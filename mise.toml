@@ -1,0 +1,14 @@
+[tasks.start]
+run = "deno run --allow-read=$OBSIDIAN_VAULT_PATH --allow-run=rg --allow-env=OBSIDIAN_VAULT_PATH src/index.ts"
+description = "Start the MCP server"
+
+[tasks.dev]
+run = "deno run --allow-read --allow-run --allow-env --watch src/index.ts"
+description = "Start the MCP server in development mode with file watching"
+
+[tasks.query]
+run = "deno run --allow-read --allow-run --allow-env query-cli.ts"
+description = "Run the query CLI tool"
+
+[tools]
+deno = "2.3"

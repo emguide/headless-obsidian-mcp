@@ -1,0 +1,15 @@
+{
+  "name": "notes-mcp",
+  "version": "1.0.0",
+  "exports": "./src/index.ts",
+  "imports": {
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7",
+    "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.0.0",
+    "gray-matter": "npm:gray-matter@^4.0.3",
+    "@std/path": "jsr:@std/path@^1.0.0"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.ns", "es2022"]
+  }
+}
