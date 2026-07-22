@@ -1,3 +1,5 @@
+import type { Condition } from "./tools/property-match.js";
+
 export interface SearchNotesParams {
   pattern: string;
   case_sensitive?: boolean;
@@ -153,4 +155,37 @@ export interface RankedSearchResult extends NoteHeader {
   score: number;
   /** Short excerpt around a matched term (best-effort). */
   snippet: string;
+}
+
+export interface PropertySchemaEntry {
+  key: string;
+  count: number;
+  /** Distinct value types observed: string|number|boolean|array|null|date. */
+  types: string[];
+}
+
+export interface ListPropertiesParams {
+  /** Include the `tags` key (already covered by list_tags). Default: true. */
+  include_tags?: boolean;
+}
+
+export interface PropertyValuesParamsRead {
+  key: string;
+  limit?: number;
+}
+
+export interface PropertyValueCount {
+  value: unknown;
+  count: number;
+}
+
+export interface QueryNotesParams {
+  where: Record<string, Condition>;
+  match?: "all" | "any";
+  limit?: number;
+}
+
+export interface GetPropertyParams {
+  path: string;
+  key: string;
 }
