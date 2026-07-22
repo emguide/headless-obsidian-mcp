@@ -140,6 +140,11 @@ npm run query -- property-values status
 npm run query -- query --where '{"status":"active","priority":{"gt":3}}'
 npm run query -- get-property "projects/alpha" status
 
+# Heading outline, and read a single section (index-backed outline; section reads the file)
+npm run query -- outline "projects/alpha"
+npm run query -- read-section "projects/alpha" "Log"
+npm run query -- read-section "projects/alpha" "Projects > Log" --include-subsections
+
 # --- Writing ---
 
 # Create a note (inline, from a --file, or from stdin)
@@ -261,6 +266,28 @@ Resolve the Obsidian link graph for a note.
 - `backlinks`: Notes elsewhere in the vault that link to this one
 
 Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`; links resolve by full relative path or basename.
+
+### get_outline
+
+A note's heading structure without its body — the outline. Closes the "check what sections exist, then edit the right one" loop without reading the whole note. Index-backed (no file read); headings inside fenced code blocks are excluded.
+
+**Parameters:**
+- `path` (string, required): Relative note path (with or without `.md`)
+
+**Returns:** `{ path, outline }` where each outline entry is `{ heading, level, path, line, ambiguous }`. `path` is the full `" > "`-joined heading-path (e.g. `Projects > Log`) — the disambiguating address; `line` is 1-based; `ambiguous` is `true` when the bare heading text repeats in the note.
+
+### read_section
+
+Read a single section of a note without loading the whole note — the read-side complement of `append_to_section`/`replace_section`. Reads the file at call time (the index does not retain body text).
+
+**Parameters:**
+- `path` (string, required): Relative note path (with or without `.md`)
+- `section` (string, required): A bare heading, or a `" > "`-joined heading-path like `Projects > Log`
+- `include_subsections` (boolean, optional): Include nested subsections in the returned content (default: false)
+
+**Returns:** `{ path, section, level, content }`. `section` is the resolved full heading-path; `content` is the heading line plus its own body (nested subsections excluded unless `include_subsections` is set). Frontmatter is never included.
+
+A bare heading resolves when unique; an ambiguous bare heading errors loudly, listing the candidate full paths so you can retry with the exact one (mirrors `patch_note`'s fail-loud behavior).
 
 ### list_tags
 
@@ -642,7 +669,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`).
 
 ## Acknowledgments
 

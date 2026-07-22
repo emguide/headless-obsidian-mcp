@@ -59,6 +59,19 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default).
 - **Security**: Path traversal protected via the same guard as read_notes.
 
+### get_outline
+- **Purpose**: A note's heading structure without its body — the outline. Closes the "check what sections exist, then edit the right one" loop without reading the whole note.
+- **Input**: `path` (required) - Relative note path (with or without `.md`)
+- **Output**: `{ path, outline }` where each outline entry is `{ heading, level, path, line, ambiguous }`. `path` is the full `" > "`-joined heading-path (e.g. `Projects > Log`) — the disambiguating address; `line` is 1-based; `ambiguous` is `true` when the bare heading text repeats in the note. Index-backed (no file read); headings inside fenced code blocks are excluded.
+- **Security**: Path traversal protected via the same guard as read_notes.
+
+### read_section
+- **Purpose**: Read a single section of a note without loading the whole note — the read-side complement of `append_to_section`/`replace_section`.
+- **Input**: `path` (required), `section` (required — a bare heading, or a `" > "`-joined heading-path like `Projects > Log`), `include_subsections` (optional, default `false`)
+- **Output**: `{ path, section, level, content }`. `section` is the resolved full heading-path; `content` is the heading line plus its own body (nested subsections excluded unless `include_subsections` is set). Frontmatter is never included.
+- **Addressing**: A bare heading resolves when unique; an ambiguous bare heading errors loudly, listing the candidate full paths so you can retry with the exact one (mirrors `patch_note`'s fail-loud behavior). Reads the file at call time (the index does not retain body text).
+- **Security**: Path traversal protected via the same guard as read_notes.
+
 ### list_tags
 - **Purpose**: Show the vault's topic index. Returns every tag with the number of notes using it, sorted by frequency.
 - **Input**: none
@@ -260,14 +273,17 @@ refused rather than proceeding without the safety net. Implemented in
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
 `list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`,
-`query_notes`, `list_properties`, `get_property_values`) share an in-memory index
-(`src/tools/vault-index.ts`) that parses each note once (frontmatter, tags,
-wikilinks, headings) and caches the result. Each tool call refreshes the index
-by walking the vault and re-reading only files whose size or mtime changed, so
-repeated calls are map lookups rather than full-vault scans. Both the backlink
-graph and the resolved outbound-link graph are precomputed during refresh, so
-`get_related_notes` scores candidates from lookups rather than re-resolving
-links on every call.
+`query_notes`, `list_properties`, `get_property_values`, `get_outline`) share an
+in-memory index (`src/tools/vault-index.ts`) that parses each note once
+(frontmatter, tags, wikilinks, headings) and caches the result. Each tool call
+refreshes the index by walking the vault and re-reading only files whose size
+or mtime changed, so repeated calls are map lookups rather than full-vault
+scans. Both the backlink graph and the resolved outbound-link graph are
+precomputed during refresh, so `get_related_notes` scores candidates from
+lookups rather than re-resolving links on every call. The index now also
+stores each note's structured headings (level, text, line, fence-aware),
+which backs `get_outline` directly; `read_section` still reads the file at
+call time since the index does not retain body text.
 
 The index also builds a BM25 full-text index (`src/tools/text/bm25.ts`) from a
 stemmed token stream per note (`src/tools/text/tokenize.ts`), rebuilt from cached
@@ -309,6 +325,9 @@ npm run query -- properties                             # Frontmatter schema
 npm run query -- property-values status                 # Distinct values of a key
 npm run query -- query --where '{"status":"active","priority":{"gt":3}}'
 npm run query -- get-property "projects/alpha" status
+npm run query -- outline "projects/alpha"                # Heading outline
+npm run query -- read-section "projects/alpha" "Log"     # One section
+npm run query -- read-section "projects/alpha" "Projects > Log" --include-subsections
 
 # Write examples (the query CLI is not gated by OBSIDIAN_ALLOW_WRITES)
 npm run query -- write "inbox/idea" "# Idea\n\nbody"    # Create a note
