@@ -5,14 +5,13 @@ import {
   walkVault,
   collectTags,
   extractLinkTargets,
-  firstHeading,
   parseHeadings,
   assertVaultPath,
   VaultFile,
 } from "./vault.js";
 import { tokenize } from "./text/tokenize.js";
 import { BM25 } from "./text/bm25.js";
-import { NoteHeader, RankedSearchResult } from "../types.js";
+import { NoteHeader, RankedSearchResult, ParsedHeading } from "../types.js";
 
 /**
  * A fully-parsed note in the index. Raw file contents are not retained —
@@ -30,6 +29,8 @@ export interface IndexEntry {
   linkTargets: string[];
   headline?: string;
   title: string;
+  /** Fence-aware headings in document order (shared parser). */
+  headings: ParsedHeading[];
   /** BM25 token stream: body plus title/headings/tags injected at ×2 weight. */
   tokens: string[];
 }
@@ -217,6 +218,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let linkTargets: string[] = [];
   let headline: string | undefined;
   let title = basename(f.path);
+  let headings: ParsedHeading[] = [];
   let tokens: string[] = [];
 
   try {
@@ -225,14 +227,15 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     frontmatter = parsed.data as Record<string, unknown>;
     tags = collectTags(frontmatter, parsed.content);
     linkTargets = extractLinkTargets(parsed.content);
-    headline = firstHeading(parsed.content);
+    headings = parseHeadings(parsed.content);
+    headline = headings[0]?.text;
     if (typeof frontmatter.title === "string" && frontmatter.title.trim()) {
       title = frontmatter.title.trim();
     }
     // BM25 tokens: body once, then boosted fields (title, headings, tags) an
     // extra time (×2 weight) so a title/heading/tag hit outranks a passing
     // body mention even when the term never appears in the body at all.
-    const boosted = [title, ...parseHeadings(parsed.content).map((h) => h.text), ...tags].join(" ");
+    const boosted = [title, ...headings.map((h) => h.text), ...tags].join(" ");
     const boostedTokens = tokenize(boosted);
     tokens = [...tokenize(parsed.content), ...boostedTokens, ...boostedTokens];
   } catch {
@@ -249,6 +252,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     linkTargets,
     headline,
     title,
+    headings,
     tokens,
   };
 }
