@@ -211,6 +211,8 @@ Full-text search ranked by BM25 relevance — the most relevant notes first, rat
 - `score`: BM25 relevance score (higher = more relevant)
 - `snippet`: A short matched excerpt
 
+Note: tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, stemmed), so non-Latin scripts (e.g. CJK) and accented characters aren't well indexed here — use `search_notes` for literal non-ASCII matching.
+
 ### read_notes
 
 Read and parse one or more notes from your vault.

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { getIndex } from "../src/tools/vault-index.js";
 import { searchNotesRanked } from "../src/tools/search-ranked.js";
 import { makeVault, Fixture } from "./fixtures.js";
-import { writeFile, utimes } from "node:fs/promises";
+import { writeFile, utimes, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 let fx: Fixture;
@@ -97,4 +97,28 @@ test("searchNotesRanked rejects an empty query", async () => {
 test("searchNotesRanked defaults limit to 10 and caps at 100", async () => {
   const res = await searchNotesRanked(fx.vaultPath, { query: "networking", limit: 1000 });
   assert.ok(res.length <= 100);
+});
+
+test("snippet actually contains a query word, not just any text", async () => {
+  const idx = await getIndex(fx.vaultPath);
+  const res = await idx.searchRanked("pods", 10);
+  assert.equal(res[0].path, "k8s");
+  assert.ok(res[0].snippet.toLowerCase().includes("pod"));
+});
+
+test("searchRanked does not throw when a winning note's file is deleted before the snippet read", async () => {
+  const fx2 = await makeVault([
+    {
+      path: "solo.md",
+      content: ["# Solo", "This note talks about widgets extensively."].join("\n"),
+    },
+  ]);
+  try {
+    const idx = await getIndex(fx2.vaultPath);
+    await unlink(join(fx2.vaultPath, "solo.md"));
+    const res = await idx.searchRanked("widgets", 10);
+    assert.ok(Array.isArray(res));
+  } finally {
+    await fx2.cleanup();
+  }
 });

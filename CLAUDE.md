@@ -29,6 +29,7 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
   - `limit` (optional): Maximum number of results (default: 10, max: 100)
 - **Output**: Array of note headers (same shape as `list_notes`) extended with `score` (BM25 relevance, higher = more relevant) and `snippet` (a short matched excerpt).
 - **Ranking**: Standard Okapi BM25 (`k1=1.2`, `b=0.75`) over a stemmed, stopword-filtered token stream. Title, heading, and tag terms are boosted (indexed at ×2 weight) so a title hit outranks a passing body mention. Built on the shared in-memory vault index — no per-query vault scan.
+- **Limitation**: Tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, Porter-stemmed), so non-Latin scripts (e.g. CJK) and accented characters are not well indexed for ranked search. Use `search_notes` (ripgrep) for literal non-ASCII matching.
 
 ### read_notes  
 - **Purpose**: Read and parse one or more notes

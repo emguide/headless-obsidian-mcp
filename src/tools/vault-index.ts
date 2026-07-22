@@ -15,8 +15,9 @@ import { BM25 } from "./text/bm25.js";
 import { NoteHeader, RankedSearchResult } from "../types.js";
 
 /**
- * A fully-parsed note in the index. Contents themselves are not retained
- * (only the derived facts), keeping the index memory-light for large vaults.
+ * A fully-parsed note in the index. Raw file contents are not retained —
+ * only derived facts, plus `tokens`, a normalized (tokenized/stemmed) copy
+ * of the content kept for BM25 ranking.
  */
 export interface IndexEntry {
   path: string;
