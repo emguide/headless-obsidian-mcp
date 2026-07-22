@@ -544,3 +544,11 @@ Replace the paths with:
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
 After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
+
+## Acknowledgments
+
+This project began as a Node.js port of [notes-mcp](https://github.com/boazy/notes-mcp) by Boaz Yaniv, and has since been substantially extended with knowledge-base, structure-aware editing, and vault-management tools. The original is MIT licensed; that license and copyright are retained in [LICENSE](LICENSE).
+
+## License
+
+Released under the [MIT License](LICENSE).
