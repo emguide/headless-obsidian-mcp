@@ -7,8 +7,9 @@ test("lowercases and splits on punctuation and whitespace", () => {
 });
 
 test("drops common stopwords", () => {
-  // "the", "of", "a" are stopwords; "kubernetes"/"networking" survive (stemmed).
+  // "the", "of", "a" are stopwords; "state"/"kubernetes"/"networking" survive (stemmed).
   assert.deepEqual(tokenize("the state of a kubernetes networking"), [
+    "state",
     "kubernet",
     "network",
   ]);
