@@ -515,9 +515,17 @@ program
   .option("--match <mode>", "all (default) or any", "all")
   .option("-l, --limit <n>", "Maximum number of notes", (v) => parseInt(v, 10))
   .action(async (options: any, command: Command) => {
+    let where: any;
+    try {
+      where = JSON.parse(options.where);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("Error:", "Invalid --where JSON: " + message);
+      process.exit(1);
+    }
     await queryTool(
       "query_notes",
-      { where: JSON.parse(options.where), match: options.match, limit: options.limit },
+      { where, match: options.match, limit: options.limit },
       command.parent?.opts().verbose
     );
   });

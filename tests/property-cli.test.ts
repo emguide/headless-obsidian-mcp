@@ -56,3 +56,23 @@ test("CLI: add-property-values mutates the note", async () => {
     await cleanup();
   }
 });
+
+test("CLI: query --where with malformed JSON exits cleanly", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "a.md", content: "---\nstatus: active\n---\nbody\n" },
+  ]);
+  try {
+    await assert.rejects(
+      run("npx", [...CLI, "query", "--where", "not json"], {
+        env: { ...process.env, OBSIDIAN_VAULT_PATH: vaultPath },
+      }),
+      (error: any) => {
+        assert.notEqual(error.code, 0);
+        assert.match(error.stderr, /Invalid --where JSON/);
+        return true;
+      }
+    );
+  } finally {
+    await cleanup();
+  }
+});
