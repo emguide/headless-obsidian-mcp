@@ -1,10 +1,10 @@
 {
-  "name": "notes-mcp",
+  "name": "headless-obsidian-mcp",
   "version": "1.0.0",
-  "description": "MCP server for interacting with Obsidian notes",
+  "description": "Headless MCP server for interacting with Obsidian vaults",
   "type": "module",
   "bin": {
-    "notes-mcp": "./dist/index.js"
+    "headless-obsidian-mcp": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "engines": {

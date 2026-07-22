@@ -50,7 +50,7 @@ export async function snapshotBeforeWrite(vaultPath: string): Promise<void> {
       "commit",
       "--no-verify",
       "-m",
-      "notes-mcp: auto-snapshot before write",
+      "headless-obsidian-mcp: auto-snapshot before write",
     ]);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

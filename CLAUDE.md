@@ -1,6 +1,6 @@
-# Notes MCP Server
+# Headless Obsidian MCP
 
-This is an MCP (Model Context Protocol) server for interacting with Obsidian notes. It provides tools to search through and read notes from an Obsidian vault.
+This is a headless MCP (Model Context Protocol) server for interacting with Obsidian vaults. It provides tools to search, read, navigate the link graph, and edit notes in an Obsidian vault — without the Obsidian GUI.
 
 ## Setup
 
