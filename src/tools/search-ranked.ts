@@ -1,4 +1,5 @@
 import { getIndex } from "./vault-index.js";
+import { assertVaultPath } from "./vault.js";
 import { RankedSearchParams, RankedSearchResult } from "../types.js";
 
 const DEFAULT_LIMIT = 10;
@@ -12,6 +13,7 @@ export async function searchNotesRanked(
   vaultPath: string,
   params: RankedSearchParams
 ): Promise<RankedSearchResult[]> {
+  assertVaultPath(vaultPath);
   const { query, limit } = params;
 
   if (!query || typeof query !== "string" || !query.trim()) {
