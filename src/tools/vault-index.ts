@@ -41,6 +41,7 @@ export class VaultIndex {
   private byPath = new Map<string, string>();
   private byBasename = new Map<string, string[]>();
   private backlinkMap = new Map<string, string[]>();
+  private outboundMap = new Map<string, string[]>();
 
   constructor(vaultPath: string) {
     assertVaultPath(vaultPath);
@@ -78,6 +79,7 @@ export class VaultIndex {
     this.byPath.clear();
     this.byBasename.clear();
     this.backlinkMap.clear();
+    this.outboundMap.clear();
 
     for (const e of this.entries.values()) {
       this.byPath.set(e.path.toLowerCase(), e.path);
@@ -97,6 +99,8 @@ export class VaultIndex {
         const r = this.resolve(target);
         if (r && r !== e.path) resolvedTargets.add(r);
       }
+      // Resolved outbound edges of this note, and their inverse (backlinks).
+      this.outboundMap.set(e.path, [...resolvedTargets].sort((a, b) => a.localeCompare(b)));
       for (const target of resolvedTargets) {
         const list = this.backlinkMap.get(target) ?? [];
         list.push(e.path);
@@ -136,6 +140,11 @@ export class VaultIndex {
   /** Notes that link to the given note path (sorted). */
   backlinks(path: string): string[] {
     return this.backlinkMap.get(path) ?? [];
+  }
+
+  /** Canonical paths this note links to, resolved and de-duplicated (sorted). */
+  outbound(path: string): string[] {
+    return this.outboundMap.get(path) ?? [];
   }
 }
 

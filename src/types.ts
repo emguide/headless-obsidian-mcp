@@ -75,6 +75,32 @@ export interface FindByTagParams {
   limit?: number;
 }
 
+export interface RelatedNotesParams {
+  /** The note to find neighbours for (relative path, with or without .md). */
+  path: string;
+  /** Maximum number of related notes to return. Default: 10. */
+  limit?: number;
+}
+
+/**
+ * A related note: a lightweight header plus the relatedness signals that
+ * surfaced it, so an agent knows not just what is related but why.
+ */
+export interface RelatedNote extends NoteHeader {
+  /** Weighted relatedness score (higher = more related). */
+  score: number;
+  /** Human-readable explanation of each contributing signal. */
+  reasons: string[];
+  /** Tags shared with the source note. */
+  shared_tags: string[];
+  /** Notes that both this note and the source link out to (co-reference). */
+  shared_links: string[];
+  /** Notes that link to both this note and the source (co-citation). */
+  shared_backlinks: string[];
+  /** True when this note and the source link directly to each other (either way). */
+  linked: boolean;
+}
+
 export interface RecentNotesParams {
   /** Maximum number of notes to return. Default: 20. */
   limit?: number;

@@ -72,6 +72,15 @@ This is an MCP (Model Context Protocol) server for interacting with Obsidian not
   - `where` (optional): Frontmatter equality filters, e.g. `{ "status": "active" }` (matches array members too)
 - **Output**: Array of note headers (same shape as `list_notes`)
 
+### get_related_notes
+- **Purpose**: Associative recall. Rank the notes most related to a given note, so an agent can ask "I'm looking at X — what else is relevant?" No embeddings or model: a transparent weighted blend of signals already held in the shared index.
+- **Input**:
+  - `path` (required): Relative note path (with or without `.md`)
+  - `limit` (optional): Maximum number of related notes to return (default: 10)
+- **Scoring**: direct link either direction (weight 4), each shared tag (3), each shared out-link / co-reference (2), each shared backlink / co-citation (2). Notes with no connecting signal are omitted; ties break by path.
+- **Output**: Array of note headers (same shape as `list_notes`) extended with `score`, `reasons`, `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
+- **Security**: Path traversal protected via the same guard as read_notes.
+
 ## Writing tools
 
 **The write tools are off by default.** The server is read-only unless
@@ -167,11 +176,14 @@ refused rather than proceeding without the safety net. Implemented in
 ### Vault index
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
-`list_recent_notes`) share an in-memory index (`src/tools/vault-index.ts`) that
-parses each note once (frontmatter, tags, wikilinks, headings) and caches the
-result. Each tool call refreshes the index by walking the vault and re-reading
-only files whose size or mtime changed, so repeated calls are map lookups rather
-than full-vault scans. Backlinks are precomputed during refresh.
+`list_recent_notes`, `get_related_notes`) share an in-memory index
+(`src/tools/vault-index.ts`) that parses each note once (frontmatter, tags,
+wikilinks, headings) and caches the result. Each tool call refreshes the index
+by walking the vault and re-reading only files whose size or mtime changed, so
+repeated calls are map lookups rather than full-vault scans. Both the backlink
+graph and the resolved outbound-link graph are precomputed during refresh, so
+`get_related_notes` scores candidates from lookups rather than re-resolving
+links on every call.
 
 The project includes a `mise.toml` file for simplified task management with mise.
 The build output is written to `dist/`; the compiled entry point is `dist/index.js`.
@@ -199,6 +211,8 @@ npm run query -- tags                                   # All tags with counts
 npm run query -- find-by-tag productivity project --all # Notes with all tags
 npm run query -- recent --limit 10                     # Most recently modified
 npm run query -- recent --date-field updated --since 2026-07-01
+npm run query -- related "projects/alpha"              # Notes related to alpha
+npm run query -- related "projects/alpha" --limit 5    # Top 5 related notes
 
 # Write examples (the query CLI is not gated by OBSIDIAN_ALLOW_WRITES)
 npm run query -- write "inbox/idea" "# Idea\n\nbody"    # Create a note
