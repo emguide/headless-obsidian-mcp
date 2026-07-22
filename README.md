@@ -10,6 +10,9 @@ An MCP (Model Context Protocol) server for interacting with Obsidian notes. This
 - **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
 - **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
 - **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter
+- **Write & Edit** (opt-in): Create, overwrite, append, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
+- **Structure-aware edits**: Add/remove tags, set frontmatter, and add/append/replace sections without rewriting the whole note — saving agent tokens
+- **Git safety net**: Optionally snapshot the vault into a commit before every write (`OBSIDIAN_GIT_AUTOCOMMIT`)
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **Frontmatter Support**: Extracts YAML frontmatter as structured metadata
 - **Tag Extraction**: Automatically identifies and extracts Obsidian tags
@@ -113,6 +116,34 @@ npm run query -- find-by-tag productivity project --all
 npm run query -- recent --limit 10
 npm run query -- recent --date-field updated --since 2024-01-01
 
+# --- Writing ---
+
+# Create a note (inline, from a --file, or from stdin)
+npm run query -- write "inbox/idea" "# Idea\n\nbody"
+npm run query -- write "inbox/idea" --file draft.md --overwrite
+
+# Append text to a note
+npm run query -- append "daily/2026-07-22" "one more thing"
+
+# Tags and frontmatter (no whole-note rewrite)
+npm run query -- add-tag "projects/alpha" project active
+npm run query -- remove-tag "projects/alpha" stale
+npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
+
+# Sections (heading-scoped edits)
+npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
+npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
+npm run query -- replace-section "projects/alpha" "Summary" "new summary"
+
+# Delete a note
+npm run query -- delete "inbox/idea"
+
+# For content that begins with "-" (markdown lists), pipe it via stdin or --file:
+printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"
+
+# Snapshot the vault into a git commit before the write (see Configuration)
+OBSIDIAN_GIT_AUTOCOMMIT=1 npm run query -- add-tag "projects/alpha" review
+
 # Use verbose mode to see the request being sent
 npm run query -- --verbose search "pattern"
 npm run query -- --verbose read "note1"
@@ -208,6 +239,96 @@ List notes ordered by recency, newest first.
 
 **Returns:** Array of note headers (same shape as `list_notes`).
 
+### write_note
+
+Create a note, or overwrite an existing one.
+
+**Parameters:**
+- `path` (string, required): Relative note path (with or without .md extension)
+- `content` (string, required): Full note body (may include frontmatter)
+- `overwrite` (boolean, optional): Allow replacing an existing note (default: false — refuses to clobber)
+
+**Returns:** `{ path, created }`
+
+### append_note
+
+Append text to the end of a note.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `content` (string, required): Text to append
+- `create` (boolean, optional): Create the note if it does not exist (default: false)
+
+**Returns:** `{ path, created }`
+
+### delete_note
+
+Delete a note from the vault. Errors if it does not exist.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+
+**Returns:** `{ path, deleted }`
+
+### add_tag / remove_tag
+
+Add or remove tags in a note's frontmatter without rewriting the note. Adds are idempotent; storage is normalized to a `tags:` array.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `tags` (array, required): Tags to add/remove (with or without leading `#`)
+
+**Returns:** `{ path, tags }` — the resulting tag list.
+
+### set_frontmatter
+
+Set and/or unset frontmatter fields while leaving the body untouched.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `set` (object, optional): Fields to set, e.g. `{ "status": "done" }`
+- `unset` (array, optional): Frontmatter keys to remove
+
+**Returns:** `{ path, changed }`
+
+### add_section
+
+Insert a new heading + content. Appends at the end by default, or immediately after the section named by `after`. Errors on a duplicate heading at the same level.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `heading` (string, required): Heading text (without leading `#`)
+- `content` (string, required): Body text for the new section
+- `level` (number, optional): Heading level 1–6 (default: 2)
+- `after` (string, optional): Insert after the section with this heading
+
+**Returns:** `{ path, heading }`
+
+### append_to_section
+
+Append text under an existing heading (before the next heading), leaving the rest of the note untouched.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `heading` (string, required): Heading of the section to append to
+- `content` (string, required): Text to append
+- `create` (boolean, optional): Create the section if missing (default: false)
+
+**Returns:** `{ path, heading }`
+
+### replace_section
+
+Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `heading` (string, required): Heading of the section to replace
+- `content` (string, required): New body text
+
+**Returns:** `{ path, heading }`
+
+> **Body vs. frontmatter fidelity:** section edits preserve the frontmatter block byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML in canonical form (block-style lists) but leave the body untouched. Headings inside fenced code blocks are ignored. All writes are path-traversal protected.
+
 ## Example Usage
 
 Once connected to an MCP client, you can:
@@ -235,11 +356,48 @@ await find_by_tag({ tags: ["project", "active"], match: "all" });
 
 // Stay current: recent notes, active only
 await list_recent_notes({ limit: 10, where: { status: "active" } });
+
+// Create a note (won't clobber unless overwrite: true)
+await write_note({ path: "inbox/idea", content: "# Idea\n\nbody" });
+
+// Surgical edits — no whole-note rewrite
+await add_tag({ path: "projects/alpha", tags: ["review"] });
+await set_frontmatter({ path: "projects/alpha", set: { status: "done" } });
+await append_to_section({ path: "projects/alpha", heading: "Log", content: "shipped" });
 ```
 
 ## Configuration
 
 The server requires the `OBSIDIAN_VAULT_PATH` environment variable to be set to your Obsidian vault directory.
+
+### Enabling writes (`OBSIDIAN_ALLOW_WRITES`)
+
+The write tools are **off by default** — out of the box the server is read-only.
+Set `OBSIDIAN_ALLOW_WRITES` to a truthy value (`1`, `true`, `yes`, `on`) to
+expose them:
+
+```bash
+export OBSIDIAN_ALLOW_WRITES=1
+```
+
+When disabled, the nine write tools (`write_note`, `append_note`, `delete_note`,
+`add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`,
+`replace_section`) are hidden from the tool list and any call to one is
+rejected, so an agent only ever sees the read tools. The flag gates the MCP
+server; the query CLI is the operator's own tool and is not affected by it.
+
+### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
+
+Set `OBSIDIAN_GIT_AUTOCOMMIT` to a truthy value (`1`, `true`, `yes`, `on`) to
+snapshot the vault into a git commit **before every write**. The pre-existing
+state is committed (`git add -A && git commit`) so the agent's change lands as
+an isolated, revertible diff — the agent's own write is left **uncommitted** for
+you to review. A clean working tree is a no-op (nothing to snapshot).
+
+The guard is **fail-closed**: when the flag is on but the snapshot can't be made
+(git isn't installed, the vault isn't a git repository, or the commit fails),
+the write is refused rather than proceeding without the safety net. Leave the
+variable unset to disable it entirely (writes then require no git).
 
 ## Claude Desktop Integration
 
@@ -282,4 +440,6 @@ Replace the paths with:
 - `/path/to/notes-mcp`: The absolute path to this project directory
 - `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
 
-After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the `search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, and `list_recent_notes` tools.
+To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
+
+After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
