@@ -9,6 +9,9 @@ import {
   addTags,
   removeTags,
   setFrontmatter,
+  addPropertyValues,
+  removePropertyValues,
+  renameProperty,
   addSection,
   appendToSection,
   replaceSection,
@@ -29,6 +32,9 @@ export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "add_tag",
   "remove_tag",
   "set_frontmatter",
+  "add_property_values",
+  "remove_property_values",
+  "rename_property",
   "add_section",
   "append_to_section",
   "replace_section",
@@ -480,6 +486,66 @@ export async function setNoteFrontmatter(
     setFrontmatter(doc, set, unset)
   );
   return { path: canonicalName(path), changed };
+}
+
+/* -------------------------------------------------------------- properties -- */
+
+export interface PropertyValuesParams {
+  path: string;
+  key: string;
+  values: unknown[];
+}
+
+export async function addNotePropertyValues(
+  vaultPath: string,
+  { path, key, values }: PropertyValuesParams
+): Promise<{ path: string; key: string; values: unknown[] }> {
+  if (!key || typeof key !== "string") throw new Error("key must be a non-empty string");
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new Error("values must be a non-empty array");
+  }
+  let result: unknown[] = [];
+  await editNote(vaultPath, path, (doc) => {
+    const next = addPropertyValues(doc, key, values);
+    const current = doc.data[key];
+    result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
+    return next != null;
+  });
+  return { path: canonicalName(path), key, values: result };
+}
+
+export async function removeNotePropertyValues(
+  vaultPath: string,
+  { path, key, values }: PropertyValuesParams
+): Promise<{ path: string; key: string; values: unknown[] }> {
+  if (!key || typeof key !== "string") throw new Error("key must be a non-empty string");
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new Error("values must be a non-empty array");
+  }
+  let result: unknown[] = [];
+  await editNote(vaultPath, path, (doc) => {
+    const next = removePropertyValues(doc, key, values);
+    const current = doc.data[key];
+    result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
+    return next != null;
+  });
+  return { path: canonicalName(path), key, values: result };
+}
+
+export interface RenamePropertyParams {
+  path: string;
+  from: string;
+  to: string;
+}
+
+export async function renameNoteProperty(
+  vaultPath: string,
+  { path, from, to }: RenamePropertyParams
+): Promise<{ path: string; from: string; to: string }> {
+  if (!from || typeof from !== "string") throw new Error("from must be a non-empty string");
+  if (!to || typeof to !== "string") throw new Error("to must be a non-empty string");
+  await editNote(vaultPath, path, (doc) => renameProperty(doc, from, to));
+  return { path: canonicalName(path), from, to };
 }
 
 /* --------------------------------------------------------------- sections -- */

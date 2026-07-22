@@ -39,7 +39,8 @@ export class NoteDocument {
     const block = raw.slice(0, match[0].length);
     const body = raw.slice(match[0].length);
     // Reuse gray-matter (js-yaml) for the actual YAML parse.
-    const data = (matter(raw).data ?? {}) as Record<string, unknown>;
+    // Clone the data object to avoid sharing cached state between parses.
+    const data = structuredClone((matter(raw).data ?? {})) as Record<string, unknown>;
     return new NoteDocument(data, body, block);
   }
 
