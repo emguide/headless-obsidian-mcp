@@ -8,6 +8,8 @@ import { searchNotesRanked } from "./tools/search-ranked.js";
 import { readNotes } from "./tools/read.js";
 import { listNotes } from "./tools/list.js";
 import { getLinks } from "./tools/links.js";
+import { getOutline } from "./tools/outline.js";
+import { readSection } from "./tools/section.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
@@ -66,6 +68,10 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await listNotes(VAULT_PATH!, args);
     } else if (toolName === "get_links") {
       result = await getLinks(VAULT_PATH!, args.path);
+    } else if (toolName === "get_outline") {
+      result = await getOutline(VAULT_PATH!, args.path);
+    } else if (toolName === "read_section") {
+      result = await readSection(VAULT_PATH!, args);
     } else if (toolName === "list_tags") {
       result = await listTags(VAULT_PATH!);
     } else if (toolName === "find_by_tag") {
@@ -207,6 +213,27 @@ program
   .action(async (path: string, _options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     await queryTool("get_links", { path }, verbose);
+  });
+
+program
+  .command("outline <path>")
+  .description("Show a note's heading outline (levels, paths, ambiguity)")
+  .action(async (path: string, _options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool("get_outline", { path }, verbose);
+  });
+
+program
+  .command("read-section <path> <section>")
+  .description("Read one section by heading or \"A > B\" path")
+  .option("--include-subsections", "Include nested subsections")
+  .action(async (path: string, section: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool(
+      "read_section",
+      { path, section, include_subsections: !!options.includeSubsections },
+      verbose
+    );
   });
 
 program
