@@ -9,6 +9,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { searchNotes } from "./tools/search.js";
+import { searchNotesRanked } from "./tools/search-ranked.js";
 import { readNotes } from "./tools/read.js";
 import { listNotes } from "./tools/list.js";
 import { getLinks } from "./tools/links.js";
@@ -49,6 +50,7 @@ import {
   FindByTagParams,
   RecentNotesParams,
   RelatedNotesParams,
+  RankedSearchParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -101,6 +103,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["pattern"]
         }
+      },
+      {
+        name: "search_notes_ranked",
+        description:
+          "Full-text search ranked by BM25 relevance. Returns the most relevant notes first (title/heading/tag matches boosted), each with a relevance score and a matched snippet. Complements search_notes (which is literal/regex, unranked).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Free-text query (max 1000 chars). Multi-word queries are ranked by relevance.",
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of results (default: 10, max: 100).",
+            },
+          },
+          required: ["query"],
+        },
       },
       {
         name: "read_notes",
@@ -450,6 +471,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify(results, null, 2)
             }
           ]
+        };
+      }
+
+      case "search_notes_ranked": {
+        const params = args as unknown as RankedSearchParams;
+        if (!params.query) {
+          throw new Error("query is required for search_notes_ranked");
+        }
+        const results = await searchNotesRanked(VAULT_PATH, params);
+        return {
+          content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
         };
       }
 

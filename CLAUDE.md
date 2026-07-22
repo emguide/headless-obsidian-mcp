@@ -22,6 +22,15 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Output**: Array of search results with file paths (without .md suffix) and context lines
 - **Security**: Protected against flag injection and regex DoS attacks
 
+### search_notes_ranked
+- **Purpose**: Full-text search ranked by BM25 relevance — the most relevant notes first, rather than every literal match. Complements `search_notes` (which is literal/regex and unranked).
+- **Input**:
+  - `query` (required): Free-text query (max 1000 chars). Multi-word queries are ranked by relevance.
+  - `limit` (optional): Maximum number of results (default: 10, max: 100)
+- **Output**: Array of note headers (same shape as `list_notes`) extended with `score` (BM25 relevance, higher = more relevant) and `snippet` (a short matched excerpt).
+- **Ranking**: Standard Okapi BM25 (`k1=1.2`, `b=0.75`) over a stemmed, stopword-filtered token stream. Title, heading, and tag terms are boosted (indexed at ×2 weight) so a title hit outranks a passing body mention. Built on the shared in-memory vault index — no per-query vault scan.
+- **Limitation**: Tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, Porter-stemmed), so non-Latin scripts (e.g. CJK) and accented characters are not well indexed for ranked search. Use `search_notes` (ripgrep) for literal non-ASCII matching.
+
 ### read_notes  
 - **Purpose**: Read and parse one or more notes
 - **Input**: `paths` - Array of relative note paths (with or without .md extension, max 50 notes)
@@ -209,7 +218,7 @@ refused rather than proceeding without the safety net. Implemented in
 ### Vault index
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
-`list_recent_notes`, `get_related_notes`, `get_vault_stats`) share an in-memory index
+`list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`) share an in-memory index
 (`src/tools/vault-index.ts`) that parses each note once (frontmatter, tags,
 wikilinks, headings) and caches the result. Each tool call refreshes the index
 by walking the vault and re-reading only files whose size or mtime changed, so
@@ -217,6 +226,11 @@ repeated calls are map lookups rather than full-vault scans. Both the backlink
 graph and the resolved outbound-link graph are precomputed during refresh, so
 `get_related_notes` scores candidates from lookups rather than re-resolving
 links on every call.
+
+The index also builds a BM25 full-text index (`src/tools/text/bm25.ts`) from a
+stemmed token stream per note (`src/tools/text/tokenize.ts`), rebuilt from cached
+per-note tokens on each refresh so only changed files are re-tokenized. This
+backs `search_notes_ranked`.
 
 The project includes a `mise.toml` file for simplified task management with mise.
 The build output is written to `dist/`; the compiled entry point is `dist/index.js`.
@@ -231,6 +245,7 @@ npm run query -- search "productivity"                  # Case-insensitive searc
 npm run query -- search "TODO" --case-sensitive        # Case-sensitive search
 npm run query -- search "test" --whole-word             # Whole words only
 npm run query -- search "pattern" --context 10         # Custom context lines
+npm run query -- search-ranked "kubernetes networking" --limit 5   # BM25 ranked
 
 # Read examples
 npm run query -- read "note1" "folder/note2"           # Read multiple notes

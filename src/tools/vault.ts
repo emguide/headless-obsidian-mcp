@@ -220,3 +220,12 @@ export function firstHeading(content: string): string | undefined {
   const match = content.match(/^#{1,6}\s+(.+?)\s*$/m);
   return match ? match[1].trim() : undefined;
 }
+
+/** Extract every markdown heading (`# ...` through `###### ...`) in order. */
+export function allHeadings(content: string): string[] {
+  const out: string[] = [];
+  const re = /^#{1,6}\s+(.+?)\s*$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) out.push(m[1].trim());
+  return out;
+}

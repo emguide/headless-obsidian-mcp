@@ -6,14 +6,18 @@ import {
   collectTags,
   extractLinkTargets,
   firstHeading,
+  allHeadings,
   assertVaultPath,
   VaultFile,
 } from "./vault.js";
-import { NoteHeader } from "../types.js";
+import { tokenize } from "./text/tokenize.js";
+import { BM25 } from "./text/bm25.js";
+import { NoteHeader, RankedSearchResult } from "../types.js";
 
 /**
- * A fully-parsed note in the index. Contents themselves are not retained
- * (only the derived facts), keeping the index memory-light for large vaults.
+ * A fully-parsed note in the index. Raw file contents are not retained —
+ * only derived facts, plus `tokens`, a normalized (tokenized/stemmed) copy
+ * of the content kept for BM25 ranking.
  */
 export interface IndexEntry {
   path: string;
@@ -26,6 +30,8 @@ export interface IndexEntry {
   linkTargets: string[];
   headline?: string;
   title: string;
+  /** BM25 token stream: body plus title/headings/tags injected at ×2 weight. */
+  tokens: string[];
 }
 
 /**
@@ -42,6 +48,7 @@ export class VaultIndex {
   private byBasename = new Map<string, string[]>();
   private backlinkMap = new Map<string, string[]>();
   private outboundMap = new Map<string, string[]>();
+  private bm25 = new BM25();
 
   constructor(vaultPath: string) {
     assertVaultPath(vaultPath);
@@ -110,6 +117,15 @@ export class VaultIndex {
     for (const list of this.backlinkMap.values()) {
       list.sort((a, b) => a.localeCompare(b));
     }
+
+    // Rebuild the BM25 index from cached per-note tokens. Unchanged notes were
+    // not re-tokenized (their tokens come straight from the cached entry), so
+    // this only re-aggregates corpus statistics — cheap relative to file I/O.
+    this.bm25 = new BM25();
+    for (const e of this.entries.values()) {
+      this.bm25.add(e.path, e.tokens);
+    }
+    this.bm25.finalize();
   }
 
   /**
@@ -146,6 +162,52 @@ export class VaultIndex {
   outbound(path: string): string[] {
     return this.outboundMap.get(path) ?? [];
   }
+
+  /**
+   * Rank notes by BM25 relevance to a free-text query. Snippets are read from
+   * the ≤ limit winning files at query time (never stored in the index).
+   */
+  async searchRanked(query: string, limit: number): Promise<RankedSearchResult[]> {
+    const queryTokens = tokenize(query);
+    if (queryTokens.length === 0) return [];
+    const hits = this.bm25.search(queryTokens, limit);
+
+    // Raw (unstemmed) query words used only to locate a snippet line.
+    const rawWords = query
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 0);
+
+    const results: RankedSearchResult[] = [];
+    for (const hit of hits) {
+      const entry = this.entries.get(hit.docId);
+      if (!entry) continue;
+      const snippet = await this.buildSnippet(entry.fullPath, rawWords);
+      results.push({ ...entryToHeader(entry), score: hit.score, snippet });
+    }
+    return results;
+  }
+
+  /** Best-effort snippet: first body line containing a query word, else first body line. */
+  private async buildSnippet(fullPath: string, rawWords: string[]): Promise<string> {
+    let body: string;
+    try {
+      const raw = await readFile(fullPath, "utf-8");
+      body = matter(raw).content;
+    } catch {
+      return "";
+    }
+    const lines = body
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    const clip = (s: string): string => (s.length > 200 ? s.slice(0, 200) + "…" : s);
+    for (const line of lines) {
+      const lower = line.toLowerCase();
+      if (rawWords.some((w) => lower.includes(w))) return clip(line);
+    }
+    return lines.length > 0 ? clip(lines[0]) : "";
+  }
 }
 
 /** Read and parse a single file into an index entry (failures degrade gracefully). */
@@ -155,6 +217,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let linkTargets: string[] = [];
   let headline: string | undefined;
   let title = basename(f.path);
+  let tokens: string[] = [];
 
   try {
     const raw = await readFile(f.fullPath, "utf-8");
@@ -166,6 +229,12 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     if (typeof frontmatter.title === "string" && frontmatter.title.trim()) {
       title = frontmatter.title.trim();
     }
+    // BM25 tokens: body once, then boosted fields (title, headings, tags) an
+    // extra time (×2 weight) so a title/heading/tag hit outranks a passing
+    // body mention even when the term never appears in the body at all.
+    const boosted = [title, ...allHeadings(parsed.content), ...tags].join(" ");
+    const boostedTokens = tokenize(boosted);
+    tokens = [...tokenize(parsed.content), ...boostedTokens, ...boostedTokens];
   } catch {
     // Unreadable/unparseable note: still indexed by path with fs metadata.
   }
@@ -180,6 +249,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     linkTargets,
     headline,
     title,
+    tokens,
   };
 }
 

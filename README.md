@@ -5,6 +5,7 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 ## Features
 
 - **Search Notes**: Full-text search through your Obsidian vault using ripgrep
+- **Ranked Search**: BM25-ranked full-text search — most relevant notes first, with a matched snippet
 - **Read Notes**: Parse and extract content, metadata, and tags from notes
 - **List Notes**: Discover the vault as lightweight headers — a table of contents for agents
 - **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
@@ -96,6 +97,10 @@ npm run query -- search "pattern.*spans.*lines" --multiline
 
 # Search with custom context lines (default: 5)
 npm run query -- search "pattern" --context 10
+
+# BM25-ranked full-text search (most relevant notes first)
+npm run query -- search-ranked "kubernetes networking"
+npm run query -- search-ranked "kubernetes networking" --limit 5
 
 # Read specific notes
 npm run query -- read "daily-notes/2024-01-15"
@@ -193,6 +198,20 @@ Search through markdown files in your vault using ripgrep patterns.
 **Returns:** Array of search results with:
 - `path`: Relative note path (without .md extension)
 - `matches`: Array of matches with line numbers and context
+
+### search_notes_ranked
+
+Full-text search ranked by BM25 relevance — the most relevant notes first, rather than every literal match. Complements `search_notes` (literal/regex, unranked); it doesn't replace it.
+
+**Parameters:**
+- `query` (string, required): Free-text query (max 1000 chars)
+- `limit` (number, optional): Maximum number of results (default: 10, max: 100)
+
+**Returns:** Array of note headers (same shape as `list_notes`) extended with:
+- `score`: BM25 relevance score (higher = more relevant)
+- `snippet`: A short matched excerpt
+
+Note: tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, stemmed), so non-Latin scripts (e.g. CJK) and accented characters aren't well indexed here — use `search_notes` for literal non-ASCII matching.
 
 ### read_notes
 
