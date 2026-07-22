@@ -197,3 +197,19 @@ export interface GetPropertyParams {
   path: string;
   key: string;
 }
+
+export interface OutlineEntry {
+  heading: string;
+  level: number;
+  /** Full " > "-joined heading-path (disambiguating address). */
+  path: string;
+  /** 1-based line number of the heading in the note body. */
+  line: number;
+  /** True when the bare heading text is non-unique in this note. */
+  ambiguous: boolean;
+}
+
+export interface OutlineResult {
+  path: string;
+  outline: OutlineEntry[];
+}
