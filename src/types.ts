@@ -101,6 +101,34 @@ export interface RelatedNote extends NoteHeader {
   linked: boolean;
 }
 
+/** Aggregate, index-derived statistics describing the whole vault. */
+export interface VaultStats {
+  /** Number of markdown notes in the vault. */
+  notes: number;
+  /** Total size of all notes in bytes. */
+  total_size_bytes: number;
+  /** Number of distinct tags across the vault. */
+  distinct_tags: number;
+  /** Total tag assignments (a tag used in N notes counts N times). */
+  tag_assignments: number;
+  /** Notes carrying at least one tag. */
+  tagged_notes: number;
+  /** Notes with no tags at all. */
+  untagged_notes: number;
+  /** Distinct resolved outbound links, summed across notes. */
+  resolved_links: number;
+  /** Wikilink references that resolve to no note in the vault. */
+  unresolved_links: number;
+  /** Notes with at least one resolved outbound link. */
+  notes_with_links: number;
+  /** Notes with no inbound and no outbound resolved links. */
+  orphan_notes: number;
+  /** Most recent note modification time (ISO 8601), or null for an empty vault. */
+  last_modified: string | null;
+  /** Oldest note modification time (ISO 8601), or null for an empty vault. */
+  first_modified: string | null;
+}
+
 export interface RecentNotesParams {
   /** Maximum number of notes to return. Default: 20. */
   limit?: number;

@@ -81,12 +81,23 @@ This is an MCP (Model Context Protocol) server for interacting with Obsidian not
 - **Output**: Array of note headers (same shape as `list_notes`) extended with `score`, `reasons`, `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
+### get_frontmatter
+- **Purpose**: Read just a note's parsed frontmatter (YAML metadata), without its body — a cheap way to inspect a note's status, aliases, dates, or custom fields before reading or editing the whole note.
+- **Input**: `path` (required) - Relative note path (with or without `.md`)
+- **Output**: `{ path, frontmatter }` where `frontmatter` is the parsed YAML as a JSON object (empty when the note has none).
+- **Security**: Path traversal protected via the same guard as read_notes.
+
+### get_vault_stats
+- **Purpose**: Summarize the whole vault in one call. Derived entirely from the shared index (no extra file reads).
+- **Input**: none
+- **Output**: `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with no inbound and no outbound resolved links; the modification bounds are ISO timestamps (`null` for an empty vault).
+
 ## Writing tools
 
 **The write tools are off by default.** The server is read-only unless
 `OBSIDIAN_ALLOW_WRITES` is set to a truthy value (`1`, `true`, `yes`, `on`).
-When disabled, the nine write tools are hidden from `list_tools` and any call to
-one is rejected — so an agent only ever sees the read tools. When enabled, all
+When disabled, the thirteen write tools are hidden from `list_tools` and any call
+to one is rejected — so an agent only ever sees the read tools. When enabled, all
 tools are exposed. The flag gates the MCP server (the agent-facing surface); the
 query CLI is the operator's own tool and is not gated. Flag helpers live in
 `src/tools/env-flags.ts`.
@@ -108,10 +119,32 @@ change a tag or a section without reading and rewriting the whole note.
 - **Input**: `path` (required), `content` (required), `create` (optional — create the note if missing)
 - **Output**: `{ path, created }`
 
+### prepend_note
+- **Purpose**: Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it (never before the YAML fence).
+- **Input**: `path` (required), `content` (required), `create` (optional — create the note if missing)
+- **Output**: `{ path, created }`
+
 ### delete_note
-- **Purpose**: Delete a note. Errors if it does not exist.
-- **Input**: `path` (required)
-- **Output**: `{ path, deleted }`
+- **Purpose**: Delete a note. **Trash-safe by default**: the note is moved to the vault's `.trash` folder (Obsidian's convention, ignored by the index) so the deletion is recoverable. Repeated trashings of the same name are disambiguated with a numeric suffix. Errors if the note does not exist.
+- **Input**: `path` (required), `permanent` (optional — unlink outright instead of trashing)
+- **Output**: `{ path, deleted, trashed, trash_path? }`
+
+### move_note
+- **Purpose**: Move or rename a note. By default every `[[wikilink]]` elsewhere in the vault that pointed to the old location is rewritten to the new one (full-path links become the new full path; bare-basename links become the new basename; aliases and `#anchors` are preserved), so the link graph is never broken.
+- **Input**: `from` (required), `to` (required), `overwrite` (optional, default `false`), `update_links` (optional, default `true`)
+- **Output**: `{ from, to, overwritten, updated_notes, updated_links }`
+- **Security**: Path traversal protected on both endpoints.
+
+### move_file
+- **Purpose**: Move or rename an arbitrary file (attachments, images, or notes referenced by literal path). Treats the path literally — no `.md` is appended and no wikilinks are rewritten.
+- **Input**: `from` (required), `to` (required), `overwrite` (optional, default `false`)
+- **Output**: `{ from, to, overwritten }`
+- **Security**: Path traversal protected on both endpoints via `resolveVaultFile`.
+
+### patch_note
+- **Purpose**: Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex — no injection or catastrophic-backtracking risk). Errors if the text to find is absent, so a stale patch fails loudly.
+- **Input**: `path` (required), `find` (required), `replace` (required), `all` (optional — replace every occurrence instead of only the first)
+- **Output**: `{ path, replacements }`
 
 ### add_tag / remove_tag
 - **Purpose**: Add or remove tags in a note's frontmatter without rewriting it. Adds are idempotent; storage is normalized to a `tags:` array.
@@ -176,7 +209,7 @@ refused rather than proceeding without the safety net. Implemented in
 ### Vault index
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
-`list_recent_notes`, `get_related_notes`) share an in-memory index
+`list_recent_notes`, `get_related_notes`, `get_vault_stats`) share an in-memory index
 (`src/tools/vault-index.ts`) that parses each note once (frontmatter, tags,
 wikilinks, headings) and caches the result. Each tool call refreshes the index
 by walking the vault and re-reading only files whose size or mtime changed, so
@@ -213,18 +246,25 @@ npm run query -- recent --limit 10                     # Most recently modified
 npm run query -- recent --date-field updated --since 2026-07-01
 npm run query -- related "projects/alpha"              # Notes related to alpha
 npm run query -- related "projects/alpha" --limit 5    # Top 5 related notes
+npm run query -- frontmatter "projects/alpha"          # Just the frontmatter
+npm run query -- stats                                  # Whole-vault statistics
 
 # Write examples (the query CLI is not gated by OBSIDIAN_ALLOW_WRITES)
 npm run query -- write "inbox/idea" "# Idea\n\nbody"    # Create a note
 npm run query -- write "inbox/idea" --file draft.md -o  # Overwrite from a file
 npm run query -- append "daily/2026-07-22" "more text"  # Append to a note
+npm run query -- prepend "daily/2026-07-22" "> banner"  # Prepend to the body
 npm run query -- add-tag "projects/alpha" project active
 npm run query -- remove-tag "projects/alpha" stale
 npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
 npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
 npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
 npm run query -- replace-section "projects/alpha" "Summary" "new summary"
-npm run query -- delete "inbox/idea"
+npm run query -- move "projects/alpha" "archive/alpha"  # Rename + rewrite links
+npm run query -- move-file "assets/old.png" "assets/new.png"
+npm run query -- patch "projects/alpha" "old text" "new text" --all
+npm run query -- delete "inbox/idea"                    # Trash-safe (recoverable)
+npm run query -- delete "inbox/idea" --permanent        # Unlink outright
 
 # Content beginning with "-" (e.g. markdown lists) via stdin or --file:
 printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"

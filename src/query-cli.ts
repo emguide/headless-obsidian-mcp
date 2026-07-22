@@ -10,10 +10,16 @@ import { getLinks } from "./tools/links.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
+import { getFrontmatter } from "./tools/frontmatter.js";
+import { getVaultStats } from "./tools/stats.js";
 import {
   writeNote,
   appendNote,
+  prependNote,
   deleteNote,
+  moveNote,
+  moveFile,
+  patchNote,
   addTag,
   removeTag,
   setNoteFrontmatter,
@@ -56,12 +62,24 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await listRecentNotes(VAULT_PATH!, args);
     } else if (toolName === "get_related_notes") {
       result = await getRelatedNotes(VAULT_PATH!, args);
+    } else if (toolName === "get_frontmatter") {
+      result = await getFrontmatter(VAULT_PATH!, args.path);
+    } else if (toolName === "get_vault_stats") {
+      result = await getVaultStats(VAULT_PATH!);
     } else if (toolName === "write_note") {
       result = await writeNote(VAULT_PATH!, args);
     } else if (toolName === "append_note") {
       result = await appendNote(VAULT_PATH!, args);
+    } else if (toolName === "prepend_note") {
+      result = await prependNote(VAULT_PATH!, args);
     } else if (toolName === "delete_note") {
-      result = await deleteNote(VAULT_PATH!, args.path);
+      result = await deleteNote(VAULT_PATH!, args.path, { permanent: args.permanent });
+    } else if (toolName === "move_note") {
+      result = await moveNote(VAULT_PATH!, args);
+    } else if (toolName === "move_file") {
+      result = await moveFile(VAULT_PATH!, args);
+    } else if (toolName === "patch_note") {
+      result = await patchNote(VAULT_PATH!, args);
     } else if (toolName === "add_tag") {
       result = await addTag(VAULT_PATH!, args);
     } else if (toolName === "remove_tag") {
@@ -208,6 +226,23 @@ program
     await queryTool("get_related_notes", args, verbose);
   });
 
+program
+  .command("frontmatter")
+  .description("Read just a note's parsed frontmatter")
+  .argument("<path>", "Relative note path")
+  .action(async (path: string, _options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool("get_frontmatter", { path }, verbose);
+  });
+
+program
+  .command("stats")
+  .description("Summarize the whole vault (notes, tags, link-graph health, size)")
+  .action(async (_options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool("get_vault_stats", {}, verbose);
+  });
+
 function readContent(inline: string | undefined, file: string | undefined): string {
   if (file) return readFileSync(file, "utf-8");
   if (inline != null) return inline;
@@ -249,12 +284,73 @@ program
   });
 
 program
-  .command("delete")
-  .description("Delete a note from the vault")
+  .command("prepend")
+  .description("Prepend text to the start of a note's body (after any frontmatter)")
   .argument("<path>", "Relative note path")
-  .action(async (path: string, _options: any, command: Command) => {
+  .argument("[content]", "Text to prepend (omit to read from --file or stdin)")
+  .option("-f, --file <file>", "Read the text from a file")
+  .option("-c, --create", "Create the note if it does not exist")
+  .action(async (path: string, content: string | undefined, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
-    await queryTool("delete_note", { path }, verbose);
+    const args = {
+      path,
+      content: readContent(content, options.file),
+      ...(options.create && { create: true }),
+    };
+    await queryTool("prepend_note", args, verbose);
+  });
+
+program
+  .command("delete")
+  .description("Delete a note (trash-safe by default; --permanent to unlink)")
+  .argument("<path>", "Relative note path")
+  .option("-p, --permanent", "Permanently delete instead of moving to .trash")
+  .action(async (path: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool("delete_note", { path, ...(options.permanent && { permanent: true }) }, verbose);
+  });
+
+program
+  .command("move")
+  .description("Move or rename a note, updating wikilinks that point to it")
+  .argument("<from>", "Current relative note path")
+  .argument("<to>", "New relative note path")
+  .option("-o, --overwrite", "Allow replacing an existing note at the destination")
+  .option("-n, --no-update-links", "Do not rewrite wikilinks that point to this note")
+  .action(async (from: string, to: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      from,
+      to,
+      ...(options.overwrite && { overwrite: true }),
+      ...(options.updateLinks === false && { update_links: false }),
+    };
+    await queryTool("move_note", args, verbose);
+  });
+
+program
+  .command("move-file")
+  .description("Move or rename an arbitrary file (attachment/image), no link rewriting")
+  .argument("<from>", "Current relative file path (with extension)")
+  .argument("<to>", "New relative file path (with extension)")
+  .option("-o, --overwrite", "Allow replacing an existing file at the destination")
+  .action(async (from: string, to: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = { from, to, ...(options.overwrite && { overwrite: true }) };
+    await queryTool("move_file", args, verbose);
+  });
+
+program
+  .command("patch")
+  .description("Apply a literal find/replace patch to a note")
+  .argument("<path>", "Relative note path")
+  .argument("<find>", "Exact literal text to find")
+  .argument("<replace>", "Replacement text")
+  .option("-a, --all", "Replace every occurrence instead of only the first")
+  .action(async (path: string, find: string, replace: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = { path, find, replace, ...(options.all && { all: true }) };
+    await queryTool("patch_note", args, verbose);
   });
 
 program
