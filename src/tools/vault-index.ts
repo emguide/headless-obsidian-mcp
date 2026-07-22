@@ -6,7 +6,7 @@ import {
   collectTags,
   extractLinkTargets,
   firstHeading,
-  allHeadings,
+  parseHeadings,
   assertVaultPath,
   VaultFile,
 } from "./vault.js";
@@ -232,7 +232,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     // BM25 tokens: body once, then boosted fields (title, headings, tags) an
     // extra time (×2 weight) so a title/heading/tag hit outranks a passing
     // body mention even when the term never appears in the body at all.
-    const boosted = [title, ...allHeadings(parsed.content), ...tags].join(" ");
+    const boosted = [title, ...parseHeadings(parsed.content).map((h) => h.text), ...tags].join(" ");
     const boostedTokens = tokenize(boosted);
     tokens = [...tokenize(parsed.content), ...boostedTokens, ...boostedTokens];
   } catch {

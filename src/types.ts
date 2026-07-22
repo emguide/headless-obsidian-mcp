@@ -45,6 +45,14 @@ export interface NoteHeader {
   modified: string;
 }
 
+/** A markdown heading with its level and 0-based source line index. */
+export interface ParsedHeading {
+  text: string;
+  level: number;
+  /** 0-based index of the heading line within the content's line array. */
+  line: number;
+}
+
 export interface ListNotesParams {
   /** Restrict to notes under this folder (relative to the vault root). */
   folder?: string;
