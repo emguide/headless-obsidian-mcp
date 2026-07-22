@@ -72,10 +72,78 @@ This is an MCP (Model Context Protocol) server for interacting with Obsidian not
   - `where` (optional): Frontmatter equality filters, e.g. `{ "status": "active" }` (matches array members too)
 - **Output**: Array of note headers (same shape as `list_notes`)
 
+## Writing tools
+
+The server can also mutate the vault. All writes funnel through a single guarded
+path (`src/tools/write.ts` → `commitWrite`) that resolves + path-guards the
+target, runs the git guard (see below), then writes. The structure-aware tools
+are built on a shared note-document core (`src/tools/note-document.ts`) that
+parses frontmatter + body once and applies surgical edits, so an agent can
+change a tag or a section without reading and rewriting the whole note.
+
+### write_note
+- **Purpose**: Create a note, or overwrite an existing one.
+- **Input**: `path` (required), `content` (required), `overwrite` (optional, default `false` — refuses to clobber an existing note)
+- **Output**: `{ path, created }`
+
+### append_note
+- **Purpose**: Append text to the end of a note (with a separating newline).
+- **Input**: `path` (required), `content` (required), `create` (optional — create the note if missing)
+- **Output**: `{ path, created }`
+
+### delete_note
+- **Purpose**: Delete a note. Errors if it does not exist.
+- **Input**: `path` (required)
+- **Output**: `{ path, deleted }`
+
+### add_tag / remove_tag
+- **Purpose**: Add or remove tags in a note's frontmatter without rewriting it. Adds are idempotent; storage is normalized to a `tags:` array.
+- **Input**: `path` (required), `tags` (required array, with or without leading `#`)
+- **Output**: `{ path, tags }` (the resulting tag list)
+
+### set_frontmatter
+- **Purpose**: Set and/or unset frontmatter fields (e.g. `status`, `updated`) while leaving the body untouched.
+- **Input**: `path` (required), `set` (optional object of fields), `unset` (optional array of keys)
+- **Output**: `{ path, changed }`
+
+### add_section
+- **Purpose**: Insert a new heading + content. Appends at the end by default, or immediately after the section named by `after`. Errors on a duplicate heading at the same level.
+- **Input**: `path` (required), `heading` (required), `content` (required), `level` (optional 1–6, default 2), `after` (optional)
+- **Output**: `{ path, heading }`
+
+### append_to_section
+- **Purpose**: Append text under an existing heading (before the next heading), leaving the rest of the note untouched. `create: true` creates the section if missing.
+- **Input**: `path` (required), `heading` (required), `content` (required), `create` (optional)
+- **Output**: `{ path, heading }`
+
+### replace_section
+- **Purpose**: Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
+- **Input**: `path` (required), `heading` (required), `content` (required)
+- **Output**: `{ path, heading }`
+
+**Structure notes**: Body-only edits (sections) preserve the frontmatter block
+byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML block in
+canonical form (block-style lists) but leave the body untouched. Headings inside
+fenced code blocks are ignored when locating sections. All writes are
+path-traversal protected via the same guard as read_notes.
+
+### Git guard (`OBSIDIAN_GIT_AUTOCOMMIT`)
+
+Set `OBSIDIAN_GIT_AUTOCOMMIT` to a truthy value (`1`, `true`, `yes`, `on`) to
+snapshot the vault into a git commit **before every write**, so the agent's
+change lands as an isolated, revertible diff. The pre-existing state is
+committed (`git add -A && git commit`); the agent's own write is left
+**uncommitted** for review. A clean working tree is not an error (nothing to
+snapshot). The guard is **fail-closed**: when enabled but the snapshot cannot be
+taken (git missing, vault not a repo, or the commit fails), the write is
+refused rather than proceeding without the safety net. Implemented in
+`src/tools/git-guard.ts`.
+
 ## Dependencies
 
 - Node.js runtime (18+)
 - ripgrep (`rg`) command-line tool
+- git (only required when `OBSIDIAN_GIT_AUTOCOMMIT` is enabled)
 - @modelcontextprotocol/sdk
 - gray-matter (frontmatter parsing)
 - commander (query CLI argument parsing)
@@ -123,6 +191,27 @@ npm run query -- tags                                   # All tags with counts
 npm run query -- find-by-tag productivity project --all # Notes with all tags
 npm run query -- recent --limit 10                     # Most recently modified
 npm run query -- recent --date-field updated --since 2026-07-01
+
+# Write examples
+npm run query -- write "inbox/idea" "# Idea\n\nbody"    # Create a note
+npm run query -- write "inbox/idea" --file draft.md -o  # Overwrite from a file
+npm run query -- append "daily/2026-07-22" "more text"  # Append to a note
+npm run query -- add-tag "projects/alpha" project active
+npm run query -- remove-tag "projects/alpha" stale
+npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
+npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
+npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
+npm run query -- replace-section "projects/alpha" "Summary" "new summary"
+npm run query -- delete "inbox/idea"
+
+# Content beginning with "-" (e.g. markdown lists) via stdin or --file:
+printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"
+```
+
+Enable the git safety net for any write by exporting the flag first:
+
+```bash
+OBSIDIAN_GIT_AUTOCOMMIT=1 npm run query -- add-tag "projects/alpha" review
 ```
 
 (With mise: `mise run query -- search "productivity"`, etc.)

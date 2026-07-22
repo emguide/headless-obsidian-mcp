@@ -15,6 +15,23 @@ import { getLinks } from "./tools/links.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import {
+  writeNote,
+  appendNote,
+  deleteNote,
+  addTag,
+  removeTag,
+  setNoteFrontmatter,
+  addNoteSection,
+  appendNoteSection,
+  replaceNoteSection,
+  WriteNoteParams,
+  AppendNoteParams,
+  TagParams,
+  SetFrontmatterParams,
+  AddSectionParams,
+  SectionEditParams,
+} from "./tools/write.js";
+import {
   SearchNotesParams,
   ListNotesParams,
   FindByTagParams,
@@ -174,6 +191,122 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           }
         }
+      },
+      {
+        name: "write_note",
+        description: "Create a note, or overwrite an existing one. Refuses to overwrite unless overwrite:true is passed. Use the structure-aware tools (add_section, set_frontmatter, add_tag) for surgical edits instead of rewriting a whole note.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            content: { type: "string", description: "Full note body (may include frontmatter)" },
+            overwrite: { type: "boolean", description: "Allow replacing an existing note (default: false)" }
+          },
+          required: ["path", "content"]
+        }
+      },
+      {
+        name: "append_note",
+        description: "Append text to the end of an existing note. Set create:true to create the note if it is missing.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            content: { type: "string", description: "Text to append" },
+            create: { type: "boolean", description: "Create the note if it does not exist (default: false)" }
+          },
+          required: ["path", "content"]
+        }
+      },
+      {
+        name: "delete_note",
+        description: "Delete a note from the vault. Errors if the note does not exist.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" }
+          },
+          required: ["path"]
+        }
+      },
+      {
+        name: "add_tag",
+        description: "Add one or more tags to a note's frontmatter without rewriting the note. Existing tags are not duplicated. Returns the resulting tag list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags to add (with or without leading #)" }
+          },
+          required: ["path", "tags"]
+        }
+      },
+      {
+        name: "remove_tag",
+        description: "Remove one or more tags from a note's frontmatter. Returns the resulting tag list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            tags: { type: "array", items: { type: "string" }, description: "Tags to remove (with or without leading #)" }
+          },
+          required: ["path", "tags"]
+        }
+      },
+      {
+        name: "set_frontmatter",
+        description: "Set and/or unset frontmatter fields on a note (e.g. status, updated, aliases) while leaving the body untouched. Provide `set` (object of fields to set) and/or `unset` (array of keys to remove).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            set: { type: "object", description: "Frontmatter fields to set, e.g. { \"status\": \"done\" }" },
+            unset: { type: "array", items: { type: "string" }, description: "Frontmatter keys to remove" }
+          },
+          required: ["path"]
+        }
+      },
+      {
+        name: "add_section",
+        description: "Insert a new heading + content into a note without touching the rest. Appends at the end by default, or immediately after the section named by `after`. Errors if a section with the same heading and level already exists.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            heading: { type: "string", description: "Heading text (without the leading #)" },
+            content: { type: "string", description: "Body text for the new section" },
+            level: { type: "number", description: "Heading level 1-6 (default: 2)" },
+            after: { type: "string", description: "Insert after the section with this heading, instead of at the end" }
+          },
+          required: ["path", "heading", "content"]
+        }
+      },
+      {
+        name: "append_to_section",
+        description: "Append text to the body of an existing section (before the next heading), leaving the rest of the note untouched. Set create:true to create the section if it is missing.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            heading: { type: "string", description: "Heading text of the section to append to" },
+            content: { type: "string", description: "Text to append under the heading" },
+            create: { type: "boolean", description: "Create the section if it does not exist (default: false)" }
+          },
+          required: ["path", "heading", "content"]
+        }
+      },
+      {
+        name: "replace_section",
+        description: "Replace the body under an existing heading (the heading line is kept), leaving the rest of the note untouched. Errors if the section is missing.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            heading: { type: "string", description: "Heading text of the section to replace" },
+            content: { type: "string", description: "New body text for the section" }
+          },
+          required: ["path", "heading", "content"]
+        }
       }
     ]
   };
@@ -253,6 +386,55 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
         };
+      }
+
+      case "write_note": {
+        const result = await writeNote(VAULT_PATH, (args ?? {}) as unknown as WriteNoteParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "append_note": {
+        const result = await appendNote(VAULT_PATH, (args ?? {}) as unknown as AppendNoteParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "delete_note": {
+        const { path } = args as unknown as { path: string };
+        if (!path || typeof path !== "string") {
+          throw new Error("A note path is required for delete_note");
+        }
+        const result = await deleteNote(VAULT_PATH, path);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "add_tag": {
+        const result = await addTag(VAULT_PATH, (args ?? {}) as unknown as TagParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "remove_tag": {
+        const result = await removeTag(VAULT_PATH, (args ?? {}) as unknown as TagParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "set_frontmatter": {
+        const result = await setNoteFrontmatter(VAULT_PATH, (args ?? {}) as unknown as SetFrontmatterParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "add_section": {
+        const result = await addNoteSection(VAULT_PATH, (args ?? {}) as unknown as AddSectionParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "append_to_section": {
+        const result = await appendNoteSection(VAULT_PATH, (args ?? {}) as unknown as SectionEditParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "replace_section": {
+        const result = await replaceNoteSection(VAULT_PATH, (args ?? {}) as unknown as SectionEditParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
       default:

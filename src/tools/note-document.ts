@@ -1,0 +1,331 @@
+import matter from "gray-matter";
+
+/**
+ * An in-memory, editable view of a single note: its parsed frontmatter plus its
+ * raw markdown body. Structure-aware edits mutate `data` (frontmatter) and/or
+ * `body` (markdown) and are re-serialized on {@link serialize}.
+ *
+ * Body edits are byte-preserving for the frontmatter: as long as the
+ * frontmatter object is not marked dirty, the original frontmatter block is
+ * reattached verbatim, so a section edit never reflows the YAML. Frontmatter
+ * edits re-serialize the YAML block in canonical form (block-style lists) while
+ * leaving the body untouched.
+ */
+export class NoteDocument {
+  data: Record<string, unknown>;
+  body: string;
+  private readonly originalBlock: string;
+  private frontmatterDirty = false;
+
+  private constructor(
+    data: Record<string, unknown>,
+    body: string,
+    originalBlock: string
+  ) {
+    this.data = data;
+    this.body = body;
+    this.originalBlock = originalBlock;
+  }
+
+  // Matches a leading frontmatter fence and captures nothing; we only need its
+  // length so `block + body === raw`.
+  private static readonly FENCE = /^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/;
+
+  static parse(raw: string): NoteDocument {
+    const match = NoteDocument.FENCE.exec(raw);
+    if (!match) {
+      return new NoteDocument({}, raw, "");
+    }
+    const block = raw.slice(0, match[0].length);
+    const body = raw.slice(match[0].length);
+    // Reuse gray-matter (js-yaml) for the actual YAML parse.
+    const data = (matter(raw).data ?? {}) as Record<string, unknown>;
+    return new NoteDocument(data, body, block);
+  }
+
+  /** Mark the frontmatter as changed so it is re-serialized on output. */
+  markFrontmatterDirty(): void {
+    this.frontmatterDirty = true;
+  }
+
+  serialize(): string {
+    if (!this.frontmatterDirty) {
+      return this.originalBlock + this.body;
+    }
+    if (Object.keys(this.data).length === 0) {
+      // Frontmatter emptied out — drop the block entirely.
+      return this.body;
+    }
+    return matter.stringify(this.body, this.data);
+  }
+}
+
+/* ------------------------------------------------------------------ tags -- */
+
+/** Read the frontmatter tag list, normalizing the `tags`/`tag`, array/string forms. */
+export function frontmatterTagList(data: Record<string, unknown>): string[] {
+  const raw = data.tags ?? data.tag;
+  if (raw == null) return [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/);
+  return list
+    .map((t) => String(t).trim().replace(/^#/, ""))
+    .filter((t) => t.length > 0);
+}
+
+function normalizeTag(tag: string): string {
+  const clean = tag.trim().replace(/^#/, "");
+  if (!clean) throw new Error("Tag must be a non-empty string");
+  return clean;
+}
+
+/**
+ * Add tags to the frontmatter `tags` list (created if absent). Existing tags
+ * are not duplicated. Returns the resulting tag list, or null if nothing
+ * changed. Normalizes storage to a `tags:` array, folding a legacy `tag:` key in.
+ */
+export function addTags(doc: NoteDocument, tags: string[]): string[] | null {
+  const current = frontmatterTagList(doc.data);
+  const set = new Set(current);
+  let changed = false;
+  for (const tag of tags) {
+    const norm = normalizeTag(tag);
+    if (!set.has(norm)) {
+      set.add(norm);
+      changed = true;
+    }
+  }
+  // Fold a singular `tag:` key into `tags:` if we are rewriting anyway.
+  const hadLegacyKey = doc.data.tag != null && doc.data.tags == null;
+  if (!changed && !hadLegacyKey) return null;
+
+  const next = [...set];
+  doc.data.tags = next;
+  delete doc.data.tag;
+  doc.markFrontmatterDirty();
+  return next;
+}
+
+/**
+ * Remove tags from the frontmatter `tags` list. Returns the resulting list, or
+ * null if none of the tags were present. An emptied list drops the key.
+ */
+export function removeTags(doc: NoteDocument, tags: string[]): string[] | null {
+  const current = frontmatterTagList(doc.data);
+  if (current.length === 0) return null;
+  const remove = new Set(tags.map(normalizeTag));
+  const next = current.filter((t) => !remove.has(t));
+  if (next.length === current.length) return null;
+
+  if (next.length === 0) {
+    delete doc.data.tags;
+    delete doc.data.tag;
+  } else {
+    doc.data.tags = next;
+    delete doc.data.tag;
+  }
+  doc.markFrontmatterDirty();
+  return next;
+}
+
+/* ----------------------------------------------------------- frontmatter -- */
+
+/**
+ * Set and/or unset frontmatter fields. `set` keys are merged in (overwriting);
+ * `unset` keys are deleted. Returns true if anything changed.
+ */
+export function setFrontmatter(
+  doc: NoteDocument,
+  set?: Record<string, unknown>,
+  unset?: string[]
+): boolean {
+  let changed = false;
+  if (set) {
+    for (const [key, value] of Object.entries(set)) {
+      doc.data[key] = value;
+      changed = true;
+    }
+  }
+  if (unset) {
+    for (const key of unset) {
+      if (key in doc.data) {
+        delete doc.data[key];
+        changed = true;
+      }
+    }
+  }
+  if (changed) doc.markFrontmatterDirty();
+  return changed;
+}
+
+/* -------------------------------------------------------------- sections -- */
+
+interface Heading {
+  /** Index of the heading line within the body's line array. */
+  line: number;
+  level: number;
+  text: string;
+}
+
+/** Find all ATX headings in the body, skipping fenced code blocks. */
+function findHeadings(lines: string[]): Heading[] {
+  const headings: Heading[] = [];
+  let inFence = false;
+  let fence = "";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fenceMatch = line.match(/^\s*(```+|~~~+)/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true;
+        fence = marker;
+      } else if (marker === fence) {
+        inFence = false;
+      }
+      continue;
+    }
+    if (inFence) continue;
+    const h = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (h) {
+      headings.push({ line: i, level: h[1].length, text: h[2].trim() });
+    }
+  }
+  return headings;
+}
+
+/** Locate a section by heading text (exact, trimmed). Optional level filter. */
+function locateSection(
+  lines: string[],
+  heading: string,
+  level?: number
+): { heading: Heading; bodyStart: number; bodyEnd: number } | null {
+  const headings = findHeadings(lines);
+  const wanted = heading.trim();
+  const idx = headings.findIndex(
+    (h) => h.text === wanted && (level == null || h.level === level)
+  );
+  if (idx === -1) return null;
+  const h = headings[idx];
+  const bodyStart = h.line + 1;
+  // The section ends at the next heading of the same or higher level.
+  let bodyEnd = lines.length;
+  for (let j = idx + 1; j < headings.length; j++) {
+    if (headings[j].level <= h.level) {
+      bodyEnd = headings[j].line;
+      break;
+    }
+  }
+  return { heading: h, bodyStart, bodyEnd };
+}
+
+function splitBody(body: string): { lines: string[]; trailingNewline: boolean } {
+  const trailingNewline = body.endsWith("\n");
+  const trimmed = trailingNewline ? body.slice(0, -1) : body;
+  return { lines: trimmed.length === 0 ? [] : trimmed.split("\n"), trailingNewline };
+}
+
+function joinBody(lines: string[], trailingNewline: boolean): string {
+  const joined = lines.join("\n");
+  return trailingNewline && joined.length > 0 ? joined + "\n" : joined;
+}
+
+/** Drop trailing blank lines from a slice range end (returns new end index). */
+function trimTrailingBlanks(lines: string[], end: number, start: number): number {
+  let e = end;
+  while (e > start && lines[e - 1].trim() === "") e--;
+  return e;
+}
+
+/**
+ * Append a new section (`#`-heading + content) to the note. Inserts at the end
+ * of the body by default, or immediately after the section named by `after`.
+ * Throws if a section with the same heading and level already exists.
+ */
+export function addSection(
+  doc: NoteDocument,
+  heading: string,
+  content: string,
+  level = 2,
+  after?: string
+): void {
+  if (level < 1 || level > 6) throw new Error("Heading level must be 1-6");
+  const { lines, trailingNewline } = splitBody(doc.body);
+  if (locateSection(lines, heading, level)) {
+    throw new Error(
+      `A level-${level} section "${heading}" already exists; ` +
+        `use append_to_section or replace_section instead`
+    );
+  }
+
+  const block = [`${"#".repeat(level)} ${heading.trim()}`, ...content.split("\n")];
+
+  let head: string[];
+  let tail: string[];
+  if (after) {
+    const target = locateSection(lines, after);
+    if (!target) throw new Error(`Section "${after}" not found`);
+    head = lines.slice(0, trimTrailingBlanks(lines, target.bodyEnd, target.bodyStart));
+    tail = lines.slice(target.bodyEnd);
+  } else {
+    head = lines.slice(0, trimTrailingBlanks(lines, lines.length, 0));
+    tail = [];
+  }
+
+  const parts: string[] = [...head];
+  if (head.length > 0) parts.push(""); // blank line before the new heading
+  parts.push(...block);
+  if (tail.length > 0) parts.push("", ...tail);
+
+  doc.body = joinBody(parts, trailingNewline || doc.body.length === 0);
+}
+
+/**
+ * Append text to the body of an existing section (before the next heading).
+ * If the section is missing and `create` is true, a new section is added at the
+ * end; otherwise it throws.
+ */
+export function appendToSection(
+  doc: NoteDocument,
+  heading: string,
+  content: string,
+  create = false
+): void {
+  const { lines, trailingNewline } = splitBody(doc.body);
+  const target = locateSection(lines, heading);
+  if (!target) {
+    if (create) {
+      addSection(doc, heading, content);
+      return;
+    }
+    throw new Error(`Section "${heading}" not found`);
+  }
+
+  const head = lines.slice(0, trimTrailingBlanks(lines, target.bodyEnd, target.bodyStart));
+  const tail = lines.slice(target.bodyEnd);
+  const parts = [...head, "", ...content.split("\n")];
+  if (tail.length > 0) parts.push("", ...tail);
+
+  doc.body = joinBody(parts, trailingNewline);
+}
+
+/**
+ * Replace the body of an existing section (heading line kept, everything up to
+ * the next same-or-higher heading replaced). Throws if the section is missing.
+ */
+export function replaceSection(
+  doc: NoteDocument,
+  heading: string,
+  content: string
+): void {
+  const { lines, trailingNewline } = splitBody(doc.body);
+  const target = locateSection(lines, heading);
+  if (!target) throw new Error(`Section "${heading}" not found`);
+
+  const before = lines.slice(0, target.bodyStart);
+  const rest = lines.slice(target.bodyEnd);
+  const replacement = content.split("\n");
+  const parts = [...before, ...replacement];
+  if (rest.length > 0) parts.push("", ...rest);
+
+  doc.body = joinBody(parts, trailingNewline);
+}
