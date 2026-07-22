@@ -138,8 +138,8 @@ export interface RecentNotesParams {
   since?: string;
   /** Frontmatter field to sort by instead of filesystem mtime (e.g. "updated"). */
   date_field?: string;
-  /** Frontmatter equality filters, e.g. { status: "active" }. */
-  where?: Record<string, unknown>;
+  /** Frontmatter conditions, e.g. { status: "active" } or { priority: { gt: 3 } }. */
+  where?: Record<string, Condition>;
 }
 
 export interface RankedSearchParams {
