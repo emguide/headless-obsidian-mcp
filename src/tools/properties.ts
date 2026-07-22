@@ -139,8 +139,10 @@ export async function getProperty(
   if (!path || typeof path !== "string") throw new Error("A note path is required");
   if (!key || typeof key !== "string") throw new Error("key must be a non-empty string");
   const index = await getIndex(vaultPath);
-  const entry = index.getEntry(canonicalName(path));
-  if (!entry) throw new Error(`Note not found: ${canonicalName(path)}`);
+  const canonical = canonicalName(path);
+  const resolved = index.resolve(canonical) ?? canonical;
+  const entry = index.getEntry(resolved);
+  if (!entry) throw new Error(`Note not found: ${canonical}`);
   const present = key in entry.frontmatter;
   return {
     path: entry.path,

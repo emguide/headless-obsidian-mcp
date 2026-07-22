@@ -78,7 +78,7 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
   - `limit` (optional): Maximum number of notes to return (default: 20)
   - `since` (optional): Only include notes on or after this ISO date
   - `date_field` (optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
-  - `where` (optional): Frontmatter equality filters, e.g. `{ "status": "active" }` (matches array members too)
+  - `where` (optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`; matches array members too)
 - **Output**: Array of note headers (same shape as `list_notes`)
 
 ### get_related_notes

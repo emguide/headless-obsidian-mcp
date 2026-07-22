@@ -289,7 +289,7 @@ List notes ordered by recency, newest first.
 - `limit` (number, optional): Maximum number of notes to return (default: 20)
 - `since` (string, optional): Only include notes on or after this ISO date
 - `date_field` (string, optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
-- `where` (object, optional): Frontmatter equality filters, e.g. `{ "status": "active" }`
+- `where` (object, optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`)
 
 **Returns:** Array of note headers (same shape as `list_notes`).
 

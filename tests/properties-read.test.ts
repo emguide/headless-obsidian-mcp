@@ -106,3 +106,16 @@ test("getProperty distinguishes present, null, and absent", async () => {
     await cleanup();
   }
 });
+
+test("getProperty resolves case-insensitively, like get_links/get_related_notes", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "Projects/Alpha.md", content: "---\nstatus: active\n---\nbody\n" },
+  ]);
+  try {
+    const res = await getProperty(vaultPath, { path: "projects/alpha", key: "status" });
+    assert.equal(res.present, true);
+    assert.equal(res.value, "active");
+  } finally {
+    await cleanup();
+  }
+});
