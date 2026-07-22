@@ -126,6 +126,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
   let currentMatches: SearchResult['matches'] = [];
   let filesOmitted = 0;
   let skippingCurrentFile = false; // true once fileLimit reached; count distinct extra files
+  let matchCapReachedForFile = false; // true once matchLimit reached within the current file
 
   const flushCurrent = () => {
     if (currentFile && currentMatches.length > 0) {
@@ -149,6 +150,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
         flushCurrent();
         currentFile = relativePath;
         currentMatches = [];
+        matchCapReachedForFile = false;
 
         // Decide whether this new file fits under the file cap.
         skippingCurrentFile = fileLimit > 0 && results.length >= fileLimit;
@@ -163,6 +165,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
 
       if (parsed.data.submatches && parsed.data.submatches.length > 0) {
         if (matchLimit > 0 && currentMatches.length >= matchLimit) {
+          matchCapReachedForFile = true;
           cappedFiles.add(relativePath);
           continue;
         }
@@ -174,7 +177,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
         });
       }
     } else if (parsed.type === 'context') {
-      if (skippingCurrentFile) {
+      if (skippingCurrentFile || matchCapReachedForFile) {
         continue;
       }
       if (currentMatches.length > 0) {
