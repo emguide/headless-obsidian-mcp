@@ -60,7 +60,7 @@ if (!VAULT_PATH) {
 
 const server = new Server(
   {
-    name: "notes-mcp",
+    name: "headless-obsidian-mcp",
     version: "1.0.0",
   },
   {

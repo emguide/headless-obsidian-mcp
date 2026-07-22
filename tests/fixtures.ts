@@ -24,7 +24,7 @@ export interface Fixture {
  */
 export async function makeVault(notes: FixtureNote[]): Promise<Fixture> {
   clearIndexCache();
-  const vaultPath = await mkdtemp(join(tmpdir(), "notes-mcp-test-"));
+  const vaultPath = await mkdtemp(join(tmpdir(), "headless-obsidian-mcp-test-"));
 
   for (const note of notes) {
     const full = join(vaultPath, note.path);

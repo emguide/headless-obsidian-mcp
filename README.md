@@ -1,6 +1,6 @@
-# Notes MCP Server
+# Headless Obsidian MCP
 
-An MCP (Model Context Protocol) server for interacting with Obsidian notes. This server provides tools to search through and read notes from your Obsidian vault, making your knowledge base accessible to AI assistants.
+A headless MCP (Model Context Protocol) server for interacting with Obsidian vaults. It gives AI assistants Obsidian's power — full-text search, the link graph, tags, and structure-aware editing — without the GUI, making your knowledge base a first-class agent tool.
 
 ## Features
 
@@ -510,9 +510,9 @@ To use this MCP server with Claude Desktop, first build the project (`npm instal
 ```json
 {
   "mcpServers": {
-    "notes": {
+    "obsidian": {
       "command": "node",
-      "args": ["/path/to/notes-mcp/dist/index.js"],
+      "args": ["/path/to/headless-obsidian-mcp/dist/index.js"],
       "env": {
         "OBSIDIAN_VAULT_PATH": "/path/to/your/obsidian/vault"
       }
@@ -525,8 +525,8 @@ To use this MCP server with Claude Desktop, first build the project (`npm instal
 ```json
 {
   "mcpServers": {
-    "notes": {
-      "command": "/path/to/notes-mcp/start-server.sh",
+    "obsidian": {
+      "command": "/path/to/headless-obsidian-mcp/start-server.sh",
       "env": {
         "OBSIDIAN_VAULT_PATH": "/path/to/your/obsidian/vault"
       }
@@ -538,12 +538,12 @@ To use this MCP server with Claude Desktop, first build the project (`npm instal
 This uses the included `start-server.sh` script, which changes to the project directory, installs dependencies and builds if needed, then runs `node dist/index.js`.
 
 Replace the paths with:
-- `/path/to/notes-mcp`: The absolute path to this project directory
+- `/path/to/headless-obsidian-mcp`: The absolute path to this project directory
 - `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
 
 ## Acknowledgments
 
