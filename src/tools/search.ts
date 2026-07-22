@@ -184,7 +184,15 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
         const lastMatch = currentMatches[currentMatches.length - 1];
         if (parsed.data.line_number < lastMatch.line_number) {
           lastMatch.context_before.push(parsed.data.lines.text);
-        } else {
+        } else if (
+          !(matchLimit > 0 && currentMatches.length >= matchLimit) ||
+          lastMatch.context_after.length < context_lines
+        ) {
+          // Once the match buffer is full, only accept trailing context that
+          // still fits the LAST KEPT match's own context window (bounded by
+          // context_lines). Anything beyond that window, once the buffer is
+          // full, is context_before leakage from the next (dropped) match's
+          // context events arriving ahead of that match's own match event.
           lastMatch.context_after.push(parsed.data.lines.text);
         }
       }
