@@ -1,14 +1,18 @@
+[tasks.build]
+run = "npm run build"
+description = "Compile TypeScript to dist/"
+
 [tasks.start]
-run = "deno run --allow-read=$OBSIDIAN_VAULT_PATH --allow-run=rg --allow-env=OBSIDIAN_VAULT_PATH src/index.ts"
-description = "Start the MCP server"
+run = "npm run start"
+description = "Start the MCP server (run build first)"
 
 [tasks.dev]
-run = "deno run --allow-read --allow-run --allow-env --watch src/index.ts"
+run = "npm run dev"
 description = "Start the MCP server in development mode with file watching"
 
 [tasks.query]
-run = "deno run --allow-read --allow-run --allow-env query-cli.ts"
+run = "npm run query --"
 description = "Run the query CLI tool"
 
 [tools]
-deno = "2.3"
+node = "20"

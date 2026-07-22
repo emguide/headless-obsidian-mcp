@@ -6,7 +6,8 @@ This is an MCP (Model Context Protocol) server for interacting with Obsidian not
 
 1. Set the `OBSIDIAN_VAULT_PATH` environment variable to point to your Obsidian vault directory
 2. Ensure `ripgrep` (`rg`) is installed on your system
-3. Run with: `deno task start` or `mise run start` (if using mise)
+3. Install dependencies and build: `npm install && npm run build`
+4. Run with: `npm start` or `mise run start` (if using mise)
 
 ## Tools
 
@@ -33,34 +34,39 @@ This is an MCP (Model Context Protocol) server for interacting with Obsidian not
 
 ## Dependencies
 
-- Deno runtime
+- Node.js runtime (18+)
 - ripgrep (`rg`) command-line tool
 - @modelcontextprotocol/sdk
 - gray-matter (frontmatter parsing)
-- @std/path (cross-platform path utilities)
+- commander (query CLI argument parsing)
+- Node's built-in `node:path`, `node:fs/promises`, and `node:child_process`
 
 ## Development
 
-- `deno task dev` or `mise run dev` - Run in watch mode
-- `deno task start` or `mise run start` - Run normally
+- `npm run dev` or `mise run dev` - Run in watch mode (via tsx, no build step)
+- `npm run build` or `mise run build` - Compile TypeScript to `dist/`
+- `npm start` or `mise run start` - Run the compiled server (`dist/index.js`)
 
 The project includes a `mise.toml` file for simplified task management with mise.
+The build output is written to `dist/`; the compiled entry point is `dist/index.js`.
 
 ## Testing
 
-Use the included query CLI tool for testing:
+Use the included query CLI tool for testing (runs from source via tsx):
 
 ```bash
 # Search examples
-mise run query search "productivity"                    # Case-insensitive search
-mise run query search "TODO" --case-sensitive          # Case-sensitive search  
-mise run query search "test" --whole-word               # Whole words only
-mise run query search "pattern" --context 10           # Custom context lines
+npm run query -- search "productivity"                  # Case-insensitive search
+npm run query -- search "TODO" --case-sensitive        # Case-sensitive search
+npm run query -- search "test" --whole-word             # Whole words only
+npm run query -- search "pattern" --context 10         # Custom context lines
 
 # Read examples
-mise run query read "note1" "folder/note2"             # Read multiple notes
-mise run query -v search "pattern"                     # Verbose mode
+npm run query -- read "note1" "folder/note2"           # Read multiple notes
+npm run query -- --verbose search "pattern"            # Verbose mode
 ```
+
+(With mise: `mise run query -- search "productivity"`, etc.)
 
 ## Documentation Updates
 
