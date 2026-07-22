@@ -1,6 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { getIndex } from "../src/tools/vault-index.js";
+import { searchNotesRanked } from "../src/tools/search-ranked.js";
 import { makeVault, Fixture } from "./fixtures.js";
 import { writeFile, utimes } from "node:fs/promises";
 import { join } from "node:path";
@@ -78,4 +79,22 @@ test("reflects edits after refresh", async () => {
   const idx = await getIndex(fx.vaultPath); // getIndex refreshes
   const res = await idx.searchRanked("networking", 10);
   assert.ok(res.some((r) => r.path === "unrelated"));
+});
+
+test("searchNotesRanked wrapper validates and returns ranked results", async () => {
+  const res = await searchNotesRanked(fx.vaultPath, { query: "networking" });
+  assert.ok(res.length > 0);
+  assert.equal(typeof res[0].score, "number");
+});
+
+test("searchNotesRanked rejects an empty query", async () => {
+  await assert.rejects(
+    () => searchNotesRanked(fx.vaultPath, { query: "" }),
+    /query must be a non-empty string/i
+  );
+});
+
+test("searchNotesRanked defaults limit to 10 and caps at 100", async () => {
+  const res = await searchNotesRanked(fx.vaultPath, { query: "networking", limit: 1000 });
+  assert.ok(res.length <= 100);
 });
