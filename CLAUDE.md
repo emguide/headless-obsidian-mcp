@@ -86,6 +86,16 @@ This is an MCP (Model Context Protocol) server for interacting with Obsidian not
 - `npm run dev` or `mise run dev` - Run in watch mode (via tsx, no build step)
 - `npm run build` or `mise run build` - Compile TypeScript to `dist/`
 - `npm start` or `mise run start` - Run the compiled server (`dist/index.js`)
+- `npm test` - Run the test suite (Node's built-in `node:test` runner via tsx, no extra deps)
+
+### Vault index
+
+The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
+`list_recent_notes`) share an in-memory index (`src/tools/vault-index.ts`) that
+parses each note once (frontmatter, tags, wikilinks, headings) and caches the
+result. Each tool call refreshes the index by walking the vault and re-reading
+only files whose size or mtime changed, so repeated calls are map lookups rather
+than full-vault scans. Backlinks are precomputed during refresh.
 
 The project includes a `mise.toml` file for simplified task management with mise.
 The build output is written to `dist/`; the compiled entry point is `dist/index.js`.

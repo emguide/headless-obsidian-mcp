@@ -1,18 +1,6 @@
-import { readFile } from "node:fs/promises";
-import matter from "gray-matter";
-import { walkVault, collectTags, buildHeader, assertVaultPath } from "./vault.js";
+import { assertVaultPath } from "./vault.js";
+import { getIndex, entryToHeader } from "./vault-index.js";
 import { TagCount, FindByTagParams, NoteHeader } from "../types.js";
-
-/** Read a note and return its unified tag set (frontmatter + inline). */
-async function tagsForFile(fullPath: string): Promise<string[]> {
-  try {
-    const raw = await readFile(fullPath, "utf-8");
-    const { data, content } = matter(raw);
-    return collectTags(data as Record<string, unknown>, content);
-  } catch {
-    return [];
-  }
-}
 
 /**
  * Aggregate every tag used across the vault with the number of notes that use
@@ -21,17 +9,14 @@ async function tagsForFile(fullPath: string): Promise<string[]> {
  */
 export async function listTags(vaultPath: string): Promise<TagCount[]> {
   assertVaultPath(vaultPath);
-  const files = await walkVault(vaultPath);
+  const index = await getIndex(vaultPath);
   const counts = new Map<string, number>();
 
-  await Promise.all(
-    files.map(async (f) => {
-      const tags = await tagsForFile(f.fullPath);
-      for (const tag of new Set(tags)) {
-        counts.set(tag, (counts.get(tag) ?? 0) + 1);
-      }
-    })
-  );
+  for (const entry of index.getEntries()) {
+    for (const tag of new Set(entry.tags)) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
 
   return [...counts.entries()]
     .map(([tag, count]) => ({ tag, count }))
@@ -63,19 +48,14 @@ export async function findByTag(
   // Normalize requested tags: drop leading "#", lowercase for comparison.
   const wanted = tags.map((t) => String(t).replace(/^#/, "").toLowerCase());
 
-  const files = await walkVault(vaultPath);
-  const matched = [];
-
-  for (const f of files) {
-    const noteTags = (await tagsForFile(f.fullPath)).map((t) => t.toLowerCase());
-    const noteSet = new Set(noteTags);
-    const hit =
-      match === "all"
-        ? wanted.every((w) => noteSet.has(w))
-        : wanted.some((w) => noteSet.has(w));
-    if (hit) matched.push(f);
-  }
+  const index = await getIndex(vaultPath);
+  const matched = index.getEntries().filter((entry) => {
+    const noteSet = new Set(entry.tags.map((t) => t.toLowerCase()));
+    return match === "all"
+      ? wanted.every((w) => noteSet.has(w))
+      : wanted.some((w) => noteSet.has(w));
+  });
 
   const limited = limit !== undefined ? matched.slice(0, limit) : matched;
-  return Promise.all(limited.map((f) => buildHeader(f)));
+  return limited.map(entryToHeader);
 }

@@ -1,14 +1,6 @@
-import { readFile } from "node:fs/promises";
-import matter from "gray-matter";
-import { walkVault, buildHeader, assertVaultPath, VaultFile } from "./vault.js";
+import { assertVaultPath } from "./vault.js";
+import { getIndex, entryToHeader, IndexEntry } from "./vault-index.js";
 import { RecentNotesParams, NoteHeader } from "../types.js";
-
-/** A vault file paired with its parsed frontmatter and effective sort date. */
-interface Dated {
-  file: VaultFile;
-  frontmatter: Record<string, unknown>;
-  sortDate: number; // epoch ms used for ordering / since-filtering
-}
 
 /** Parse a value into epoch ms, or null if it isn't a usable date. */
 function toEpoch(value: unknown): number | null {
@@ -64,41 +56,23 @@ export async function listRecentNotes(
     }
   }
 
-  const files = await walkVault(vaultPath);
+  const index = await getIndex(vaultPath);
 
-  // Only parse frontmatter when we actually need it (a date field or filter).
-  const needFrontmatter = Boolean(date_field) || Boolean(where);
+  const sortDateOf = (e: IndexEntry): number =>
+    (date_field ? toEpoch(e.frontmatter[date_field]) : null) ?? e.mtimeMs;
 
-  const dated: Dated[] = await Promise.all(
-    files.map(async (f) => {
-      let frontmatter: Record<string, unknown> = {};
-      if (needFrontmatter) {
-        try {
-          const raw = await readFile(f.fullPath, "utf-8");
-          frontmatter = matter(raw).data as Record<string, unknown>;
-        } catch {
-          frontmatter = {};
-        }
-      }
-      const fieldEpoch = date_field ? toEpoch(frontmatter[date_field]) : null;
-      return {
-        file: f,
-        frontmatter,
-        sortDate: fieldEpoch ?? f.mtime.getTime(),
-      };
-    })
-  );
-
-  let selected = dated;
+  let selected = index.getEntries();
   if (where) {
-    selected = selected.filter((d) => matchesWhere(d.frontmatter, where));
+    selected = selected.filter((e) => matchesWhere(e.frontmatter, where));
   }
   if (sinceEpoch !== null) {
-    selected = selected.filter((d) => d.sortDate >= sinceEpoch!);
+    selected = selected.filter((e) => sortDateOf(e) >= sinceEpoch!);
   }
 
-  selected.sort((a, b) => b.sortDate - a.sortDate);
-  const limited = selected.slice(0, limit);
+  selected = selected
+    .slice()
+    .sort((a, b) => sortDateOf(b) - sortDateOf(a))
+    .slice(0, limit);
 
-  return Promise.all(limited.map((d) => buildHeader(d.file)));
+  return selected.map(entryToHeader);
 }

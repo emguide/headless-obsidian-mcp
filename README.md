@@ -56,9 +56,23 @@ npm run dev
 mise run dev
 ```
 
-## Testing
+## Tests
 
-You can test the MCP server using the included query CLI tool. It runs directly from
+Run the automated test suite (Node's built-in `node:test` runner via tsx — no
+extra dependencies):
+
+```bash
+npm test
+```
+
+The tests build a throwaway fixture vault in a temp directory and cover link
+resolution and backlinks, tag aggregation and filtering, listing and recency,
+index cache invalidation, and the security guards (path traversal, pattern
+limits).
+
+## Manual testing
+
+You can also exercise the MCP server using the included query CLI tool. It runs directly from
 the TypeScript sources via `tsx`, so no build step is required:
 
 ```bash
