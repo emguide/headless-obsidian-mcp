@@ -147,8 +147,8 @@ const MARKDOWN_PATTERNS: RegExp[] = [
   /\*\*[^*]+\*\*/, // **bold**
   /__[^_]+__/, // __bold__
   /`[^`]*`/, // `code`
-  /^\s*#{1,6}\s+\S/, // # heading
-  /^\s*[-*+]\s+\S/, // - / * / + list bullet
+  /^\s*#{1,6}\s+\S/m, // # heading (multiline: detect headings on any line)
+  /^\s*[-*+]\s+\S/m, // - / * / + list bullet (multiline: detect bullets on any line)
 ];
 
 function assertNoMarkdown(key: string, value: string): void {

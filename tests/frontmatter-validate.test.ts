@@ -40,3 +40,17 @@ test("rejects markdown syntax in a string value", () => {
 test("rejects markdown syntax inside a string array element", () => {
   assert.throws(() => validateFrontmatterValue("a", ["ok", "[[bad]]"]), /markdown/i);
 });
+
+test("rejects markdown on a later line in a multiline string (heading)", () => {
+  assert.throws(
+    () => validateFrontmatterValue("a", "plain text\n# heading here"),
+    /markdown/i
+  );
+});
+
+test("rejects markdown on a later line in a multiline string (bullet)", () => {
+  assert.throws(
+    () => validateFrontmatterValue("a", "plain text\n- bullet here"),
+    /markdown/i
+  );
+});
