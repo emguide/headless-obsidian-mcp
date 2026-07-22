@@ -19,7 +19,9 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
   - `whole_word` (optional): Match whole words only
   - `multiline` (optional): Enable multiline matching
   - `context_lines` (optional): Number of context lines to show (default: 5, max: 100)
-- **Output**: Array of search results with file paths (without .md suffix) and context lines
+  - `limit` (optional): Max number of files to return (default: 20, `0` = unlimited — no hard maximum)
+  - `max_matches_per_file` (optional): Max matches per file (default: 20, `0` = unlimited)
+- **Output**: `{ results, truncated, files_returned, files_omitted, matches_capped_in }` — `results` is the array of matches (file paths without .md, plus context lines), bounded by the caps above; the other fields report what was dropped so a truncated result isn't mistaken for a complete one.
 - **Security**: Protected against flag injection and regex DoS attacks
 
 ### search_notes_ranked
@@ -288,6 +290,7 @@ npm run query -- search "TODO" --case-sensitive        # Case-sensitive search
 npm run query -- search "test" --whole-word             # Whole words only
 npm run query -- search "pattern" --context 10         # Custom context lines
 npm run query -- search-ranked "kubernetes networking" --limit 5   # BM25 ranked
+npm run query -- search "productivity" --limit 20 --max-matches 20   # Bounded literal search
 
 # Read examples
 npm run query -- read "note1" "folder/note2"           # Read multiple notes

@@ -147,6 +147,8 @@ program
   .option("-w, --whole-word", "Match whole words only")
   .option("-m, --multiline", "Enable multiline matching")
   .option("-c, --context <lines>", "Number of context lines to show", "5")
+  .option("-l, --limit <n>", "Max files to return (default: 20, 0 = unlimited)")
+  .option("--max-matches <n>", "Max matches per file (default: 20, 0 = unlimited)")
   .action(async (pattern: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const context = parseInt(options.context, 10);
@@ -155,7 +157,9 @@ program
       ...(options.caseSensitive && { case_sensitive: true }),
       ...(options.wholeWord && { whole_word: true }),
       ...(options.multiline && { multiline: true }),
-      ...(context !== 5 && { context_lines: context })
+      ...(context !== 5 && { context_lines: context }),
+      ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
+      ...(options.maxMatches !== undefined && { max_matches_per_file: parseInt(options.maxMatches, 10) })
     };
     await queryTool("search_notes", args, verbose);
   });

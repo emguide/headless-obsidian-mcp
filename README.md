@@ -205,10 +205,15 @@ Search through markdown files in your vault using ripgrep patterns.
 - `whole_word` (boolean, optional): Match whole words only
 - `multiline` (boolean, optional): Enable multiline matching
 - `context_lines` (number, optional): Number of context lines to show (default: 5, max: 100)
+- `limit` (number, optional): Maximum number of files to return (default: 20, 0 = unlimited — no hard maximum)
+- `max_matches_per_file` (number, optional): Maximum matches to return per file (default: 20, 0 = unlimited)
 
-**Returns:** Array of search results with:
-- `path`: Relative note path (without .md extension)
-- `matches`: Array of matches with line numbers and context
+**Returns:** An object bounding the result set:
+- `results`: Array of search results, each with `path` (relative, without .md) and `matches` (line numbers + context)
+- `truncated`: `true` if any cap dropped results
+- `files_returned`: number of files in `results`
+- `files_omitted`: matching files seen beyond `limit` and not returned
+- `matches_capped_in`: paths of files whose matches were capped
 
 ### search_notes_ranked
 
@@ -528,10 +533,12 @@ Replace the body under an existing heading (the heading line is kept). Errors if
 Once connected to an MCP client, you can:
 
 ```javascript
-// Search for notes containing "productivity"
+// Search for notes containing "productivity" (bounded: 20 files, 20 matches/file by default)
 await search_notes({
   pattern: "productivity",
-  case_sensitive: false
+  case_sensitive: false,
+  limit: 20,             // 0 for unlimited
+  max_matches_per_file: 20
 });
 
 // Read specific notes
