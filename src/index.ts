@@ -15,10 +15,16 @@ import { getLinks } from "./tools/links.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
+import { getFrontmatter } from "./tools/frontmatter.js";
+import { getVaultStats } from "./tools/stats.js";
 import {
   writeNote,
   appendNote,
+  prependNote,
   deleteNote,
+  moveNote,
+  moveFile,
+  patchNote,
   addTag,
   removeTag,
   setNoteFrontmatter,
@@ -28,6 +34,10 @@ import {
   isWriteTool,
   WriteNoteParams,
   AppendNoteParams,
+  PrependNoteParams,
+  MoveNoteParams,
+  MoveFileParams,
+  PatchNoteParams,
   TagParams,
   SetFrontmatterParams,
   AddSectionParams,
@@ -214,6 +224,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "get_frontmatter",
+        description: "Read just a note's parsed frontmatter (YAML metadata), without its body. A cheap way to inspect a note's status, aliases, dates, or custom fields before reading or editing the whole note.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Relative note path (with or without .md extension)"
+            }
+          },
+          required: ["path"]
+        }
+      },
+      {
+        name: "get_vault_stats",
+        description: "Summarize the whole vault: note and tag counts, link-graph health (resolved vs unresolved links, orphan notes), total size, and modification-time bounds. Use it to get a quick sense of the vault's scale and health.",
+        inputSchema: {
+          type: "object",
+          properties: {}
+        }
+      },
+      {
         name: "write_note",
         description: "Create a note, or overwrite an existing one. Refuses to overwrite unless overwrite:true is passed. Use the structure-aware tools (add_section, set_frontmatter, add_tag) for surgical edits instead of rewriting a whole note.",
         inputSchema: {
@@ -240,14 +272,69 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "delete_note",
-        description: "Delete a note from the vault. Errors if the note does not exist.",
+        name: "prepend_note",
+        description: "Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it. Set create:true to create the note if it is missing.",
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" }
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            content: { type: "string", description: "Text to prepend" },
+            create: { type: "boolean", description: "Create the note if it does not exist (default: false)" }
+          },
+          required: ["path", "content"]
+        }
+      },
+      {
+        name: "delete_note",
+        description: "Delete a note. Trash-safe by default: the note is moved to the vault's .trash folder so the deletion is recoverable. Pass permanent:true to unlink it outright. Errors if the note does not exist.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            permanent: { type: "boolean", description: "Permanently delete instead of moving to .trash (default: false)" }
           },
           required: ["path"]
+        }
+      },
+      {
+        name: "move_note",
+        description: "Move or rename a note. By default every wikilink elsewhere in the vault that pointed to the old location is rewritten to the new one, so the link graph is never broken. Refuses to overwrite an existing destination unless overwrite:true.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            from: { type: "string", description: "Current relative note path (with or without .md)" },
+            to: { type: "string", description: "New relative note path (with or without .md)" },
+            overwrite: { type: "boolean", description: "Allow replacing an existing note at the destination (default: false)" },
+            update_links: { type: "boolean", description: "Rewrite wikilinks in other notes that point to this note (default: true)" }
+          },
+          required: ["from", "to"]
+        }
+      },
+      {
+        name: "move_file",
+        description: "Move or rename an arbitrary file in the vault (attachments, images, or notes referenced by literal path). Treats the path literally: no .md is appended and no wikilinks are rewritten. Refuses to overwrite an existing destination unless overwrite:true.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            from: { type: "string", description: "Current relative file path (with extension)" },
+            to: { type: "string", description: "New relative file path (with extension)" },
+            overwrite: { type: "boolean", description: "Allow replacing an existing file at the destination (default: false)" }
+          },
+          required: ["from", "to"]
+        }
+      },
+      {
+        name: "patch_note",
+        description: "Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex). Replaces the first occurrence by default, or every occurrence with all:true. Errors if the text to find is not present.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            find: { type: "string", description: "Exact literal text to find" },
+            replace: { type: "string", description: "Replacement text" },
+            all: { type: "boolean", description: "Replace every occurrence instead of only the first (default: false)" }
+          },
+          required: ["path", "find", "replace"]
         }
       },
       {
@@ -428,6 +515,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "get_frontmatter": {
+        const { path } = args as unknown as { path: string };
+        if (!path || typeof path !== "string") {
+          throw new Error("A note path is required for get_frontmatter");
+        }
+        const result = await getFrontmatter(VAULT_PATH, path);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "get_vault_stats": {
+        const result = await getVaultStats(VAULT_PATH);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
       case "write_note": {
         const result = await writeNote(VAULT_PATH, (args ?? {}) as unknown as WriteNoteParams);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
@@ -438,12 +539,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
+      case "prepend_note": {
+        const result = await prependNote(VAULT_PATH, (args ?? {}) as unknown as PrependNoteParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
       case "delete_note": {
-        const { path } = args as unknown as { path: string };
+        const { path, permanent } = args as unknown as { path: string; permanent?: boolean };
         if (!path || typeof path !== "string") {
           throw new Error("A note path is required for delete_note");
         }
-        const result = await deleteNote(VAULT_PATH, path);
+        const result = await deleteNote(VAULT_PATH, path, { permanent });
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "move_note": {
+        const result = await moveNote(VAULT_PATH, (args ?? {}) as unknown as MoveNoteParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "move_file": {
+        const result = await moveFile(VAULT_PATH, (args ?? {}) as unknown as MoveFileParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "patch_note": {
+        const result = await patchNote(VAULT_PATH, (args ?? {}) as unknown as PatchNoteParams);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 

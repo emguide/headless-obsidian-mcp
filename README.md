@@ -10,9 +10,11 @@ An MCP (Model Context Protocol) server for interacting with Obsidian notes. This
 - **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
 - **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
 - **Related Notes**: Associative recall — rank the notes most related to a given one (shared tags + link graph), no embeddings required
-- **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter
-- **Write & Edit** (opt-in): Create, overwrite, append, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
-- **Structure-aware edits**: Add/remove tags, set frontmatter, and add/append/replace sections without rewriting the whole note — saving agent tokens
+- **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter; read a note's frontmatter alone or get whole-vault stats
+- **Write & Edit** (opt-in): Create, overwrite, append, prepend, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
+- **Structure-aware edits**: Add/remove tags, set frontmatter, add/append/replace sections, and literal find/replace patches without rewriting the whole note — saving agent tokens
+- **Move & rename**: Move notes (rewriting the wikilinks that point to them) or arbitrary attachment files
+- **Trash-safe delete**: Deletes move to the vault's `.trash` by default, so they're recoverable
 - **Git safety net**: Optionally snapshot the vault into a commit before every write (`OBSIDIAN_GIT_AUTOCOMMIT`)
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **Frontmatter Support**: Extracts YAML frontmatter as structured metadata
@@ -121,14 +123,19 @@ npm run query -- recent --date-field updated --since 2024-01-01
 npm run query -- related "projects/alpha"
 npm run query -- related "projects/alpha" --limit 5
 
+# Read just a note's frontmatter, or summarize the whole vault
+npm run query -- frontmatter "projects/alpha"
+npm run query -- stats
+
 # --- Writing ---
 
 # Create a note (inline, from a --file, or from stdin)
 npm run query -- write "inbox/idea" "# Idea\n\nbody"
 npm run query -- write "inbox/idea" --file draft.md --overwrite
 
-# Append text to a note
+# Append or prepend text to a note (prepend inserts after any frontmatter)
 npm run query -- append "daily/2026-07-22" "one more thing"
+npm run query -- prepend "daily/2026-07-22" "> top banner"
 
 # Tags and frontmatter (no whole-note rewrite)
 npm run query -- add-tag "projects/alpha" project active
@@ -140,8 +147,20 @@ npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
 npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
 npm run query -- replace-section "projects/alpha" "Summary" "new summary"
 
-# Delete a note
+# Move / rename a note (rewrites wikilinks that point to it)
+npm run query -- move "projects/alpha" "archive/alpha"
+npm run query -- move "projects/alpha" "archive/alpha" --no-update-links
+
+# Move an arbitrary file (attachment/image); no link rewriting
+npm run query -- move-file "assets/old.png" "assets/new.png"
+
+# Literal find/replace patch on a note
+npm run query -- patch "projects/alpha" "old text" "new text"
+npm run query -- patch "projects/alpha" "TODO" "DONE" --all
+
+# Delete a note (trash-safe by default; recoverable from .trash)
 npm run query -- delete "inbox/idea"
+npm run query -- delete "inbox/idea" --permanent
 
 # For content that begins with "-" (markdown lists), pipe it via stdin or --file:
 printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"
@@ -254,6 +273,23 @@ Find the notes most related to a given note and rank them — associative recall
 
 **Returns:** Array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
 
+### get_frontmatter
+
+Read just a note's parsed frontmatter (YAML metadata), without its body — a cheap way to inspect status, aliases, dates, or custom fields before reading or editing the whole note.
+
+**Parameters:**
+- `path` (string, required): Relative note path (with or without `.md`)
+
+**Returns:** `{ path, frontmatter }` where `frontmatter` is the parsed YAML as an object (empty when the note has none).
+
+### get_vault_stats
+
+Summarize the whole vault in a single call, derived entirely from the shared index.
+
+**Parameters:** none
+
+**Returns:** `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with neither inbound nor outbound resolved links; the time bounds are ISO timestamps (`null` for an empty vault).
+
 ### write_note
 
 Create a note, or overwrite an existing one.
@@ -276,14 +312,61 @@ Append text to the end of a note.
 
 **Returns:** `{ path, created }`
 
-### delete_note
+### prepend_note
 
-Delete a note from the vault. Errors if it does not exist.
+Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it (never before the YAML fence).
 
 **Parameters:**
 - `path` (string, required): Relative note path
+- `content` (string, required): Text to prepend
+- `create` (boolean, optional): Create the note if it does not exist (default: false)
 
-**Returns:** `{ path, deleted }`
+**Returns:** `{ path, created }`
+
+### delete_note
+
+Delete a note. **Trash-safe by default:** the note is moved to the vault's `.trash` folder (Obsidian's convention, ignored by the index) so the deletion is recoverable; repeated trashings of the same name get a numeric suffix. Errors if the note does not exist.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `permanent` (boolean, optional): Unlink the file outright instead of trashing it (default: false)
+
+**Returns:** `{ path, deleted, trashed, trash_path? }`
+
+### move_note
+
+Move or rename a note. By default every `[[wikilink]]` elsewhere in the vault that pointed to the old location is rewritten to the new one — full-path links become the new full path, bare-basename links become the new basename, and aliases and `#anchors` are preserved — so the link graph is never broken.
+
+**Parameters:**
+- `from` (string, required): Current relative note path (with or without `.md`)
+- `to` (string, required): New relative note path
+- `overwrite` (boolean, optional): Allow replacing an existing note at the destination (default: false)
+- `update_links` (boolean, optional): Rewrite wikilinks that point to this note (default: true)
+
+**Returns:** `{ from, to, overwritten, updated_notes, updated_links }`
+
+### move_file
+
+Move or rename an arbitrary file (attachments, images, or notes referenced by literal path). Treats the path literally — no `.md` is appended and no wikilinks are rewritten.
+
+**Parameters:**
+- `from` (string, required): Current relative file path (with extension)
+- `to` (string, required): New relative file path (with extension)
+- `overwrite` (boolean, optional): Allow replacing an existing file at the destination (default: false)
+
+**Returns:** `{ from, to, overwritten }`
+
+### patch_note
+
+Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex — no injection or catastrophic-backtracking risk). Errors if the text to find is absent, so a stale patch fails loudly rather than silently doing nothing.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `find` (string, required): Exact literal text to find
+- `replace` (string, required): Replacement text
+- `all` (boolean, optional): Replace every occurrence instead of only the first (default: false)
+
+**Returns:** `{ path, replacements }`
 
 ### add_tag / remove_tag
 

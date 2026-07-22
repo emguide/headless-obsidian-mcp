@@ -60,6 +60,25 @@ export function resolveNotePath(vaultPath: string, notePath: string): string {
 }
 
 /**
+ * Resolve a user-supplied path (any file, not just a note) to an absolute path
+ * inside the vault, guarding against path-traversal escapes. Unlike
+ * {@link resolveNotePath} this does not append a `.md` suffix, so it is used for
+ * attachments and for the `.trash` folder when trashing a note.
+ */
+export function resolveVaultFile(vaultPath: string, filePath: string): string {
+  if (!filePath || typeof filePath !== "string") {
+    throw new Error("File path must be a non-empty string");
+  }
+  const resolvedVault = resolve(vaultPath);
+  const fullPath = resolve(join(vaultPath, filePath));
+  const relativePath = relative(resolvedVault, fullPath);
+  if (relativePath.startsWith("..") || relativePath.includes(".." + sep)) {
+    throw new Error("Invalid file path: path traversal not allowed");
+  }
+  return fullPath;
+}
+
+/**
  * Recursively walk the vault and return every markdown file, skipping hidden
  * and machinery directories. Filesystem metadata is collected but file
  * contents are not read. Results are sorted by path for deterministic output.
@@ -167,6 +186,33 @@ export function extractLinkTargets(content: string): string[] {
     if (target) targets.push(target);
   }
   return targets;
+}
+
+/**
+ * Rewrite the note targets of every wikilink/embed in `content`. For each link,
+ * `mapTarget` receives the bare target (alias + `#anchor` stripped, trimmed) and
+ * returns a replacement target, or null to leave the link untouched. The embed
+ * prefix (`!`), display alias (`|alias`), and anchor (`#heading`) are preserved.
+ * Returns the rewritten content and the number of links changed.
+ */
+export function rewriteWikilinks(
+  content: string,
+  mapTarget: (target: string) => string | null
+): { content: string; changed: number } {
+  let changed = 0;
+  const next = content.replace(/(!?)\[\[([^\]]+)\]\]/g, (whole, bang: string, inner: string) => {
+    const pipe = inner.indexOf("|");
+    const left = pipe === -1 ? inner : inner.slice(0, pipe);
+    const alias = pipe === -1 ? "" : inner.slice(pipe); // includes leading "|"
+    const hash = left.indexOf("#");
+    const target = hash === -1 ? left : left.slice(0, hash);
+    const anchor = hash === -1 ? "" : left.slice(hash); // includes leading "#"
+    const replacement = mapTarget(target.trim());
+    if (replacement == null) return whole;
+    changed++;
+    return `${bang}[[${replacement}${anchor}${alias}]]`;
+  });
+  return { content: next, changed };
 }
 
 /** Extract the first markdown heading (`# ...`) from note content, if any. */

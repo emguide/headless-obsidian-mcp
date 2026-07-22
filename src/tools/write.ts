@@ -1,6 +1,7 @@
-import { readFile, writeFile, mkdir, unlink, stat } from "node:fs/promises";
-import { dirname } from "node:path";
-import { resolveNotePath } from "./vault.js";
+import { readFile, writeFile, mkdir, unlink, rename, stat } from "node:fs/promises";
+import { dirname, join, sep } from "node:path";
+import { getIndex } from "./vault-index.js";
+import { resolveNotePath, resolveVaultFile, rewriteWikilinks } from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
 import {
   NoteDocument,
@@ -20,7 +21,11 @@ import {
 export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "write_note",
   "append_note",
+  "prepend_note",
   "delete_note",
+  "move_note",
+  "move_file",
+  "patch_note",
   "add_tag",
   "remove_tag",
   "set_frontmatter",
@@ -48,20 +53,31 @@ async function fileExists(fullPath: string): Promise<boolean> {
   }
 }
 
+/** Resolve + path-guard a note path and write it, creating parent dirs. */
+async function writeResolved(
+  vaultPath: string,
+  notePath: string,
+  content: string
+): Promise<void> {
+  const fullPath = resolveNotePath(vaultPath, notePath);
+  await mkdir(dirname(fullPath), { recursive: true });
+  await writeFile(fullPath, content, "utf-8");
+}
+
 /**
- * The single funnel every mutation passes through: resolve + path-guard the
- * target, take the pre-write git snapshot (fail-closed when enabled), then
+ * The single funnel every mutation passes through: take the pre-write git
+ * snapshot (fail-closed when enabled), then resolve + path-guard the target and
  * write the file. Centralizing this keeps the safety guarantees in one place.
+ * Operations that touch several files (e.g. move_note updating backlinks) take
+ * the snapshot once and then call {@link writeResolved} directly.
  */
 async function commitWrite(
   vaultPath: string,
   notePath: string,
   content: string
 ): Promise<void> {
-  const fullPath = resolveNotePath(vaultPath, notePath);
   await snapshotBeforeWrite(vaultPath);
-  await mkdir(dirname(fullPath), { recursive: true });
-  await writeFile(fullPath, content, "utf-8");
+  await writeResolved(vaultPath, notePath, content);
 }
 
 /** Read an existing note's raw text, or throw a friendly not-found error. */
@@ -144,17 +160,268 @@ export async function appendNote(
   return { path: canonicalName(path), created: false };
 }
 
+export interface PrependNoteParams {
+  path: string;
+  content: string;
+  /** Create the note if it does not exist. Default false. */
+  create?: boolean;
+}
+
+/**
+ * Prepend text to the start of a note's body. Any frontmatter block is
+ * preserved byte-for-byte and the text is inserted after it (never before the
+ * YAML fence), so the note's metadata stays intact.
+ */
+export async function prependNote(
+  vaultPath: string,
+  { path, content, create = false }: PrependNoteParams
+): Promise<{ path: string; created: boolean }> {
+  if (typeof content !== "string") throw new Error("content must be a string");
+  const fullPath = resolveNotePath(vaultPath, path);
+  const existed = await fileExists(fullPath);
+  if (!existed) {
+    if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
+    await commitWrite(vaultPath, path, content.endsWith("\n") ? content : content + "\n");
+    return { path: canonicalName(path), created: true };
+  }
+  const raw = await readRaw(vaultPath, path);
+  const doc = NoteDocument.parse(raw);
+  const insert = content.endsWith("\n") ? content : content + "\n";
+  doc.body = insert + doc.body;
+  await commitWrite(vaultPath, path, doc.serialize());
+  return { path: canonicalName(path), created: false };
+}
+
+export interface DeleteNoteOptions {
+  /** Permanently unlink the file instead of moving it to the vault's .trash. */
+  permanent?: boolean;
+}
+
+/**
+ * Delete a note. By default this is trash-safe: the note is moved to a `.trash`
+ * folder inside the vault (Obsidian's convention, ignored by the index) so the
+ * deletion is recoverable. Pass `permanent: true` to unlink it outright. Errors
+ * if the note does not exist.
+ */
 export async function deleteNote(
   vaultPath: string,
-  notePath: string
-): Promise<{ path: string; deleted: boolean }> {
+  notePath: string,
+  { permanent = false }: DeleteNoteOptions = {}
+): Promise<{ path: string; deleted: boolean; trashed: boolean; trash_path?: string }> {
   const fullPath = resolveNotePath(vaultPath, notePath);
   if (!(await fileExists(fullPath))) {
     throw new Error(`Note not found: ${canonicalName(notePath)}`);
   }
   await snapshotBeforeWrite(vaultPath);
-  await unlink(fullPath);
-  return { path: canonicalName(notePath), deleted: true };
+
+  if (permanent) {
+    await unlink(fullPath);
+    return { path: canonicalName(notePath), deleted: true, trashed: false };
+  }
+
+  // Move into `.trash`, preserving the note's relative path. If a note of the
+  // same name was trashed before, disambiguate with a numeric suffix rather
+  // than clobbering the earlier copy.
+  const canon = canonicalName(notePath);
+  let trashRel = join(".trash", `${canon}.md`);
+  let trashFull = resolveVaultFile(vaultPath, trashRel);
+  for (let n = 1; await fileExists(trashFull); n++) {
+    trashRel = join(".trash", `${canon}-${n}.md`);
+    trashFull = resolveVaultFile(vaultPath, trashRel);
+  }
+  await mkdir(dirname(trashFull), { recursive: true });
+  await rename(fullPath, trashFull);
+  return {
+    path: canon,
+    deleted: true,
+    trashed: true,
+    trash_path: trashRel.split(sep).join("/"),
+  };
+}
+
+/* -------------------------------------------------------------- move/patch -- */
+
+export interface MoveNoteParams {
+  from: string;
+  to: string;
+  /** Allow replacing an existing note at the destination. Default false. */
+  overwrite?: boolean;
+  /** Rewrite wikilinks in other notes that point to the moved note. Default true. */
+  update_links?: boolean;
+}
+
+/**
+ * Move or rename a note. By default every wikilink elsewhere in the vault that
+ * pointed to the old location is rewritten to the new one (Obsidian's rename
+ * behaviour), so the link graph is never broken. Full-path links become the new
+ * full path; bare-basename links become the new basename. Refuses to overwrite
+ * an existing destination unless `overwrite` is set.
+ */
+export async function moveNote(
+  vaultPath: string,
+  { from, to, overwrite = false, update_links = true }: MoveNoteParams
+): Promise<{
+  from: string;
+  to: string;
+  overwritten: boolean;
+  updated_notes: number;
+  updated_links: number;
+}> {
+  const fromFull = resolveNotePath(vaultPath, from);
+  const toFull = resolveNotePath(vaultPath, to);
+  const fromCanon = canonicalName(from);
+  const toCanon = canonicalName(to);
+  if (fromCanon === toCanon) {
+    throw new Error("Source and destination are the same note");
+  }
+  if (!(await fileExists(fromFull))) {
+    throw new Error(`Note not found: ${fromCanon}`);
+  }
+  const destExisted = await fileExists(toFull);
+  if (destExisted && !overwrite) {
+    throw new Error(
+      `Note already exists: ${toCanon}. Pass overwrite:true to replace it.`
+    );
+  }
+
+  // Capture backlinks from the pre-move index before touching the filesystem.
+  let backlinks: string[] = [];
+  if (update_links) {
+    const index = await getIndex(vaultPath);
+    backlinks = index.backlinks(fromCanon);
+  }
+
+  await snapshotBeforeWrite(vaultPath);
+  await mkdir(dirname(toFull), { recursive: true });
+  await rename(fromFull, toFull);
+
+  let updatedNotes = 0;
+  let updatedLinks = 0;
+  if (update_links && backlinks.length > 0) {
+    const fromLower = fromCanon.toLowerCase();
+    const oldBase = fromCanon.split("/").pop()!.toLowerCase();
+    const newBase = toCanon.split("/").pop()!;
+    for (const backlink of backlinks) {
+      let raw: string;
+      try {
+        raw = await readFile(resolveNotePath(vaultPath, backlink), "utf-8");
+      } catch {
+        continue; // Backlink note vanished between index and now - skip.
+      }
+      const { content, changed } = rewriteWikilinks(raw, (target) => {
+        const norm = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
+        if (norm === fromLower) return toCanon; // full-path reference
+        if (!norm.includes("/") && norm === oldBase) return newBase; // basename reference
+        return null;
+      });
+      if (changed > 0) {
+        await writeResolved(vaultPath, backlink, content);
+        updatedNotes++;
+        updatedLinks += changed;
+      }
+    }
+  }
+
+  return {
+    from: fromCanon,
+    to: toCanon,
+    overwritten: destExisted,
+    updated_notes: updatedNotes,
+    updated_links: updatedLinks,
+  };
+}
+
+export interface MoveFileParams {
+  from: string;
+  to: string;
+  /** Allow replacing an existing file at the destination. Default false. */
+  overwrite?: boolean;
+}
+
+/** Normalize a raw file path to forward slashes for stable output. */
+function normalizeFilePath(filePath: string): string {
+  return filePath.replace(/\\/g, "/");
+}
+
+/**
+ * Move or rename an arbitrary file in the vault (attachments, images, or notes
+ * referenced by literal path). Unlike {@link moveNote} this treats the path
+ * literally - no `.md` is appended and no wikilinks are rewritten. Refuses to
+ * overwrite an existing destination unless `overwrite` is set.
+ */
+export async function moveFile(
+  vaultPath: string,
+  { from, to, overwrite = false }: MoveFileParams
+): Promise<{ from: string; to: string; overwritten: boolean }> {
+  const fromFull = resolveVaultFile(vaultPath, from);
+  const toFull = resolveVaultFile(vaultPath, to);
+  if (normalizeFilePath(from) === normalizeFilePath(to)) {
+    throw new Error("Source and destination are the same file");
+  }
+  if (!(await fileExists(fromFull))) {
+    throw new Error(`File not found: ${normalizeFilePath(from)}`);
+  }
+  const destExisted = await fileExists(toFull);
+  if (destExisted && !overwrite) {
+    throw new Error(
+      `File already exists: ${normalizeFilePath(to)}. Pass overwrite:true to replace it.`
+    );
+  }
+  await snapshotBeforeWrite(vaultPath);
+  await mkdir(dirname(toFull), { recursive: true });
+  await rename(fromFull, toFull);
+  return {
+    from: normalizeFilePath(from),
+    to: normalizeFilePath(to),
+    overwritten: destExisted,
+  };
+}
+
+export interface PatchNoteParams {
+  path: string;
+  /** Exact literal text to find. */
+  find: string;
+  /** Replacement text. */
+  replace: string;
+  /** Replace every occurrence instead of only the first. Default false. */
+  all?: boolean;
+}
+
+/**
+ * Apply a literal find/replace patch to a note's raw text. The match is an exact
+ * string (never a regex, so no injection or catastrophic-backtracking risk).
+ * Replaces the first occurrence by default, or every occurrence with `all`.
+ * Errors if the text to find is not present, so a stale patch fails loudly
+ * rather than silently doing nothing.
+ */
+export async function patchNote(
+  vaultPath: string,
+  { path, find, replace, all = false }: PatchNoteParams
+): Promise<{ path: string; replacements: number }> {
+  if (typeof find !== "string" || find.length === 0) {
+    throw new Error("find must be a non-empty string");
+  }
+  if (typeof replace !== "string") {
+    throw new Error("replace must be a string");
+  }
+  const raw = await readRaw(vaultPath, path);
+  if (!raw.includes(find)) {
+    throw new Error(`Text to patch was not found in ${canonicalName(path)}`);
+  }
+
+  let next: string;
+  let replacements: number;
+  if (all) {
+    const parts = raw.split(find);
+    replacements = parts.length - 1;
+    next = parts.join(replace);
+  } else {
+    replacements = 1;
+    const idx = raw.indexOf(find);
+    next = raw.slice(0, idx) + replace + raw.slice(idx + find.length);
+  }
+  await commitWrite(vaultPath, path, next);
+  return { path: canonicalName(path), replacements };
 }
 
 /* ------------------------------------------------------------------- tags -- */
