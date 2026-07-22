@@ -9,6 +9,7 @@ An MCP (Model Context Protocol) server for interacting with Obsidian notes. This
 - **List Notes**: Discover the vault as lightweight headers — a table of contents for agents
 - **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
 - **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
+- **Related Notes**: Associative recall — rank the notes most related to a given one (shared tags + link graph), no embeddings required
 - **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter
 - **Write & Edit** (opt-in): Create, overwrite, append, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
 - **Structure-aware edits**: Add/remove tags, set frontmatter, and add/append/replace sections without rewriting the whole note — saving agent tokens
@@ -115,6 +116,10 @@ npm run query -- find-by-tag productivity project --all
 # List the most recent notes (by mtime, or a frontmatter date field)
 npm run query -- recent --limit 10
 npm run query -- recent --date-field updated --since 2024-01-01
+
+# Find the notes most related to a given one (ranked, with reasons)
+npm run query -- related "projects/alpha"
+npm run query -- related "projects/alpha" --limit 5
 
 # --- Writing ---
 
@@ -239,6 +244,16 @@ List notes ordered by recency, newest first.
 
 **Returns:** Array of note headers (same shape as `list_notes`).
 
+### get_related_notes
+
+Find the notes most related to a given note and rank them — associative recall over the vault, computed entirely from the shared index with no embeddings or model. Relatedness is a transparent weighted blend of four signals: a **direct link** in either direction (weight 4), each **shared tag** (weight 3), each **shared out-link** (a note both link to — co-reference, weight 2), and each **shared backlink** (a note that links to both — co-citation, weight 2). Notes with no connecting signal are omitted.
+
+**Parameters:**
+- `path` (string, required): Relative note path (with or without `.md`)
+- `limit` (number, optional): Maximum number of related notes to return (default: 10)
+
+**Returns:** Array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
+
 ### write_note
 
 Create a note, or overwrite an existing one.
@@ -351,6 +366,9 @@ await list_notes({ folder: "projects", limit: 20 });
 // Traverse: follow the link graph
 await get_links({ path: "projects/my-project" });
 
+// Recall: what else is relevant to this note?
+await get_related_notes({ path: "projects/my-project", limit: 5 });
+
 // Retrieve by curation: notes tagged both #project and #active
 await find_by_tag({ tags: ["project", "active"], match: "all" });
 
@@ -442,4 +460,4 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
+After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).

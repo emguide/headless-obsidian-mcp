@@ -14,6 +14,7 @@ import { listNotes } from "./tools/list.js";
 import { getLinks } from "./tools/links.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
+import { getRelatedNotes } from "./tools/related.js";
 import {
   writeNote,
   appendNote,
@@ -37,6 +38,7 @@ import {
   ListNotesParams,
   FindByTagParams,
   RecentNotesParams,
+  RelatedNotesParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -191,6 +193,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Frontmatter equality filters, e.g. { \"status\": \"active\" }"
             }
           }
+        }
+      },
+      {
+        name: "get_related_notes",
+        description: "Find the notes most related to a given note, ranked, without embeddings: a transparent blend of shared tags, direct links, shared out-links (co-reference), and shared backlinks (co-citation). Each result carries the reasons it surfaced. Use it for associative recall - 'I'm looking at X, what else is relevant?'",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Relative note path (with or without .md extension)"
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of related notes to return (default: 10)"
+            }
+          },
+          required: ["path"]
         }
       },
       {
@@ -396,6 +416,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "list_recent_notes": {
         const results = await listRecentNotes(VAULT_PATH, (args ?? {}) as RecentNotesParams);
+        return {
+          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+        };
+      }
+
+      case "get_related_notes": {
+        const results = await getRelatedNotes(VAULT_PATH, (args ?? {}) as unknown as RelatedNotesParams);
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
         };

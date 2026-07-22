@@ -9,6 +9,7 @@ import { listNotes } from "./tools/list.js";
 import { getLinks } from "./tools/links.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
+import { getRelatedNotes } from "./tools/related.js";
 import {
   writeNote,
   appendNote,
@@ -53,6 +54,8 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await findByTag(VAULT_PATH!, args);
     } else if (toolName === "list_recent_notes") {
       result = await listRecentNotes(VAULT_PATH!, args);
+    } else if (toolName === "get_related_notes") {
+      result = await getRelatedNotes(VAULT_PATH!, args);
     } else if (toolName === "write_note") {
       result = await writeNote(VAULT_PATH!, args);
     } else if (toolName === "append_note") {
@@ -189,6 +192,20 @@ program
       ...(options.dateField && { date_field: options.dateField })
     };
     await queryTool("list_recent_notes", args, verbose);
+  });
+
+program
+  .command("related")
+  .description("Find the notes most related to a given note, ranked with reasons")
+  .argument("<path>", "Relative note path")
+  .option("-l, --limit <n>", "Maximum number of related notes to return (default: 10)")
+  .action(async (path: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      path,
+      ...(options.limit && { limit: parseInt(options.limit, 10) }),
+    };
+    await queryTool("get_related_notes", args, verbose);
   });
 
 function readContent(inline: string | undefined, file: string | undefined): string {
