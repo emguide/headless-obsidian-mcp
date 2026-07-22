@@ -38,8 +38,12 @@ export class NoteDocument {
     }
     const block = raw.slice(0, match[0].length);
     const body = raw.slice(match[0].length);
-    // Reuse gray-matter (js-yaml) for the actual YAML parse.
-    // Clone the data object to avoid sharing cached state between parses.
+    // gray-matter caches parsed results by content string and returns the SAME
+    // `data` object on repeat parses of identical text. Our write path mutates
+    // doc.data in place, so without a clone those mutations would leak between
+    // separate parses of same-content notes. structuredClone isolates each parse.
+    // (Edge: a YAML !!binary value becomes a Uint8Array rather than a Buffer —
+    // irrelevant for Obsidian frontmatter, which holds scalars and flat arrays.)
     const data = structuredClone((matter(raw).data ?? {})) as Record<string, unknown>;
     return new NoteDocument(data, body, block);
   }
