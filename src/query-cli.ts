@@ -27,7 +27,16 @@ import {
   addNoteSection,
   appendNoteSection,
   replaceNoteSection,
+  addNotePropertyValues,
+  removeNotePropertyValues,
+  renameNoteProperty,
 } from "./tools/write.js";
+import {
+  listProperties,
+  getPropertyValues,
+  queryNotes,
+  getProperty,
+} from "./tools/properties.js";
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH;
 if (!VAULT_PATH) {
@@ -95,6 +104,20 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await appendNoteSection(VAULT_PATH!, args);
     } else if (toolName === "replace_section") {
       result = await replaceNoteSection(VAULT_PATH!, args);
+    } else if (toolName === "list_properties") {
+      result = await listProperties(VAULT_PATH!, args);
+    } else if (toolName === "get_property_values") {
+      result = await getPropertyValues(VAULT_PATH!, args);
+    } else if (toolName === "query_notes") {
+      result = await queryNotes(VAULT_PATH!, args);
+    } else if (toolName === "get_property") {
+      result = await getProperty(VAULT_PATH!, args);
+    } else if (toolName === "add_property_values") {
+      result = await addNotePropertyValues(VAULT_PATH!, args);
+    } else if (toolName === "remove_property_values") {
+      result = await removeNotePropertyValues(VAULT_PATH!, args);
+    } else if (toolName === "rename_property") {
+      result = await renameNoteProperty(VAULT_PATH!, args);
     } else {
       throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -467,6 +490,64 @@ program
       content: readContent(content, options.file),
     };
     await queryTool("replace_section", args, verbose);
+  });
+
+program
+  .command("properties")
+  .description("List the frontmatter property schema (keys, counts, types)")
+  .option("--no-tags", "Omit the tags key")
+  .action(async (options: any, command: Command) => {
+    await queryTool("list_properties", { include_tags: options.tags }, command.parent?.opts().verbose);
+  });
+
+program
+  .command("property-values <key>")
+  .description("List distinct values of a property with counts")
+  .option("-l, --limit <n>", "Maximum number of values", (v) => parseInt(v, 10))
+  .action(async (key: string, options: any, command: Command) => {
+    await queryTool("get_property_values", { key, limit: options.limit }, command.parent?.opts().verbose);
+  });
+
+program
+  .command("query")
+  .description("Find notes by frontmatter condition (JSON where object)")
+  .requiredOption("--where <json>", "Conditions as a JSON object")
+  .option("--match <mode>", "all (default) or any", "all")
+  .option("-l, --limit <n>", "Maximum number of notes", (v) => parseInt(v, 10))
+  .action(async (options: any, command: Command) => {
+    await queryTool(
+      "query_notes",
+      { where: JSON.parse(options.where), match: options.match, limit: options.limit },
+      command.parent?.opts().verbose
+    );
+  });
+
+program
+  .command("get-property <path> <key>")
+  .description("Read one frontmatter property from a note")
+  .action(async (path: string, key: string, _options: any, command: Command) => {
+    await queryTool("get_property", { path, key }, command.parent?.opts().verbose);
+  });
+
+program
+  .command("add-property-values <path> <key> <values...>")
+  .description("Add values to an array-valued property")
+  .action(async (path: string, key: string, values: string[], _options: any, command: Command) => {
+    await queryTool("add_property_values", { path, key, values }, command.parent?.opts().verbose);
+  });
+
+program
+  .command("remove-property-values <path> <key> <values...>")
+  .description("Remove values from an array-valued property")
+  .action(async (path: string, key: string, values: string[], _options: any, command: Command) => {
+    await queryTool("remove_property_values", { path, key, values }, command.parent?.opts().verbose);
+  });
+
+program
+  .command("rename-property <path> <from> <to>")
+  .description("Rename a frontmatter property key in a note")
+  .action(async (path: string, from: string, to: string, _options: any, command: Command) => {
+    await queryTool("rename_property", { path, from, to }, command.parent?.opts().verbose);
   });
 
 program.parseAsync(process.argv);
