@@ -218,6 +218,84 @@ export function setFrontmatter(
   return changed;
 }
 
+/**
+ * Add values to the array-valued property `key` (idempotent). Creates the array
+ * if the key is absent; promotes an existing scalar to `[old, ...new]`. Each
+ * added value is validated. Returns the resulting array, or null if unchanged.
+ */
+export function addPropertyValues(
+  doc: NoteDocument,
+  key: string,
+  values: unknown[]
+): unknown[] | null {
+  const current = doc.data[key];
+  const base: unknown[] =
+    current == null ? [] : Array.isArray(current) ? [...current] : [current];
+  let changed = false;
+  for (const value of values) {
+    validateFrontmatterValue(key, value);
+    if (!base.some((v) => v === value)) {
+      base.push(value);
+      changed = true;
+    }
+  }
+  if (!changed) return null;
+  doc.data[key] = base;
+  doc.markFrontmatterDirty();
+  return base;
+}
+
+/**
+ * Remove values from the array-valued property `key`. An emptied array drops the
+ * key. Returns the resulting array (possibly empty), or null if nothing matched.
+ */
+export function removePropertyValues(
+  doc: NoteDocument,
+  key: string,
+  values: unknown[]
+): unknown[] | null {
+  const current = doc.data[key];
+  const base: unknown[] =
+    current == null ? [] : Array.isArray(current) ? [...current] : [current];
+  const remove = new Set(values);
+  const next = base.filter((v) => !remove.has(v));
+  if (next.length === base.length) return null;
+
+  if (next.length === 0) {
+    delete doc.data[key];
+  } else {
+    doc.data[key] = next;
+  }
+  doc.markFrontmatterDirty();
+  return next;
+}
+
+/**
+ * Rename frontmatter key `from` to `to`, preserving the value. Throws if `from`
+ * is absent or `to` already exists (no silent clobber). Returns true on success.
+ */
+export function renameProperty(
+  doc: NoteDocument,
+  from: string,
+  to: string
+): boolean {
+  if (!(from in doc.data)) {
+    throw new Error(`Property "${from}" not found`);
+  }
+  if (to in doc.data) {
+    throw new Error(`Property "${to}" already exists`);
+  }
+  // Rebuild in insertion order with the key swapped in place, so the renamed
+  // key keeps its position in the serialized YAML.
+  const rebuilt: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(doc.data)) {
+    rebuilt[k === from ? to : k] = v;
+  }
+  doc.data = rebuilt;
+  doc.markFrontmatterDirty();
+  return true;
+}
+
 /* -------------------------------------------------------------- sections -- */
 
 interface Heading {
