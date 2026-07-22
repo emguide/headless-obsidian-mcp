@@ -91,7 +91,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const tools = [
       {
         name: "search_notes",
-        description: "Search through Obsidian notes using ripgrep. Returns matching notes with context lines.",
+        description: "Search through Obsidian notes using ripgrep. Returns matching notes with context lines, bounded by file and per-file match caps to avoid flooding context. Returns { results, truncated, files_returned, files_omitted, matches_capped_in }.",
         inputSchema: {
           type: "object",
           properties: {
@@ -114,6 +114,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             context_lines: {
               type: "number",
               description: "Number of context lines to show (default: 5)"
+            },
+            limit: {
+              type: "number",
+              description: "Max number of files (result entries) to return (default: 20, 0 = unlimited)"
+            },
+            max_matches_per_file: {
+              type: "number",
+              description: "Max matches to return per file (default: 20, 0 = unlimited)"
             }
           },
           required: ["pattern"]
