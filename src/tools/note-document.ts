@@ -127,6 +127,65 @@ export function removeTags(doc: NoteDocument, tags: string[]): string[] | null {
   return next;
 }
 
+/* ----------------------------------------------------------- validation -- */
+
+/** Scalar frontmatter values: what a property (or array element) may hold. */
+export function isScalar(v: unknown): boolean {
+  return (
+    v == null ||
+    typeof v === "string" ||
+    typeof v === "number" ||
+    typeof v === "boolean"
+  );
+}
+
+// Markdown markup we forbid in property strings. Bare URLs / plain punctuation
+// are intentionally allowed — only genuine markup is rejected.
+const MARKDOWN_PATTERNS: RegExp[] = [
+  /!?\[\[[^\]]*\]\]/, // [[wikilink]] or ![[embed]]
+  /\[[^\]]*\]\([^)]*\)/, // [text](url)
+  /\*\*[^*]+\*\*/, // **bold**
+  /__[^_]+__/, // __bold__
+  /`[^`]*`/, // `code`
+  /^\s*#{1,6}\s+\S/, // # heading
+  /^\s*[-*+]\s+\S/, // - / * / + list bullet
+];
+
+function assertNoMarkdown(key: string, value: string): void {
+  if (MARKDOWN_PATTERNS.some((re) => re.test(value))) {
+    throw new Error(
+      `Property "${key}" contains markdown syntax; frontmatter values must be plain text`
+    );
+  }
+}
+
+/**
+ * Enforce the frontmatter property rules on a single value the caller is about
+ * to write: no nested objects (maps), no arrays of non-scalars, and no markdown
+ * markup inside string values or string array elements. Scalars, null, and flat
+ * arrays of scalars pass. Throws a descriptive Error on any violation.
+ */
+export function validateFrontmatterValue(key: string, value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const el of value) {
+      if (!isScalar(el)) {
+        throw new Error(
+          `Property "${key}" is an array containing a non-scalar element; ` +
+            `only flat arrays of scalars are allowed`
+        );
+      }
+      if (typeof el === "string") assertNoMarkdown(key, el);
+    }
+    return;
+  }
+  if (!isScalar(value)) {
+    throw new Error(
+      `Property "${key}" is a nested object; frontmatter values must be scalars or flat arrays of scalars`
+    );
+  }
+  if (typeof value === "string") assertNoMarkdown(key, value);
+}
+
 /* ----------------------------------------------------------- frontmatter -- */
 
 /**
