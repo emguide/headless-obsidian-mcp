@@ -549,6 +549,8 @@ After updating the configuration, restart Claude Desktop. The server will appear
 
 This project began as a Node.js port of [notes-mcp](https://github.com/boazy/notes-mcp) by Boaz Yaniv, and has since been substantially extended with knowledge-base, structure-aware editing, and vault-management tools. The original is MIT licensed; that license and copyright are retained in [LICENSE](LICENSE).
 
+Thanks also to [mcpvault](https://github.com/bitbonsai/mcpvault) by bitbonsai, whose Obsidian MCP server was a useful reference while shaping this project's tool surface.
+
 ## License
 
 Released under the [MIT License](LICENSE).
