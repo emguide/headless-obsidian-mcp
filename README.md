@@ -6,6 +6,10 @@ An MCP (Model Context Protocol) server for interacting with Obsidian notes. This
 
 - **Search Notes**: Full-text search through your Obsidian vault using ripgrep
 - **Read Notes**: Parse and extract content, metadata, and tags from notes
+- **List Notes**: Discover the vault as lightweight headers — a table of contents for agents
+- **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
+- **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
+- **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **Frontmatter Support**: Extracts YAML frontmatter as structured metadata
 - **Tag Extraction**: Automatically identifies and extracts Obsidian tags
@@ -77,6 +81,24 @@ npm run query -- search "pattern" --context 10
 npm run query -- read "daily-notes/2024-01-15"
 npm run query -- read "note1" "folder/note2"
 
+# List notes as lightweight headers (optionally scoped/limited)
+npm run query -- list
+npm run query -- list --folder projects --limit 20
+
+# Show outbound links, unresolved links, and backlinks for a note
+npm run query -- links "projects/alpha"
+
+# List all tags with note counts
+npm run query -- tags
+
+# Find notes by tag (default: any; --all requires every tag)
+npm run query -- find-by-tag productivity
+npm run query -- find-by-tag productivity project --all
+
+# List the most recent notes (by mtime, or a frontmatter date field)
+npm run query -- recent --limit 10
+npm run query -- recent --date-field updated --since 2024-01-01
+
 # Use verbose mode to see the request being sent
 npm run query -- --verbose search "pattern"
 npm run query -- --verbose read "note1"
@@ -116,6 +138,62 @@ Read and parse one or more notes from your vault.
 - `metadata`: Parsed frontmatter as JSON object
 - `tags`: Array of extracted Obsidian tags
 
+### list_notes
+
+List notes in the vault as lightweight headers, without full contents. Use it to discover what exists before searching or reading.
+
+**Parameters:**
+- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
+- `limit` (number, optional): Maximum number of notes to return
+
+**Returns:** Array of note headers with `path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, and `modified` (ISO timestamp).
+
+### get_links
+
+Resolve the Obsidian link graph for a note.
+
+**Parameters:**
+- `path` (string, required): Relative note path (with or without .md extension)
+
+**Returns:** An object with:
+- `note`: Canonical path of the inspected note
+- `outbound_links`: Resolved `[[wikilinks]]`, each with the raw `target` and resolved `path`
+- `unresolved_links`: Wikilink targets that resolve to no note
+- `backlinks`: Notes elsewhere in the vault that link to this one
+
+Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`; links resolve by full relative path or basename.
+
+### list_tags
+
+Aggregate every tag across the vault, unifying inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`.
+
+**Parameters:** none
+
+**Returns:** Array of `{ tag, count }` sorted by frequency.
+
+### find_by_tag
+
+Find notes matching one or more tags.
+
+**Parameters:**
+- `tags` (array, required): Tags to match (with or without leading `#`)
+- `match` (string, optional): `"any"` (default) or `"all"`
+- `limit` (number, optional): Maximum number of notes to return
+
+**Returns:** Array of note headers (same shape as `list_notes`).
+
+### list_recent_notes
+
+List notes ordered by recency, newest first.
+
+**Parameters:**
+- `limit` (number, optional): Maximum number of notes to return (default: 20)
+- `since` (string, optional): Only include notes on or after this ISO date
+- `date_field` (string, optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
+- `where` (object, optional): Frontmatter equality filters, e.g. `{ "status": "active" }`
+
+**Returns:** Array of note headers (same shape as `list_notes`).
+
 ## Example Usage
 
 Once connected to an MCP client, you can:
@@ -131,6 +209,18 @@ await search_notes({
 await read_notes({
   paths: ["daily-notes/2024-01-15", "projects/my-project"]
 });
+
+// Orient: list notes under a folder
+await list_notes({ folder: "projects", limit: 20 });
+
+// Traverse: follow the link graph
+await get_links({ path: "projects/my-project" });
+
+// Retrieve by curation: notes tagged both #project and #active
+await find_by_tag({ tags: ["project", "active"], match: "all" });
+
+// Stay current: recent notes, active only
+await list_recent_notes({ limit: 10, where: { status: "active" } });
 ```
 
 ## Configuration
@@ -178,4 +268,4 @@ Replace the paths with:
 - `/path/to/notes-mcp`: The absolute path to this project directory
 - `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
 
-After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the `search_notes` and `read_notes` tools.
+After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the `search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, and `list_recent_notes` tools.

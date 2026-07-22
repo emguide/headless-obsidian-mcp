@@ -32,6 +32,46 @@ This is an MCP (Model Context Protocol) server for interacting with Obsidian not
   - `tags`: Array of extracted Obsidian tags
 - **Security**: Protected against path traversal attacks, with file size limits (10MB per note)
 
+### list_notes
+- **Purpose**: Discover what exists in the vault. Returns lightweight note headers (no full contents), so an agent can orient itself before searching or reading.
+- **Input**:
+  - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `limit` (optional): Maximum number of notes to return
+- **Output**: Array of note headers with `path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, and `modified` (ISO timestamp)
+
+### get_links
+- **Purpose**: Resolve the Obsidian link graph for a note, turning the flat vault into a navigable graph.
+- **Input**: `path` (required) - Relative note path (with or without .md extension)
+- **Output**: Object with:
+  - `note`: The canonical path of the inspected note
+  - `outbound_links`: Resolved `[[wikilinks]]` (each with the raw `target` and resolved `path`)
+  - `unresolved_links`: Wikilink targets that do not resolve to any note
+  - `backlinks`: Notes elsewhere in the vault that link to this one
+- **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default).
+- **Security**: Path traversal protected via the same guard as read_notes.
+
+### list_tags
+- **Purpose**: Show the vault's topic index. Returns every tag with the number of notes using it, sorted by frequency.
+- **Input**: none
+- **Output**: Array of `{ tag, count }`. Unifies inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`.
+
+### find_by_tag
+- **Purpose**: High-precision retrieval by human curation.
+- **Input**:
+  - `tags` (required): Array of tags to match (with or without leading `#`)
+  - `match` (optional): `"any"` (default) or `"all"`
+  - `limit` (optional): Maximum number of notes to return
+- **Output**: Array of note headers (same shape as `list_notes`)
+
+### list_recent_notes
+- **Purpose**: Find current material. Returns notes ordered by recency (newest first).
+- **Input**:
+  - `limit` (optional): Maximum number of notes to return (default: 20)
+  - `since` (optional): Only include notes on or after this ISO date
+  - `date_field` (optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
+  - `where` (optional): Frontmatter equality filters, e.g. `{ "status": "active" }` (matches array members too)
+- **Output**: Array of note headers (same shape as `list_notes`)
+
 ## Dependencies
 
 - Node.js runtime (18+)
@@ -64,6 +104,15 @@ npm run query -- search "pattern" --context 10         # Custom context lines
 # Read examples
 npm run query -- read "note1" "folder/note2"           # Read multiple notes
 npm run query -- --verbose search "pattern"            # Verbose mode
+
+# Knowledge-base examples
+npm run query -- list                                   # List all notes (headers)
+npm run query -- list --folder projects --limit 20     # Scope to a folder
+npm run query -- links "projects/alpha"                # Outbound links + backlinks
+npm run query -- tags                                   # All tags with counts
+npm run query -- find-by-tag productivity project --all # Notes with all tags
+npm run query -- recent --limit 10                     # Most recently modified
+npm run query -- recent --date-field updated --since 2026-07-01
 ```
 
 (With mise: `mise run query -- search "productivity"`, etc.)
