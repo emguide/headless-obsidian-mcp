@@ -213,3 +213,18 @@ export interface OutlineResult {
   path: string;
   outline: OutlineEntry[];
 }
+
+export interface ReadSectionParams {
+  path: string;
+  section: string;
+  include_subsections?: boolean;
+}
+
+export interface SectionResult {
+  path: string;
+  /** The resolved full heading-path. */
+  section: string;
+  level: number;
+  /** Heading line + body slice, verbatim. Frontmatter excluded. */
+  content: string;
+}
