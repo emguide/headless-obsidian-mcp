@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { relative } from "node:path";
-import { SearchNotesParams, SearchResult } from "../types.js";
+import { SearchNotesParams, SearchResult, SearchNotesResponse } from "../types.js";
 
 interface RipgrepResult {
   stdout: string;
@@ -33,13 +33,15 @@ function runRipgrep(args: string[]): Promise<RipgrepResult> {
   });
 }
 
-export async function searchNotes(vaultPath: string, params: SearchNotesParams): Promise<SearchResult[]> {
+export async function searchNotes(vaultPath: string, params: SearchNotesParams): Promise<SearchNotesResponse> {
   const {
     pattern,
     case_sensitive = false,
     whole_word = false,
     multiline = false,
-    context_lines = 5
+    context_lines = 5,
+    limit = 20,
+    max_matches_per_file = 20
   } = params;
 
   // Input validation
@@ -66,6 +68,14 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
 
   if (!Number.isInteger(context_lines) || context_lines < 0 || context_lines > 100) {
     throw new Error('Context lines must be an integer between 0 and 100');
+  }
+
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error('limit must be a non-negative integer (0 = unlimited)');
+  }
+
+  if (!Number.isInteger(max_matches_per_file) || max_matches_per_file < 0) {
+    throw new Error('max_matches_per_file must be a non-negative integer (0 = unlimited)');
   }
 
   if (!vaultPath || typeof vaultPath !== 'string') {
@@ -102,59 +112,100 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
   }
 
   if (!stdout.trim()) {
-    return [];
+    return { results: [], truncated: false, files_returned: 0, files_omitted: 0, matches_capped_in: [] };
   }
 
   const results: SearchResult[] = [];
   const lines = stdout.trim().split('\n');
 
+  const fileLimit = limit;                       // 0 = unlimited
+  const matchLimit = max_matches_per_file;       // 0 = unlimited
+  const cappedFiles = new Set<string>();
+
   let currentFile = '';
   let currentMatches: SearchResult['matches'] = [];
+  let filesOmitted = 0;
+  let skippingCurrentFile = false; // true once fileLimit reached; count distinct extra files
+  let matchCapReachedForFile = false; // true once matchLimit reached within the current file
+
+  const flushCurrent = () => {
+    if (currentFile && currentMatches.length > 0) {
+      results.push({ path: currentFile, matches: currentMatches });
+    }
+  };
 
   for (const line of lines) {
+    let parsed: any;
     try {
-      const parsed = JSON.parse(line);
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
 
-      if (parsed.type === 'match') {
-        const relativePath = relative(vaultPath, parsed.data.path.text).replace(/\.md$/, '');
+    if (parsed.type === 'match') {
+      const relativePath = relative(vaultPath, parsed.data.path.text).replace(/\.md$/, '');
 
-        if (currentFile !== relativePath) {
-          if (currentFile && currentMatches.length > 0) {
-            results.push({ path: currentFile, matches: currentMatches });
-          }
-          currentFile = relativePath;
-          currentMatches = [];
-        }
+      if (currentFile !== relativePath) {
+        // New file boundary: flush the previous file's matches.
+        flushCurrent();
+        currentFile = relativePath;
+        currentMatches = [];
+        matchCapReachedForFile = false;
 
-        const contextBefore: string[] = [];
-        const contextAfter: string[] = [];
-
-        if (parsed.data.submatches && parsed.data.submatches.length > 0) {
-          currentMatches.push({
-            line_number: parsed.data.line_number,
-            content: parsed.data.lines.text,
-            context_before: contextBefore,
-            context_after: contextAfter
-          });
-        }
-      } else if (parsed.type === 'context') {
-        if (currentMatches.length > 0) {
-          const lastMatch = currentMatches[currentMatches.length - 1];
-          if (parsed.data.line_number < lastMatch.line_number) {
-            lastMatch.context_before.push(parsed.data.lines.text);
-          } else {
-            lastMatch.context_after.push(parsed.data.lines.text);
-          }
+        // Decide whether this new file fits under the file cap.
+        skippingCurrentFile = fileLimit > 0 && results.length >= fileLimit;
+        if (skippingCurrentFile) {
+          filesOmitted += 1;
         }
       }
-    } catch (e) {
-      continue;
+
+      if (skippingCurrentFile) {
+        continue;
+      }
+
+      if (parsed.data.submatches && parsed.data.submatches.length > 0) {
+        if (matchLimit > 0 && currentMatches.length >= matchLimit) {
+          matchCapReachedForFile = true;
+          cappedFiles.add(relativePath);
+          continue;
+        }
+        currentMatches.push({
+          line_number: parsed.data.line_number,
+          content: parsed.data.lines.text,
+          context_before: [],
+          context_after: []
+        });
+      }
+    } else if (parsed.type === 'context') {
+      if (skippingCurrentFile || matchCapReachedForFile) {
+        continue;
+      }
+      if (currentMatches.length > 0) {
+        const lastMatch = currentMatches[currentMatches.length - 1];
+        if (parsed.data.line_number < lastMatch.line_number) {
+          lastMatch.context_before.push(parsed.data.lines.text);
+        } else if (
+          !(matchLimit > 0 && currentMatches.length >= matchLimit) ||
+          lastMatch.context_after.length < context_lines
+        ) {
+          // Once the match buffer is full, only accept trailing context that
+          // still fits the LAST KEPT match's own context window (bounded by
+          // context_lines). Anything beyond that window, once the buffer is
+          // full, is context_before leakage from the next (dropped) match's
+          // context events arriving ahead of that match's own match event.
+          lastMatch.context_after.push(parsed.data.lines.text);
+        }
+      }
     }
   }
 
-  if (currentFile && currentMatches.length > 0) {
-    results.push({ path: currentFile, matches: currentMatches });
-  }
+  flushCurrent();
 
-  return results;
+  return {
+    results,
+    truncated: filesOmitted > 0 || cappedFiles.size > 0,
+    files_returned: results.length,
+    files_omitted: filesOmitted,
+    matches_capped_in: [...cappedFiles]
+  };
 }

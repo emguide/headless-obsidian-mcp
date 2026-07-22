@@ -86,7 +86,7 @@ test("read_notes tag extraction ignores URL anchors and numeric refs", async () 
 });
 
 test("search finds matches and returns paths without .md", async () => {
-  const results = await searchNotes(fx.vaultPath, { pattern: "productivity" });
+  const { results } = await searchNotes(fx.vaultPath, { pattern: "productivity" });
   const paths = results.map((r) => r.path).sort();
   assert.deepEqual(paths, ["Beta Note", "projects/alpha"]);
 });
