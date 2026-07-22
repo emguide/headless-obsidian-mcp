@@ -139,3 +139,18 @@ export interface RecentNotesParams {
   /** Frontmatter equality filters, e.g. { status: "active" }. */
   where?: Record<string, unknown>;
 }
+
+export interface RankedSearchParams {
+  /** Free-text query; ranked by BM25 relevance. */
+  query: string;
+  /** Maximum number of results to return. Default: 10. */
+  limit?: number;
+}
+
+/** A ranked search hit: a note header plus its relevance score and a snippet. */
+export interface RankedSearchResult extends NoteHeader {
+  /** BM25 relevance score (higher = more relevant). */
+  score: number;
+  /** Short excerpt around a matched term (best-effort). */
+  snippet: string;
+}
