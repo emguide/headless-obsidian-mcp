@@ -13,6 +13,27 @@ import {
   replaceSection,
 } from "./note-document.js";
 
+/**
+ * Names of every tool that mutates the vault. Used by the server to gate the
+ * write surface behind OBSIDIAN_ALLOW_WRITES.
+ */
+export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "write_note",
+  "append_note",
+  "delete_note",
+  "add_tag",
+  "remove_tag",
+  "set_frontmatter",
+  "add_section",
+  "append_to_section",
+  "replace_section",
+]);
+
+/** Whether a tool name mutates the vault. */
+export function isWriteTool(name: string): boolean {
+  return WRITE_TOOL_NAMES.has(name);
+}
+
 /** Canonical vault name for a note path (forward slashes, no .md suffix). */
 function canonicalName(notePath: string): string {
   return notePath.replace(/\\/g, "/").replace(/\.md$/, "");

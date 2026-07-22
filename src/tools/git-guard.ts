@@ -1,22 +1,11 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import process from "node:process";
+import { GIT_AUTOCOMMIT_ENV, gitGuardEnabled } from "./env-flags.js";
 
 const execFileAsync = promisify(execFile);
 
-/** Environment variable that turns the pre-write git snapshot on. */
-export const GIT_AUTOCOMMIT_ENV = "OBSIDIAN_GIT_AUTOCOMMIT";
-
-const TRUTHY = new Set(["1", "true", "yes", "on"]);
-
-/**
- * Whether the git guard is enabled. When on, every mutation is preceded by a
- * commit of the vault's current state (see {@link snapshotBeforeWrite}).
- */
-export function gitGuardEnabled(): boolean {
-  const raw = process.env[GIT_AUTOCOMMIT_ENV];
-  return raw != null && TRUTHY.has(raw.trim().toLowerCase());
-}
+// Re-exported so existing importers of git-guard keep working.
+export { GIT_AUTOCOMMIT_ENV, gitGuardEnabled };
 
 /** Run a git subcommand inside the vault directory. */
 async function git(vaultPath: string, args: string[]): Promise<string> {

@@ -24,6 +24,7 @@ import {
   addNoteSection,
   appendNoteSection,
   replaceNoteSection,
+  isWriteTool,
   WriteNoteParams,
   AppendNoteParams,
   TagParams,
@@ -37,6 +38,7 @@ import {
   FindByTagParams,
   RecentNotesParams,
 } from "./types.js";
+import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH;
 if (!VAULT_PATH) {
@@ -57,8 +59,7 @@ const server = new Server(
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
+  const tools = [
       {
         name: "search_notes",
         description: "Search through Obsidian notes using ripgrep. Returns matching notes with context lines.",
@@ -308,7 +309,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["path", "heading", "content"]
         }
       }
-    ]
+    ];
+
+  // Expose the write tools only when writing is enabled; stay read-only otherwise.
+  return {
+    tools: writesEnabled() ? tools : tools.filter((tool) => !isWriteTool(tool.name)),
   };
 });
 
@@ -316,6 +321,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+    // Gate every mutating tool behind the write master switch (defense in depth:
+    // the tool is also hidden from list_tools when writes are disabled).
+    if (isWriteTool(name) && !writesEnabled()) {
+      throw new Error(
+        `Writing is disabled. Set ${ALLOW_WRITES_ENV}=1 (or true/yes/on) to enable the write tools.`
+      );
+    }
+
     switch (name) {
       case "search_notes": {
         const params = args as unknown as SearchNotesParams;

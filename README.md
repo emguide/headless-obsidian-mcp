@@ -10,7 +10,7 @@ An MCP (Model Context Protocol) server for interacting with Obsidian notes. This
 - **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
 - **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
 - **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter
-- **Write & Edit**: Create, overwrite, append, and delete notes
+- **Write & Edit** (opt-in): Create, overwrite, append, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
 - **Structure-aware edits**: Add/remove tags, set frontmatter, and add/append/replace sections without rewriting the whole note — saving agent tokens
 - **Git safety net**: Optionally snapshot the vault into a commit before every write (`OBSIDIAN_GIT_AUTOCOMMIT`)
 - **Cross-platform**: Works on Windows, macOS, and Linux
@@ -370,6 +370,22 @@ await append_to_section({ path: "projects/alpha", heading: "Log", content: "ship
 
 The server requires the `OBSIDIAN_VAULT_PATH` environment variable to be set to your Obsidian vault directory.
 
+### Enabling writes (`OBSIDIAN_ALLOW_WRITES`)
+
+The write tools are **off by default** — out of the box the server is read-only.
+Set `OBSIDIAN_ALLOW_WRITES` to a truthy value (`1`, `true`, `yes`, `on`) to
+expose them:
+
+```bash
+export OBSIDIAN_ALLOW_WRITES=1
+```
+
+When disabled, the nine write tools (`write_note`, `append_note`, `delete_note`,
+`add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`,
+`replace_section`) are hidden from the tool list and any call to one is
+rejected, so an agent only ever sees the read tools. The flag gates the MCP
+server; the query CLI is the operator's own tool and is not affected by it.
+
 ### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
 Set `OBSIDIAN_GIT_AUTOCOMMIT` to a truthy value (`1`, `true`, `yes`, `on`) to
@@ -424,6 +440,6 @@ Replace the paths with:
 - `/path/to/notes-mcp`: The absolute path to this project directory
 - `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
 
-To enable the git safety net for writes, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"` alongside `OBSIDIAN_VAULT_PATH` in the `env` block above.
+To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`) and the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
+After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
