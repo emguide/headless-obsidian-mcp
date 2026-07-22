@@ -6,6 +6,10 @@ export interface SearchNotesParams {
   whole_word?: boolean;
   multiline?: boolean;
   context_lines?: number;
+  /** Max number of files (result entries). Default 20; 0 = unlimited. */
+  limit?: number;
+  /** Max matches returned per file. Default 20; 0 = unlimited. */
+  max_matches_per_file?: number;
 }
 
 export interface NoteMetadata {
@@ -27,6 +31,20 @@ export interface SearchResult {
     context_before: string[];
     context_after: string[];
   }>;
+}
+
+/** The bounded result of `searchNotes`, with truncation metadata. */
+export interface SearchNotesResponse {
+  /** Matching notes, at most `limit` entries (unless limit is 0). */
+  results: SearchResult[];
+  /** True if any cap (file or per-file) dropped results. */
+  truncated: boolean;
+  /** Number of files in `results` (== results.length). */
+  files_returned: number;
+  /** Distinct matching files seen beyond `limit` and not returned. */
+  files_omitted: number;
+  /** Paths of files whose matches were capped by max_matches_per_file. */
+  matches_capped_in: string[];
 }
 
 /** Lightweight description of a note, without its full body. */
