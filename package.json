@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "tsx --test tests/*.test.ts",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "query": "tsx src/query-cli.ts",

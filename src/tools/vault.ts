@@ -1,7 +1,5 @@
-import { readdir, stat, readFile } from "node:fs/promises";
-import { join, resolve, relative, sep, basename } from "node:path";
-import matter from "gray-matter";
-import { NoteHeader } from "../types.js";
+import { readdir, stat } from "node:fs/promises";
+import { join, resolve, relative, sep } from "node:path";
 
 /**
  * A markdown file discovered in the vault, with lightweight filesystem
@@ -64,7 +62,7 @@ export function resolveNotePath(vaultPath: string, notePath: string): string {
 /**
  * Recursively walk the vault and return every markdown file, skipping hidden
  * and machinery directories. Filesystem metadata is collected but file
- * contents are not read.
+ * contents are not read. Results are sorted by path for deterministic output.
  */
 export async function walkVault(vaultPath: string): Promise<VaultFile[]> {
   assertVaultPath(vaultPath);
@@ -109,9 +107,8 @@ export async function walkVault(vaultPath: string): Promise<VaultFile[]> {
 
 /**
  * Extract inline Obsidian tags (`#tag`, including nested `#parent/child`).
- * Ignores `#` inside fenced code blocks is not attempted here; Obsidian's own
- * parser is lenient, so this stays permissive but avoids matching markdown
- * headings (`# Heading`) by requiring no whitespace after `#`.
+ * Requires no whitespace after `#` so markdown headings (`# Heading`) are not
+ * matched as tags.
  */
 export function extractInlineTags(content: string): string[] {
   const tags = new Set<string>();
@@ -135,7 +132,7 @@ function frontmatterTags(data: Record<string, unknown>): string[] {
 
 /**
  * Collect the complete tag set for a note, unifying frontmatter `tags:`
- * (which the original inline-only extractor missed) with inline `#tags`.
+ * (which an inline-only extractor misses) with inline `#tags`.
  */
 export function collectTags(
   frontmatter: Record<string, unknown>,
@@ -148,42 +145,32 @@ export function collectTags(
   return [...tags].sort((a, b) => a.localeCompare(b));
 }
 
-/** Extract the first markdown heading (`# ...`) from note content, if any. */
-function firstHeading(content: string): string | undefined {
-  const match = content.match(/^#{1,6}\s+(.+?)\s*$/m);
-  return match ? match[1].trim() : undefined;
+// Matches Obsidian wikilinks and embeds: [[target]], [[target|alias]],
+// [[target#heading]], ![[target]]. Captures the inner reference.
+const WIKILINK_RE = /!?\[\[([^\]]+)\]\]/g;
+
+/** Reduce a raw wikilink body to just its note target (drop alias + heading). */
+function linkTarget(inner: string): string {
+  // Strip display alias after "|", then any "#heading" / "#^block" anchor.
+  const noAlias = inner.split("|")[0];
+  const noAnchor = noAlias.split("#")[0];
+  return noAnchor.trim();
 }
 
-/**
- * Build a lightweight header for a note: title, tags, first heading, and
- * filesystem metadata, without returning the full body. Used by discovery
- * tools (list_notes, find_by_tag, list_recent_notes) that need to describe
- * many notes cheaply.
- */
-export async function buildHeader(file: VaultFile): Promise<NoteHeader> {
-  let title: string | undefined;
-  let tags: string[] = [];
-  let headline: string | undefined;
-
-  try {
-    const raw = await readFile(file.fullPath, "utf-8");
-    const { data, content } = matter(raw);
-    const fm = data as Record<string, unknown>;
-    if (typeof fm.title === "string" && fm.title.trim()) {
-      title = fm.title.trim();
-    }
-    tags = collectTags(fm, content);
-    headline = firstHeading(content);
-  } catch {
-    // If a note can't be read/parsed, still surface its path and fs metadata.
+/** Extract all wikilink targets (alias/anchor stripped) from note content. */
+export function extractLinkTargets(content: string): string[] {
+  const targets: string[] = [];
+  let match: RegExpExecArray | null;
+  WIKILINK_RE.lastIndex = 0;
+  while ((match = WIKILINK_RE.exec(content)) !== null) {
+    const target = linkTarget(match[1]);
+    if (target) targets.push(target);
   }
+  return targets;
+}
 
-  return {
-    path: file.path,
-    title: title ?? basename(file.path),
-    tags,
-    headline,
-    size: file.size,
-    modified: file.mtime.toISOString(),
-  };
+/** Extract the first markdown heading (`# ...`) from note content, if any. */
+export function firstHeading(content: string): string | undefined {
+  const match = content.match(/^#{1,6}\s+(.+?)\s*$/m);
+  return match ? match[1].trim() : undefined;
 }

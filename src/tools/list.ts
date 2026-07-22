@@ -1,5 +1,5 @@
-import { sep } from "node:path";
-import { walkVault, buildHeader, assertVaultPath } from "./vault.js";
+import { assertVaultPath } from "./vault.js";
+import { getIndex, entryToHeader } from "./vault-index.js";
 import { ListNotesParams, NoteHeader } from "../types.js";
 
 /**
@@ -19,18 +19,19 @@ export async function listNotes(
     throw new Error("limit must be a positive integer");
   }
 
-  let files = await walkVault(vaultPath);
+  const index = await getIndex(vaultPath);
+  let entries = index.getEntries();
 
   if (folder && typeof folder === "string" && folder.trim()) {
     // Normalize the folder prefix to forward slashes with a trailing slash so
     // "projects" matches "projects/foo" but not "projects-archive/foo".
-    const prefix = folder.replace(/[\\/]+$/, "").split(sep).join("/") + "/";
-    files = files.filter((f) => (f.path + "/").startsWith(prefix));
+    const prefix = folder.replace(/[\\/]+$/, "").replace(/\\/g, "/") + "/";
+    entries = entries.filter((e) => (e.path + "/").startsWith(prefix));
   }
 
   if (limit !== undefined) {
-    files = files.slice(0, limit);
+    entries = entries.slice(0, limit);
   }
 
-  return Promise.all(files.map((f) => buildHeader(f)));
+  return entries.map(entryToHeader);
 }
