@@ -1,3 +1,7 @@
 node_modules/
 dist/
 *.log
+
+# git worktrees for isolated feature work
+.worktrees/
+.superpowers/
