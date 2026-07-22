@@ -38,8 +38,13 @@ export class NoteDocument {
     }
     const block = raw.slice(0, match[0].length);
     const body = raw.slice(match[0].length);
-    // Reuse gray-matter (js-yaml) for the actual YAML parse.
-    const data = (matter(raw).data ?? {}) as Record<string, unknown>;
+    // gray-matter caches parsed results by content string and returns the SAME
+    // `data` object on repeat parses of identical text. Our write path mutates
+    // doc.data in place, so without a clone those mutations would leak between
+    // separate parses of same-content notes. structuredClone isolates each parse.
+    // (Edge: a YAML !!binary value becomes a Uint8Array rather than a Buffer —
+    // irrelevant for Obsidian frontmatter, which holds scalars and flat arrays.)
+    const data = structuredClone((matter(raw).data ?? {})) as Record<string, unknown>;
     return new NoteDocument(data, body, block);
   }
 
@@ -89,6 +94,7 @@ export function addTags(doc: NoteDocument, tags: string[]): string[] | null {
   let changed = false;
   for (const tag of tags) {
     const norm = normalizeTag(tag);
+    validateFrontmatterValue("tags", norm);
     if (!set.has(norm)) {
       set.add(norm);
       changed = true;
@@ -127,6 +133,65 @@ export function removeTags(doc: NoteDocument, tags: string[]): string[] | null {
   return next;
 }
 
+/* ----------------------------------------------------------- validation -- */
+
+/** Scalar frontmatter values: what a property (or array element) may hold. */
+export function isScalar(v: unknown): boolean {
+  return (
+    v == null ||
+    typeof v === "string" ||
+    typeof v === "number" ||
+    typeof v === "boolean"
+  );
+}
+
+// Markdown markup we forbid in property strings. Bare URLs / plain punctuation
+// are intentionally allowed — only genuine markup is rejected.
+const MARKDOWN_PATTERNS: RegExp[] = [
+  /!?\[\[[^\]]*\]\]/, // [[wikilink]] or ![[embed]]
+  /\[[^\]]*\]\([^)]*\)/, // [text](url)
+  /\*\*[^*]+\*\*/, // **bold**
+  /__[^_]+__/, // __bold__
+  /`[^`]*`/, // `code`
+  /^\s*#{1,6}\s+\S/m, // # heading (multiline: detect headings on any line)
+  /^\s*[-*+]\s+\S/m, // - / * / + list bullet (multiline: detect bullets on any line)
+];
+
+function assertNoMarkdown(key: string, value: string): void {
+  if (MARKDOWN_PATTERNS.some((re) => re.test(value))) {
+    throw new Error(
+      `Property "${key}" contains markdown syntax; frontmatter values must be plain text`
+    );
+  }
+}
+
+/**
+ * Enforce the frontmatter property rules on a single value the caller is about
+ * to write: no nested objects (maps), no arrays of non-scalars, and no markdown
+ * markup inside string values or string array elements. Scalars, null, and flat
+ * arrays of scalars pass. Throws a descriptive Error on any violation.
+ */
+export function validateFrontmatterValue(key: string, value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const el of value) {
+      if (!isScalar(el)) {
+        throw new Error(
+          `Property "${key}" is an array containing a non-scalar element; ` +
+            `only flat arrays of scalars are allowed`
+        );
+      }
+      if (typeof el === "string") assertNoMarkdown(key, el);
+    }
+    return;
+  }
+  if (!isScalar(value)) {
+    throw new Error(
+      `Property "${key}" is a nested object; frontmatter values must be scalars or flat arrays of scalars`
+    );
+  }
+  if (typeof value === "string") assertNoMarkdown(key, value);
+}
+
 /* ----------------------------------------------------------- frontmatter -- */
 
 /**
@@ -141,6 +206,7 @@ export function setFrontmatter(
   let changed = false;
   if (set) {
     for (const [key, value] of Object.entries(set)) {
+      validateFrontmatterValue(key, value);
       doc.data[key] = value;
       changed = true;
     }
@@ -155,6 +221,84 @@ export function setFrontmatter(
   }
   if (changed) doc.markFrontmatterDirty();
   return changed;
+}
+
+/**
+ * Add values to the array-valued property `key` (idempotent). Creates the array
+ * if the key is absent; promotes an existing scalar to `[old, ...new]`. Each
+ * added value is validated. Returns the resulting array, or null if unchanged.
+ */
+export function addPropertyValues(
+  doc: NoteDocument,
+  key: string,
+  values: unknown[]
+): unknown[] | null {
+  const current = doc.data[key];
+  const base: unknown[] =
+    current == null ? [] : Array.isArray(current) ? [...current] : [current];
+  let changed = false;
+  for (const value of values) {
+    validateFrontmatterValue(key, value);
+    if (!base.some((v) => v === value)) {
+      base.push(value);
+      changed = true;
+    }
+  }
+  if (!changed) return null;
+  doc.data[key] = base;
+  doc.markFrontmatterDirty();
+  return base;
+}
+
+/**
+ * Remove values from the array-valued property `key`. An emptied array drops the
+ * key. Returns the resulting array (possibly empty), or null if nothing matched.
+ */
+export function removePropertyValues(
+  doc: NoteDocument,
+  key: string,
+  values: unknown[]
+): unknown[] | null {
+  const current = doc.data[key];
+  const base: unknown[] =
+    current == null ? [] : Array.isArray(current) ? [...current] : [current];
+  const remove = new Set(values);
+  const next = base.filter((v) => !remove.has(v));
+  if (next.length === base.length) return null;
+
+  if (next.length === 0) {
+    delete doc.data[key];
+  } else {
+    doc.data[key] = next;
+  }
+  doc.markFrontmatterDirty();
+  return next;
+}
+
+/**
+ * Rename frontmatter key `from` to `to`, preserving the value. Throws if `from`
+ * is absent or `to` already exists (no silent clobber). Returns true on success.
+ */
+export function renameProperty(
+  doc: NoteDocument,
+  from: string,
+  to: string
+): boolean {
+  if (!(from in doc.data)) {
+    throw new Error(`Property "${from}" not found`);
+  }
+  if (to in doc.data) {
+    throw new Error(`Property "${to}" already exists`);
+  }
+  // Rebuild in insertion order with the key swapped in place, so the renamed
+  // key keeps its position in the serialized YAML.
+  const rebuilt: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(doc.data)) {
+    rebuilt[k === from ? to : k] = v;
+  }
+  doc.data = rebuilt;
+  doc.markFrontmatterDirty();
+  return true;
 }
 
 /* -------------------------------------------------------------- sections -- */

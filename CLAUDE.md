@@ -78,7 +78,7 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
   - `limit` (optional): Maximum number of notes to return (default: 20)
   - `since` (optional): Only include notes on or after this ISO date
   - `date_field` (optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
-  - `where` (optional): Frontmatter equality filters, e.g. `{ "status": "active" }` (matches array members too)
+  - `where` (optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`; matches array members too)
 - **Output**: Array of note headers (same shape as `list_notes`)
 
 ### get_related_notes
@@ -101,11 +101,36 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Input**: none
 - **Output**: `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with no inbound and no outbound resolved links; the modification bounds are ISO timestamps (`null` for an empty vault).
 
+### list_properties
+- **Purpose**: The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
+- **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`)
+- **Output**: Array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. Index-backed.
+
+### get_property_values
+- **Purpose**: Distinct values of one frontmatter property with per-note counts — a faceted breakdown, e.g. to see every `status` value in use.
+- **Input**: `key` (required), `limit` (optional)
+- **Output**: `{ key, values: [{ value, count }] }`, sorted by `count` descending then value. Array-valued properties count each element once per note. Index-backed.
+
+### query_notes
+- **Purpose**: Find notes by frontmatter condition — generalizes the `where` filter in `list_recent_notes` into its own tool.
+- **Input**:
+  - `where` (required): Object of `key -> condition`. A condition is either a bare scalar (equality, or array-membership when the note's value is an array) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`.
+  - `match` (optional): `"all"` (default — every condition must hold) or `"any"` (at least one)
+  - `limit` (optional): Maximum number of notes to return
+- **Comparisons**: Type-aware — numeric when both sides parse as numbers, chronological when both parse as dates, else case-insensitive string compare.
+- **Output**: Array of note headers (same shape as `list_notes`). Index-backed.
+
+### get_property
+- **Purpose**: Read a single frontmatter property from one note — cheaper than reading the whole note or its full frontmatter when only one field is needed.
+- **Input**: `path` (required), `key` (required)
+- **Output**: `{ path, key, value, present }` where `present` distinguishes an absent key from a key explicitly set to `null`. Index-backed.
+- **Security**: Path traversal protected via the same guard as read_notes.
+
 ## Writing tools
 
 **The write tools are off by default.** The server is read-only unless
 `OBSIDIAN_ALLOW_WRITES` is set to a truthy value (`1`, `true`, `yes`, `on`).
-When disabled, the thirteen write tools are hidden from `list_tools` and any call
+When disabled, the sixteen write tools are hidden from `list_tools` and any call
 to one is rejected — so an agent only ever sees the read tools. When enabled, all
 tools are exposed. The flag gates the MCP server (the agent-facing surface); the
 query CLI is the operator's own tool and is not gated. Flag helpers live in
@@ -165,6 +190,16 @@ change a tag or a section without reading and rewriting the whole note.
 - **Input**: `path` (required), `set` (optional object of fields), `unset` (optional array of keys)
 - **Output**: `{ path, changed }`
 
+### add_property_values / remove_property_values
+- **Purpose**: Add or remove values from an array-valued frontmatter property without rewriting the whole note. Adding is idempotent (no duplicates); an absent key is created as a new array; an existing scalar is promoted to `[old, ...new]`. Removing empties the array down and drops the key entirely once it has no values left.
+- **Input**: `path` (required), `key` (required), `values` (required array)
+- **Output**: `{ path, key, values }` (the resulting list)
+
+### rename_property
+- **Purpose**: Rename a frontmatter key in place, preserving its value and its position in the YAML. Errors if `from` is absent or `to` already exists.
+- **Input**: `path` (required), `from` (required), `to` (required)
+- **Output**: `{ path, from, to }`
+
 ### add_section
 - **Purpose**: Insert a new heading + content. Appends at the end by default, or immediately after the section named by `after`. Errors on a duplicate heading at the same level.
 - **Input**: `path` (required), `heading` (required), `content` (required), `level` (optional 1–6, default 2), `after` (optional)
@@ -185,6 +220,12 @@ byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML block in
 canonical form (block-style lists) but leave the body untouched. Headings inside
 fenced code blocks are ignored when locating sections. All writes are
 path-traversal protected via the same guard as read_notes.
+
+**Validation**: Every frontmatter write rejects (1) nested objects/maps, (2)
+arrays containing non-scalar elements, and (3) markdown syntax in string values
+(bare URLs are allowed). Validation runs only on the keys a given write actually
+touches, so a pre-existing violation on an untouched key never blocks an
+unrelated edit.
 
 ### Git guard (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
@@ -218,7 +259,8 @@ refused rather than proceeding without the safety net. Implemented in
 ### Vault index
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
-`list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`) share an in-memory index
+`list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`,
+`query_notes`, `list_properties`, `get_property_values`) share an in-memory index
 (`src/tools/vault-index.ts`) that parses each note once (frontmatter, tags,
 wikilinks, headings) and caches the result. Each tool call refreshes the index
 by walking the vault and re-reading only files whose size or mtime changed, so
@@ -263,6 +305,10 @@ npm run query -- related "projects/alpha"              # Notes related to alpha
 npm run query -- related "projects/alpha" --limit 5    # Top 5 related notes
 npm run query -- frontmatter "projects/alpha"          # Just the frontmatter
 npm run query -- stats                                  # Whole-vault statistics
+npm run query -- properties                             # Frontmatter schema
+npm run query -- property-values status                 # Distinct values of a key
+npm run query -- query --where '{"status":"active","priority":{"gt":3}}'
+npm run query -- get-property "projects/alpha" status
 
 # Write examples (the query CLI is not gated by OBSIDIAN_ALLOW_WRITES)
 npm run query -- write "inbox/idea" "# Idea\n\nbody"    # Create a note
@@ -272,6 +318,9 @@ npm run query -- prepend "daily/2026-07-22" "> banner"  # Prepend to the body
 npm run query -- add-tag "projects/alpha" project active
 npm run query -- remove-tag "projects/alpha" stale
 npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
+npm run query -- add-property-values "projects/alpha" aliases a2 a3
+npm run query -- remove-property-values "projects/alpha" aliases a3
+npm run query -- rename-property "projects/alpha" author authors
 npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
 npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
 npm run query -- replace-section "projects/alpha" "Summary" "new summary"

@@ -1,3 +1,5 @@
+import type { Condition } from "./tools/property-match.js";
+
 export interface SearchNotesParams {
   pattern: string;
   case_sensitive?: boolean;
@@ -136,8 +138,8 @@ export interface RecentNotesParams {
   since?: string;
   /** Frontmatter field to sort by instead of filesystem mtime (e.g. "updated"). */
   date_field?: string;
-  /** Frontmatter equality filters, e.g. { status: "active" }. */
-  where?: Record<string, unknown>;
+  /** Frontmatter conditions, e.g. { status: "active" } or { priority: { gt: 3 } }. */
+  where?: Record<string, Condition>;
 }
 
 export interface RankedSearchParams {
@@ -153,4 +155,37 @@ export interface RankedSearchResult extends NoteHeader {
   score: number;
   /** Short excerpt around a matched term (best-effort). */
   snippet: string;
+}
+
+export interface PropertySchemaEntry {
+  key: string;
+  count: number;
+  /** Distinct value types observed: string|number|boolean|array|null|date. */
+  types: string[];
+}
+
+export interface ListPropertiesParams {
+  /** Include the `tags` key (already covered by list_tags). Default: true. */
+  include_tags?: boolean;
+}
+
+export interface PropertyValuesParamsRead {
+  key: string;
+  limit?: number;
+}
+
+export interface PropertyValueCount {
+  value: unknown;
+  count: number;
+}
+
+export interface QueryNotesParams {
+  where: Record<string, Condition>;
+  match?: "all" | "any";
+  limit?: number;
+}
+
+export interface GetPropertyParams {
+  path: string;
+  key: string;
 }

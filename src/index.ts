@@ -19,6 +19,12 @@ import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
 import { getVaultStats } from "./tools/stats.js";
 import {
+  listProperties,
+  getPropertyValues,
+  queryNotes,
+  getProperty,
+} from "./tools/properties.js";
+import {
   writeNote,
   appendNote,
   prependNote,
@@ -32,6 +38,9 @@ import {
   addNoteSection,
   appendNoteSection,
   replaceNoteSection,
+  addNotePropertyValues,
+  removeNotePropertyValues,
+  renameNoteProperty,
   isWriteTool,
   WriteNoteParams,
   AppendNoteParams,
@@ -43,6 +52,8 @@ import {
   SetFrontmatterParams,
   AddSectionParams,
   SectionEditParams,
+  PropertyValuesParams,
+  RenamePropertyParams,
 } from "./tools/write.js";
 import {
   SearchNotesParams,
@@ -51,6 +62,10 @@ import {
   RecentNotesParams,
   RelatedNotesParams,
   RankedSearchParams,
+  ListPropertiesParams,
+  PropertyValuesParamsRead,
+  QueryNotesParams,
+  GetPropertyParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -259,6 +274,53 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "list_properties",
+        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            include_tags: { type: "boolean", description: "Include the tags key (default: true)" }
+          }
+        }
+      },
+      {
+        name: "get_property_values",
+        description: "List the distinct values of one frontmatter property with the number of notes each appears in, most frequent first. Array-valued properties count each element. A faceted index for a single key.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            key: { type: "string", description: "The frontmatter property key to facet" },
+            limit: { type: "number", description: "Maximum number of distinct values to return" }
+          },
+          required: ["key"]
+        }
+      },
+      {
+        name: "query_notes",
+        description: "Find notes whose frontmatter satisfies a set of conditions, returning lightweight headers. Each condition is a bare scalar (equality / array-membership) or an operator object { eq, ne, gt, gte, lt, lte, exists, contains }. Comparisons are type-aware (numbers, ISO dates, strings). match: all (default) or any.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            where: { type: "object", description: "Map of property key to condition (scalar or { eq/ne/gt/gte/lt/lte/exists/contains })" },
+            match: { type: "string", enum: ["all", "any"], description: "Require all (default) or any of the conditions" },
+            limit: { type: "number", description: "Maximum number of notes to return" }
+          },
+          required: ["where"]
+        }
+      },
+      {
+        name: "get_property",
+        description: "Read a single frontmatter property value from one note. Returns { path, key, value, present }; present distinguishes an absent key from a key explicitly set to null.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            key: { type: "string", description: "The frontmatter property key to read" }
+          },
+          required: ["path", "key"]
+        }
+      },
+      {
         name: "get_vault_stats",
         description: "Summarize the whole vault: note and tag counts, link-graph health (resolved vs unresolved links, orphan notes), total size, and modification-time bounds. Use it to get a quick sense of the vault's scale and health.",
         inputSchema: {
@@ -393,6 +455,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             unset: { type: "array", items: { type: "string" }, description: "Frontmatter keys to remove" }
           },
           required: ["path"]
+        }
+      },
+      {
+        name: "add_property_values",
+        description: "Add one or more values to an array-valued frontmatter property (idempotent, no duplicates). Creates the array if the key is absent; promotes an existing scalar to an array. Rejects nested objects and markdown. Returns the resulting list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            key: { type: "string", description: "The array-valued property key" },
+            values: { type: "array", description: "Values to add" }
+          },
+          required: ["path", "key", "values"]
+        }
+      },
+      {
+        name: "remove_property_values",
+        description: "Remove one or more values from an array-valued frontmatter property. An emptied array drops the key. Returns the resulting list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            key: { type: "string", description: "The array-valued property key" },
+            values: { type: "array", description: "Values to remove" }
+          },
+          required: ["path", "key", "values"]
+        }
+      },
+      {
+        name: "rename_property",
+        description: "Rename a frontmatter property key in a note, preserving its value and position. Errors if the source key is absent or the destination key already exists.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            from: { type: "string", description: "Current property key" },
+            to: { type: "string", description: "New property key" }
+          },
+          required: ["path", "from", "to"]
         }
       },
       {
@@ -556,6 +657,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
+      case "list_properties": {
+        const result = await listProperties(VAULT_PATH, (args ?? {}) as ListPropertiesParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "get_property_values": {
+        const result = await getPropertyValues(VAULT_PATH, (args ?? {}) as unknown as PropertyValuesParamsRead);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "query_notes": {
+        const result = await queryNotes(VAULT_PATH, (args ?? {}) as unknown as QueryNotesParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "get_property": {
+        const result = await getProperty(VAULT_PATH, (args ?? {}) as unknown as GetPropertyParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
       case "get_vault_stats": {
         const result = await getVaultStats(VAULT_PATH);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
@@ -612,6 +733,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "set_frontmatter": {
         const result = await setNoteFrontmatter(VAULT_PATH, (args ?? {}) as unknown as SetFrontmatterParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "add_property_values": {
+        const result = await addNotePropertyValues(VAULT_PATH, (args ?? {}) as unknown as PropertyValuesParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "remove_property_values": {
+        const result = await removeNotePropertyValues(VAULT_PATH, (args ?? {}) as unknown as PropertyValuesParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case "rename_property": {
+        const result = await renameNoteProperty(VAULT_PATH, (args ?? {}) as unknown as RenamePropertyParams);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 

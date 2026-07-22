@@ -12,8 +12,10 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 - **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
 - **Related Notes**: Associative recall — rank the notes most related to a given one (shared tags + link graph), no embeddings required
 - **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter; read a note's frontmatter alone or get whole-vault stats
+- **Property Search**: Discover the vault's frontmatter schema, list a property's distinct values, and query notes by frontmatter condition (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `exists`, `contains`)
 - **Write & Edit** (opt-in): Create, overwrite, append, prepend, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
-- **Structure-aware edits**: Add/remove tags, set frontmatter, add/append/replace sections, and literal find/replace patches without rewriting the whole note — saving agent tokens
+- **Structure-aware edits**: Add/remove tags, set frontmatter, add/remove/rename frontmatter properties, add/append/replace sections, and literal find/replace patches without rewriting the whole note — saving agent tokens
+- **Frontmatter validation**: Writes reject nested objects, arrays of non-scalars, and markdown syntax in string values, keeping properties queryable and flat
 - **Move & rename**: Move notes (rewriting the wikilinks that point to them) or arbitrary attachment files
 - **Trash-safe delete**: Deletes move to the vault's `.trash` by default, so they're recoverable
 - **Git safety net**: Optionally snapshot the vault into a commit before every write (`OBSIDIAN_GIT_AUTOCOMMIT`)
@@ -132,6 +134,12 @@ npm run query -- related "projects/alpha" --limit 5
 npm run query -- frontmatter "projects/alpha"
 npm run query -- stats
 
+# Frontmatter schema, distinct values, and condition queries
+npm run query -- properties
+npm run query -- property-values status
+npm run query -- query --where '{"status":"active","priority":{"gt":3}}'
+npm run query -- get-property "projects/alpha" status
+
 # --- Writing ---
 
 # Create a note (inline, from a --file, or from stdin)
@@ -146,6 +154,9 @@ npm run query -- prepend "daily/2026-07-22" "> top banner"
 npm run query -- add-tag "projects/alpha" project active
 npm run query -- remove-tag "projects/alpha" stale
 npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
+npm run query -- add-property-values "projects/alpha" aliases a2 a3
+npm run query -- remove-property-values "projects/alpha" aliases a3
+npm run query -- rename-property "projects/alpha" author authors
 
 # Sections (heading-scoped edits)
 npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
@@ -278,7 +289,7 @@ List notes ordered by recency, newest first.
 - `limit` (number, optional): Maximum number of notes to return (default: 20)
 - `since` (string, optional): Only include notes on or after this ISO date
 - `date_field` (string, optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
-- `where` (object, optional): Frontmatter equality filters, e.g. `{ "status": "active" }`
+- `where` (object, optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`)
 
 **Returns:** Array of note headers (same shape as `list_notes`).
 
@@ -308,6 +319,48 @@ Summarize the whole vault in a single call, derived entirely from the shared ind
 **Parameters:** none
 
 **Returns:** `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with neither inbound nor outbound resolved links; the time bounds are ISO timestamps (`null` for an empty vault).
+
+### list_properties
+
+The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
+
+**Parameters:**
+- `include_tags` (boolean, optional): Include the `tags` key (default: true; set false since it's already covered by `list_tags`)
+
+**Returns:** Array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`.
+
+### get_property_values
+
+Distinct values of one frontmatter property, with per-note counts — a faceted breakdown of every value a key takes across the vault.
+
+**Parameters:**
+- `key` (string, required): The property key
+- `limit` (number, optional): Maximum number of values to return
+
+**Returns:** `{ key, values: [{ value, count }] }`, sorted by `count` descending. Array-valued properties count each element once per note.
+
+### query_notes
+
+Find notes by frontmatter condition — generalizes the `where` filter in `list_recent_notes` into its own tool.
+
+**Parameters:**
+- `where` (object, required): `key -> condition` map. A condition is a bare scalar (equality / array-membership) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`
+- `match` (string, optional): `"all"` (default) or `"any"`
+- `limit` (number, optional): Maximum number of notes to return
+
+Comparisons are type-aware: numeric when both sides parse as numbers, chronological when both parse as dates, otherwise case-insensitive string compare.
+
+**Returns:** Array of note headers (same shape as `list_notes`).
+
+### get_property
+
+Read a single frontmatter property from one note — cheaper than reading the whole note or its full frontmatter when only one field is needed.
+
+**Parameters:**
+- `path` (string, required): Relative note path (with or without `.md`)
+- `key` (string, required): The property key
+
+**Returns:** `{ path, key, value, present }` where `present` distinguishes an absent key from a key explicitly set to `null`.
 
 ### write_note
 
@@ -408,6 +461,28 @@ Set and/or unset frontmatter fields while leaving the body untouched.
 
 **Returns:** `{ path, changed }`
 
+### add_property_values / remove_property_values
+
+Add or remove values from an array-valued frontmatter property without rewriting the whole note. Adding is idempotent (no duplicates); an absent key is created as a new array, and an existing scalar is promoted to `[old, ...new]`. Removing shrinks the array and drops the key entirely once it has no values left.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `key` (string, required): The property key
+- `values` (array, required): Values to add/remove
+
+**Returns:** `{ path, key, values }` — the resulting list.
+
+### rename_property
+
+Rename a frontmatter key in place, preserving its value and its position in the YAML. Errors if `from` is absent or `to` already exists.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `from` (string, required): Existing property key
+- `to` (string, required): New property key
+
+**Returns:** `{ path, from, to }`
+
 ### add_section
 
 Insert a new heading + content. Appends at the end by default, or immediately after the section named by `after`. Errors on a duplicate heading at the same level.
@@ -445,6 +520,8 @@ Replace the body under an existing heading (the heading line is kept). Errors if
 **Returns:** `{ path, heading }`
 
 > **Body vs. frontmatter fidelity:** section edits preserve the frontmatter block byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML in canonical form (block-style lists) but leave the body untouched. Headings inside fenced code blocks are ignored. All writes are path-traversal protected.
+
+> **Validation:** every frontmatter write rejects nested objects/maps, arrays containing non-scalar elements, and markdown syntax in string values (bare URLs are allowed). Validation runs only on the keys a given write actually touches, so a pre-existing violation on an untouched key never blocks an unrelated edit.
 
 ## Example Usage
 
@@ -500,11 +577,14 @@ expose them:
 export OBSIDIAN_ALLOW_WRITES=1
 ```
 
-When disabled, the nine write tools (`write_note`, `append_note`, `delete_note`,
-`add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`,
-`replace_section`) are hidden from the tool list and any call to one is
-rejected, so an agent only ever sees the read tools. The flag gates the MCP
-server; the query CLI is the operator's own tool and is not affected by it.
+When disabled, the sixteen write tools (`write_note`, `append_note`,
+`prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`,
+`add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`,
+`remove_property_values`, `rename_property`, `add_section`,
+`append_to_section`, `replace_section`) are hidden from the tool list and any
+call to one is rejected, so an agent only ever sees the read tools. The flag
+gates the MCP server; the query CLI is the operator's own tool and is not
+affected by it.
 
 ### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
@@ -562,7 +642,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `delete_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_section`, `append_to_section`, `replace_section`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`).
 
 ## Acknowledgments
 

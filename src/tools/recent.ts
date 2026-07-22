@@ -1,6 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader, IndexEntry } from "./vault-index.js";
 import { RecentNotesParams, NoteHeader } from "../types.js";
+import { matchesWhere } from "./property-match.js";
 
 /** Parse a value into epoch ms, or null if it isn't a usable date. */
 function toEpoch(value: unknown): number | null {
@@ -8,27 +9,6 @@ function toEpoch(value: unknown): number | null {
   const d = new Date(value as string);
   const t = d.getTime();
   return Number.isNaN(t) ? null : t;
-}
-
-/**
- * Does a note's frontmatter satisfy every key/value in `where`? String
- * comparison is case-insensitive; if the frontmatter value is an array, the
- * filter matches when the requested value is a member (e.g. status in a list).
- */
-function matchesWhere(
-  frontmatter: Record<string, unknown>,
-  where: Record<string, unknown>
-): boolean {
-  for (const [key, want] of Object.entries(where)) {
-    const have = frontmatter[key];
-    const wantStr = String(want).toLowerCase();
-    if (Array.isArray(have)) {
-      if (!have.some((v) => String(v).toLowerCase() === wantStr)) return false;
-    } else if (have == null || String(have).toLowerCase() !== wantStr) {
-      return false;
-    }
-  }
-  return true;
 }
 
 /**
