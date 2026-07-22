@@ -54,3 +54,22 @@ test("rejects markdown on a later line in a multiline string (bullet)", () => {
     /markdown/i
   );
 });
+
+import { NoteDocument, setFrontmatter } from "../src/tools/note-document.js";
+
+test("setFrontmatter rejects a nested-object value", () => {
+  const doc = NoteDocument.parse("---\ntitle: X\n---\nbody\n");
+  assert.throws(() => setFrontmatter(doc, { author: { name: "y" } }), /nested object/i);
+});
+
+test("setFrontmatter rejects markdown in a value but allows plain scalars", () => {
+  const doc = NoteDocument.parse("---\ntitle: X\n---\nbody\n");
+  assert.throws(() => setFrontmatter(doc, { note: "[[wiki]]" }), /markdown/i);
+  assert.doesNotThrow(() => setFrontmatter(doc, { status: "active", n: 3 }));
+});
+
+test("setFrontmatter validates only the keys it writes (legacy value untouched)", () => {
+  // Note already has a violating `bad` value; editing an unrelated key succeeds.
+  const doc = NoteDocument.parse("---\ntitle: X\nbad:\n  nested: 1\n---\nbody\n");
+  assert.doesNotThrow(() => setFrontmatter(doc, { status: "done" }));
+});

@@ -89,6 +89,7 @@ export function addTags(doc: NoteDocument, tags: string[]): string[] | null {
   let changed = false;
   for (const tag of tags) {
     const norm = normalizeTag(tag);
+    validateFrontmatterValue("tags", norm);
     if (!set.has(norm)) {
       set.add(norm);
       changed = true;
@@ -200,6 +201,7 @@ export function setFrontmatter(
   let changed = false;
   if (set) {
     for (const [key, value] of Object.entries(set)) {
+      validateFrontmatterValue(key, value);
       doc.data[key] = value;
       changed = true;
     }
