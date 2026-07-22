@@ -12,33 +12,41 @@ An MCP (Model Context Protocol) server for interacting with Obsidian notes. This
 
 ## Prerequisites
 
-- [Deno](https://deno.land/) runtime
+- [Node.js](https://nodejs.org/) 18 or newer
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg` command)
 - An Obsidian vault with markdown files
 
 ## Setup
 
 1. Clone or download this project
-2. Set the `OBSIDIAN_VAULT_PATH` environment variable:
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Build the TypeScript sources:
+   ```bash
+   npm run build
+   ```
+4. Set the `OBSIDIAN_VAULT_PATH` environment variable:
    ```bash
    export OBSIDIAN_VAULT_PATH="/path/to/your/obsidian/vault"
    ```
-3. Run the server:
+5. Run the server:
    ```bash
-   # Using Deno directly
-   deno task start
-   
+   # Using npm
+   npm start
+
    # Using mise (if you have mise installed)
    mise run start
    ```
 
 ## Development
 
-For development with file watching:
+For development with file watching (uses [tsx](https://github.com/privatenumber/tsx), no build step required):
 
 ```bash
-# Using Deno
-deno task dev
+# Using npm
+npm run dev
 
 # Using mise
 mise run dev
@@ -46,34 +54,37 @@ mise run dev
 
 ## Testing
 
-You can test the MCP server using the included query CLI tool:
+You can test the MCP server using the included query CLI tool. It runs directly from
+the TypeScript sources via `tsx`, so no build step is required:
 
 ```bash
 # Search for notes containing a pattern (case-insensitive by default)
-mise run query search "productivity"
+npm run query -- search "productivity"
 
 # Case-sensitive search
-mise run query search "TODO" --case-sensitive
+npm run query -- search "TODO" --case-sensitive
 
 # Search for whole words only
-mise run query search "test" --whole-word
+npm run query -- search "test" --whole-word
 
 # Multiline search
-mise run query search "pattern.*spans.*lines" --multiline
+npm run query -- search "pattern.*spans.*lines" --multiline
 
 # Search with custom context lines (default: 5)
-mise run query search "pattern" --context 10
+npm run query -- search "pattern" --context 10
 
 # Read specific notes
-mise run query read "daily-notes/2024-01-15"
-mise run query read "note1" "folder/note2"
+npm run query -- read "daily-notes/2024-01-15"
+npm run query -- read "note1" "folder/note2"
 
 # Use verbose mode to see the request being sent
-mise run query -v search "pattern"
-mise run query --verbose read "note1"
+npm run query -- --verbose search "pattern"
+npm run query -- --verbose read "note1"
 ```
 
-The query tool connects to the MCP server and returns the raw JSON responses, making it useful for testing and debugging.
+If you use mise, the equivalent commands are `mise run query -- search "productivity"`, etc.
+
+The query tool calls the MCP server tools directly and returns the raw JSON responses, making it useful for testing and debugging.
 
 ## Tools
 
@@ -82,8 +93,11 @@ The query tool connects to the MCP server and returns the raw JSON responses, ma
 Search through markdown files in your vault using ripgrep patterns.
 
 **Parameters:**
-- `pattern` (string, required): Search pattern for ripgrep
-- `flags` (array, optional): Additional ripgrep flags
+- `pattern` (string, required): Search pattern for ripgrep (max 1000 chars)
+- `case_sensitive` (boolean, optional): Case sensitive search (default: false)
+- `whole_word` (boolean, optional): Match whole words only
+- `multiline` (boolean, optional): Enable multiline matching
+- `context_lines` (number, optional): Number of context lines to show (default: 5, max: 100)
 
 **Returns:** Array of search results with:
 - `path`: Relative note path (without .md extension)
@@ -94,7 +108,7 @@ Search through markdown files in your vault using ripgrep patterns.
 Read and parse one or more notes from your vault.
 
 **Parameters:**
-- `paths` (array, required): Array of relative note paths (with or without .md extension)
+- `paths` (array, required): Array of relative note paths (with or without .md extension, max 50)
 
 **Returns:** Array of note objects with:
 - `name`: Note name (relative path without .md extension)
@@ -110,7 +124,7 @@ Once connected to an MCP client, you can:
 // Search for notes containing "productivity"
 await search_notes({
   pattern: "productivity",
-  flags: ["-i"] // case-insensitive
+  case_sensitive: false
 });
 
 // Read specific notes
@@ -125,7 +139,7 @@ The server requires the `OBSIDIAN_VAULT_PATH` environment variable to be set to 
 
 ## Claude Desktop Integration
 
-To use this MCP server with Claude Desktop, add it to your Claude configuration file:
+To use this MCP server with Claude Desktop, first build the project (`npm install && npm run build`), then add it to your Claude configuration file:
 
 **macOS/Linux**: `~/.config/claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -134,15 +148,8 @@ To use this MCP server with Claude Desktop, add it to your Claude configuration 
 {
   "mcpServers": {
     "notes": {
-      "command": "deno",
-      "args": [
-        "run",
-        "--allow-read=/path/to/your/obsidian/vault",
-        "--allow-run=rg",
-        "--allow-env=OBSIDIAN_VAULT_PATH",
-        "src/index.ts"
-      ],
-      "cwd": "/path/to/notes-mcp",
+      "command": "node",
+      "args": ["/path/to/notes-mcp/dist/index.js"],
       "env": {
         "OBSIDIAN_VAULT_PATH": "/path/to/your/obsidian/vault"
       }
@@ -151,7 +158,7 @@ To use this MCP server with Claude Desktop, add it to your Claude configuration 
 }
 ```
 
-**Using mise (recommended if you have mise installed):**
+**Using the start script (installs and builds automatically on first run):**
 ```json
 {
   "mcpServers": {
@@ -165,11 +172,10 @@ To use this MCP server with Claude Desktop, add it to your Claude configuration 
 }
 ```
 
-This uses the included `start-server.sh` script which handles changing to the project directory and running `mise run start`.
+This uses the included `start-server.sh` script, which changes to the project directory, installs dependencies and builds if needed, then runs `node dist/index.js`.
 
 Replace the paths with:
 - `/path/to/notes-mcp`: The absolute path to this project directory
 - `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
 
 After updating the configuration, restart Claude Desktop. The server will appear as "notes" and provide the `search_notes` and `read_notes` tools.
-

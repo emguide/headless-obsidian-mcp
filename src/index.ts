@@ -1,19 +1,21 @@
-#!/usr/bin/env -S deno run --allow-read --allow-run --allow-env
+#!/usr/bin/env node
 
+import { fileURLToPath } from "node:url";
+import process from "node:process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { searchNotes } from "./tools/search.ts";
-import { readNotes } from "./tools/read.ts";
-import { SearchNotesParams } from "./types.ts";
+import { searchNotes } from "./tools/search.js";
+import { readNotes } from "./tools/read.js";
+import { SearchNotesParams } from "./types.js";
 
-const VAULT_PATH = Deno.env.get("OBSIDIAN_VAULT_PATH");
+const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH;
 if (!VAULT_PATH) {
   console.error("Error: OBSIDIAN_VAULT_PATH environment variable is required");
-  Deno.exit(1);
+  process.exit(1);
 }
 
 const server = new Server(
@@ -50,7 +52,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Match whole words only"
             },
             multiline: {
-              type: "boolean", 
+              type: "boolean",
               description: "Enable multiline matching"
             },
             context_lines: {
@@ -86,7 +88,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       case "search_notes": {
-        const params = args as SearchNotesParams;
+        const params = args as unknown as SearchNotesParams;
         if (!params.pattern) {
           throw new Error("Pattern is required for search_notes");
         }
@@ -102,7 +104,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "read_notes": {
-        const { paths } = args as { paths: string[] };
+        const { paths } = args as unknown as { paths: string[] };
         if (!Array.isArray(paths) || paths.length === 0) {
           throw new Error("Paths array is required for read_notes");
         }
@@ -121,11 +123,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       content: [
         {
           type: "text",
-          text: `Error: ${error.message}`
+          text: `Error: ${message}`
         }
       ],
       isError: true
@@ -139,6 +142,7 @@ async function main() {
   console.error("Notes MCP server running on stdio");
 }
 
-if (import.meta.main) {
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMain) {
   main().catch(console.error);
 }
