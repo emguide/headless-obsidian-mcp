@@ -4,6 +4,7 @@ import process from "node:process";
 import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import { searchNotes } from "./tools/search.js";
+import { searchNotesRanked } from "./tools/search-ranked.js";
 import { readNotes } from "./tools/read.js";
 import { listNotes } from "./tools/list.js";
 import { getLinks } from "./tools/links.js";
@@ -48,6 +49,8 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
     let result;
     if (toolName === "search_notes") {
       result = await searchNotes(VAULT_PATH!, args);
+    } else if (toolName === "search_notes_ranked") {
+      result = await searchNotesRanked(VAULT_PATH!, args);
     } else if (toolName === "read_notes") {
       result = await readNotes(VAULT_PATH!, args.paths);
     } else if (toolName === "list_notes") {
@@ -132,6 +135,17 @@ program
       ...(context !== 5 && { context_lines: context })
     };
     await queryTool("search_notes", args, verbose);
+  });
+
+program
+  .command("search-ranked <query>")
+  .description("BM25 relevance-ranked full-text search")
+  .option("-l, --limit <n>", "Maximum number of results (default: 10, max: 100)")
+  .action(async (query: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args: any = { query };
+    if (options.limit !== undefined) args.limit = parseInt(options.limit, 10);
+    await queryTool("search_notes_ranked", args, verbose);
   });
 
 program
