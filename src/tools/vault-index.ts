@@ -6,9 +6,11 @@ import {
   collectTags,
   extractLinkTargets,
   firstHeading,
+  allHeadings,
   assertVaultPath,
   VaultFile,
 } from "./vault.js";
+import { tokenize } from "./text/tokenize.js";
 import { NoteHeader } from "../types.js";
 
 /**
@@ -26,6 +28,8 @@ export interface IndexEntry {
   linkTargets: string[];
   headline?: string;
   title: string;
+  /** BM25 token stream: body plus title/headings/tags injected at ×2 weight. */
+  tokens: string[];
 }
 
 /**
@@ -155,6 +159,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let linkTargets: string[] = [];
   let headline: string | undefined;
   let title = basename(f.path);
+  let tokens: string[] = [];
 
   try {
     const raw = await readFile(f.fullPath, "utf-8");
@@ -166,6 +171,12 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     if (typeof frontmatter.title === "string" && frontmatter.title.trim()) {
       title = frontmatter.title.trim();
     }
+    // BM25 tokens: body once, then boosted fields (title, headings, tags) an
+    // extra time (×2 weight) so a title/heading/tag hit outranks a passing
+    // body mention even when the term never appears in the body at all.
+    const boosted = [title, ...allHeadings(parsed.content), ...tags].join(" ");
+    const boostedTokens = tokenize(boosted);
+    tokens = [...tokenize(parsed.content), ...boostedTokens, ...boostedTokens];
   } catch {
     // Unreadable/unparseable note: still indexed by path with fs metadata.
   }
@@ -180,6 +191,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     linkTargets,
     headline,
     title,
+    tokens,
   };
 }
 
