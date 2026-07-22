@@ -32,6 +32,12 @@ guard. This spec adds equivalent bounds.
 - Imposing a hard maximum. There is intentionally no `MAX_LIMIT` clamp: the caps
   exist to stop a broad pattern from *accidentally* flooding context, not to
   forbid a deliberate full search.
+- Changing `search_notes_ranked`. It is already bounded — one result entry per
+  note with a single-line snippet, `limit` default 10 (hard max 100) — so it
+  cannot flood context the way literal search can (files × matches × context
+  lines). Its differing override semantics (no `0`-means-unlimited, hard 100
+  clamp) are left intact: exhaustive "give me everything" is a literal-search
+  need, near-meaningless for relevance-ordered ranked search.
 
 ## Design
 
