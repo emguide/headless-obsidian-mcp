@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import matter from "gray-matter";
 import { Note, NoteMetadata } from "../types.js";
+import { collectTags } from "./vault.js";
 
 export async function readNotes(vaultPath: string, notePaths: string[]): Promise<Note[]> {
   // Input validation
@@ -47,14 +48,13 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
 
       const { data: frontmatter, content: markdownContent } = matter(content);
 
-      const tags = extractObsidianTags(markdownContent);
-      const cleanContent = removeObsidianTags(markdownContent);
+      const tags = collectTags(frontmatter, markdownContent);
 
       const name = notePath.replace(/\.md$/, '');
 
       notes.push({
         name,
-        contents: cleanContent.trim(),
+        contents: markdownContent.trim(),
         metadata: frontmatter as NoteMetadata,
         tags
       });
@@ -73,14 +73,4 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
   }
 
   return notes;
-}
-
-function extractObsidianTags(content: string): string[] {
-  const tagRegex = /#[\w-]+/g;
-  const matches = content.match(tagRegex);
-  return matches ? matches.map(tag => tag.substring(1)) : [];
-}
-
-function removeObsidianTags(content: string): string {
-  return content.replace(/#[\w-]+/g, '').replace(/\n\s*\n\s*\n/g, '\n\n');
 }

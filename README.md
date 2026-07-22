@@ -233,9 +233,9 @@ Read and parse one or more notes from your vault.
 
 **Returns:** Array of note objects with:
 - `name`: Note name (relative path without .md extension)
-- `contents`: Markdown content (without frontmatter and tags)
+- `contents`: Markdown body verbatim (frontmatter removed; inline `#tags` in the body are preserved)
 - `metadata`: Parsed frontmatter as JSON object
-- `tags`: Array of extracted Obsidian tags
+- `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags`
 
 ### list_notes
 

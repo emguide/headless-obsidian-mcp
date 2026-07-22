@@ -44,12 +44,45 @@ test("search rejects a DoS-prone pattern", async () => {
   );
 });
 
-test("read_notes parses frontmatter, tags, and strips them from body", async () => {
+test("read_notes parses frontmatter and tags, preserving body text verbatim", async () => {
   const [note] = await readNotes(fx.vaultPath, ["projects/alpha"]);
   assert.equal(note.name, "projects/alpha");
   assert.equal(note.metadata.status, "active");
-  assert.ok(note.tags.includes("productivity"));
-  assert.ok(!note.contents.includes("#productivity"));
+  // `tags` unifies frontmatter `tags:` with inline `#tags`, matching the
+  // index-backed tools (list_notes, find_by_tag, list_tags).
+  assert.ok(note.tags.includes("productivity"), "inline tag");
+  assert.ok(note.tags.includes("project"), "frontmatter tag");
+  assert.ok(note.tags.includes("project/active"), "nested frontmatter tag");
+  // Body is returned verbatim (minus frontmatter) so patch_note's `find`
+  // matches what read_notes shows — inline tag text is not stripped.
+  assert.ok(note.contents.includes("#productivity"));
+});
+
+test("read_notes tag extraction ignores URL anchors and numeric refs", async () => {
+  const edge = await makeVault([
+    {
+      path: "tag-edge-cases.md",
+      content: [
+        "# Edge cases",
+        "See https://docs.example.com/page#install for setup.",
+        "Fixed in issue #123 last week.",
+        "Filed under #project/alpha and #done.",
+      ].join("\n"),
+    },
+  ]);
+  try {
+    const [note] = await readNotes(edge.vaultPath, ["tag-edge-cases"]);
+    // `#` preceded by a word char (a URL anchor) is not a tag.
+    assert.ok(!note.tags.includes("install"), "URL anchor must not be a tag");
+    // A purely numeric ref (#123) is not a tag — a tag must start with a letter.
+    assert.ok(!note.tags.includes("123"), "numeric ref must not be a tag");
+    // A nested tag is captured whole, not split into a stray fragment.
+    assert.ok(note.tags.includes("project/alpha"), "nested tag captured whole");
+    assert.ok(!note.tags.includes("project"), "nested tag not truncated");
+    assert.ok(note.tags.includes("done"));
+  } finally {
+    await edge.cleanup();
+  }
 });
 
 test("search finds matches and returns paths without .md", async () => {

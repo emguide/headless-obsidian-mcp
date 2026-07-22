@@ -36,9 +36,9 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Input**: `paths` - Array of relative note paths (with or without .md extension, max 50 notes)
 - **Output**: Array of note objects with:
   - `name`: Relative path without .md suffix
-  - `contents`: Markdown content without frontmatter and Obsidian tags
+  - `contents`: Markdown body verbatim (frontmatter block removed, but body text — including inline `#tags` — is returned unmodified so `patch_note` can match against it)
   - `metadata`: Parsed frontmatter as JSON object
-  - `tags`: Array of extracted Obsidian tags
+  - `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags` (same extraction as `list_tags`/`find_by_tag`)
 - **Security**: Protected against path traversal attacks, with file size limits (10MB per note)
 
 ### list_notes
