@@ -13,6 +13,8 @@ import { searchNotesRanked } from "./tools/search-ranked.js";
 import { readNotes } from "./tools/read.js";
 import { listNotes } from "./tools/list.js";
 import { getLinks } from "./tools/links.js";
+import { getOutline } from "./tools/outline.js";
+import { readSection } from "./tools/section.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
@@ -66,6 +68,7 @@ import {
   PropertyValuesParamsRead,
   QueryNotesParams,
   GetPropertyParams,
+  ReadSectionParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -182,6 +185,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           },
           required: ["path"]
+        }
+      },
+      {
+        name: "get_outline",
+        description: "Return a note's heading structure (outline) without reading its body: each heading with its level, 1-based line number, full \" > \"-joined heading-path, and an ambiguity flag. Use it to see what sections exist before reading or editing one.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Relative note path (with or without .md extension)"
+            }
+          },
+          required: ["path"]
+        }
+      },
+      {
+        name: "read_section",
+        description: "Read a single section of a note without loading the whole note. Address the section by bare heading (when unique) or by a \" > \"-joined heading-path (e.g. \"Projects > Log\") when the heading repeats. Returns the heading plus its own body; set include_subsections to include nested subsections.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Relative note path (with or without .md extension)"
+            },
+            section: {
+              type: "string",
+              description: "Heading text, or a \" > \"-joined heading-path when the heading is ambiguous"
+            },
+            include_subsections: {
+              type: "boolean",
+              description: "Include nested subsections in the returned content (default false)"
+            }
+          },
+          required: ["path", "section"]
         }
       },
       {
@@ -615,6 +654,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error("A note path is required for get_links");
         }
         const results = await getLinks(VAULT_PATH, path);
+        return {
+          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+        };
+      }
+
+      case "get_outline": {
+        const { path } = args as unknown as { path: string };
+        if (!path || typeof path !== "string") {
+          throw new Error("A note path is required for get_outline");
+        }
+        const results = await getOutline(VAULT_PATH, path);
+        return {
+          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+        };
+      }
+
+      case "read_section": {
+        const params = args as unknown as ReadSectionParams;
+        if (!params.path || typeof params.path !== "string") {
+          throw new Error("A note path is required for read_section");
+        }
+        if (!params.section || typeof params.section !== "string") {
+          throw new Error("A section is required for read_section");
+        }
+        const results = await readSection(VAULT_PATH, params);
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
         };

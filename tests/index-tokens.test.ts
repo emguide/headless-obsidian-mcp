@@ -1,16 +1,19 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { getIndex } from "../src/tools/vault-index.js";
-import { allHeadings } from "../src/tools/vault.js";
+import { parseHeadings } from "../src/tools/vault.js";
 import { makeVault, Fixture } from "./fixtures.js";
 
-test("allHeadings returns every heading in order", () => {
+test("parseHeadings returns every heading in order", () => {
   const md = "# One\n\nbody\n\n## Two\n\n### Three\n";
-  assert.deepEqual(allHeadings(md), ["One", "Two", "Three"]);
+  assert.deepEqual(
+    parseHeadings(md).map((h) => h.text),
+    ["One", "Two", "Three"]
+  );
 });
 
-test("allHeadings is empty when there are no headings", () => {
-  assert.deepEqual(allHeadings("just a paragraph"), []);
+test("parseHeadings is empty when there are no headings", () => {
+  assert.deepEqual(parseHeadings("just a paragraph"), []);
 });
 
 let fx: Fixture;

@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, resolve, relative, sep } from "node:path";
+import { ParsedHeading } from "../types.js";
 
 /**
  * A markdown file discovered in the vault, with lightweight filesystem
@@ -215,17 +216,53 @@ export function rewriteWikilinks(
   return { content: next, changed };
 }
 
-/** Extract the first markdown heading (`# ...`) from note content, if any. */
-export function firstHeading(content: string): string | undefined {
-  const match = content.match(/^#{1,6}\s+(.+?)\s*$/m);
-  return match ? match[1].trim() : undefined;
+/**
+ * All ATX headings (`#`..`######`) in document order, skipping fenced code
+ * blocks. This is the single shared heading parser used by the index, the
+ * write tools, and the read-side structure tools, so they never disagree.
+ */
+export function parseHeadings(content: string): ParsedHeading[] {
+  const lines = content.split("\n");
+  const headings: ParsedHeading[] = [];
+  let inFence = false;
+  let fence = "";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fenceMatch = line.match(/^\s*(```+|~~~+)/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true;
+        fence = marker;
+      } else if (marker === fence) {
+        inFence = false;
+      }
+      continue;
+    }
+    if (inFence) continue;
+    const h = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (h) headings.push({ text: h[2].trim(), level: h[1].length, line: i });
+  }
+  return headings;
 }
 
-/** Extract every markdown heading (`# ...` through `###### ...`) in order. */
-export function allHeadings(content: string): string[] {
-  const out: string[] = [];
-  const re = /^#{1,6}\s+(.+?)\s*$/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) out.push(m[1].trim());
-  return out;
+/**
+ * Parallel array of `" > "`-joined ancestor paths for the given headings.
+ * A heading at level L attaches to the nearest heading of level < L before it;
+ * level skips attach to whatever shallower ancestor is present.
+ */
+export function headingPaths(headings: ParsedHeading[]): string[] {
+  const stack: ParsedHeading[] = [];
+  return headings.map((h) => {
+    while (stack.length > 0 && stack[stack.length - 1].level >= h.level) {
+      stack.pop();
+    }
+    const path = [...stack.map((a) => a.text), h.text].join(" > ");
+    stack.push(h);
+    return path;
+  });
+}
+
+export function firstHeading(content: string): string | undefined {
+  return parseHeadings(content)[0]?.text;
 }

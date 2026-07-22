@@ -1,4 +1,5 @@
 import matter from "gray-matter";
+import { parseHeadings } from "./vault.js";
 
 /**
  * An in-memory, editable view of a single note: its parsed frontmatter plus its
@@ -312,29 +313,11 @@ interface Heading {
 
 /** Find all ATX headings in the body, skipping fenced code blocks. */
 function findHeadings(lines: string[]): Heading[] {
-  const headings: Heading[] = [];
-  let inFence = false;
-  let fence = "";
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const fenceMatch = line.match(/^\s*(```+|~~~+)/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0];
-      if (!inFence) {
-        inFence = true;
-        fence = marker;
-      } else if (marker === fence) {
-        inFence = false;
-      }
-      continue;
-    }
-    if (inFence) continue;
-    const h = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
-    if (h) {
-      headings.push({ line: i, level: h[1].length, text: h[2].trim() });
-    }
-  }
-  return headings;
+  return parseHeadings(lines.join("\n")).map((h) => ({
+    line: h.line,
+    level: h.level,
+    text: h.text,
+  }));
 }
 
 /** Locate a section by heading text (exact, trimmed). Optional level filter. */

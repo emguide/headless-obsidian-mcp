@@ -45,6 +45,14 @@ export interface NoteHeader {
   modified: string;
 }
 
+/** A markdown heading with its level and 0-based source line index. */
+export interface ParsedHeading {
+  text: string;
+  level: number;
+  /** 0-based index of the heading line within the content's line array. */
+  line: number;
+}
+
 export interface ListNotesParams {
   /** Restrict to notes under this folder (relative to the vault root). */
   folder?: string;
@@ -188,4 +196,35 @@ export interface QueryNotesParams {
 export interface GetPropertyParams {
   path: string;
   key: string;
+}
+
+export interface OutlineEntry {
+  heading: string;
+  level: number;
+  /** Full " > "-joined heading-path (disambiguating address). */
+  path: string;
+  /** 1-based line number of the heading in the note body. */
+  line: number;
+  /** True when the bare heading text is non-unique in this note. */
+  ambiguous: boolean;
+}
+
+export interface OutlineResult {
+  path: string;
+  outline: OutlineEntry[];
+}
+
+export interface ReadSectionParams {
+  path: string;
+  section: string;
+  include_subsections?: boolean;
+}
+
+export interface SectionResult {
+  path: string;
+  /** The resolved full heading-path. */
+  section: string;
+  level: number;
+  /** Heading line + body slice, verbatim. Frontmatter excluded. */
+  content: string;
 }
