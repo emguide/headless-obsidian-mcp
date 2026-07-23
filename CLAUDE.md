@@ -153,9 +153,9 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Input**:
   - `where` (required): Object of `key -> condition`. A condition is either a bare scalar (equality, or array-membership when the note's value is an array) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`.
   - `match` (optional): `"all"` (default — every condition must hold) or `"any"` (at least one)
-  - `limit` (optional): Maximum number of notes to return
+  - `limit` (optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 - **Comparisons**: Type-aware — numeric when both sides parse as numbers, chronological when both parse as dates, else case-insensitive string compare.
-- **Output**: Array of note headers (same shape as `list_notes`). Index-backed.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`); `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`. Index-backed.
 
 ### get_property
 - **Purpose**: Read a single frontmatter property from one note — cheaper than reading the whole note or its full frontmatter when only one field is needed.

@@ -71,7 +71,7 @@ test("queryNotes finds notes by condition", async () => {
     const hits = await queryNotes(vaultPath, {
       where: { status: "active", priority: { gt: 3 } },
     });
-    assert.deepEqual(hits.map((h) => h.path), ["a"]);
+    assert.deepEqual(hits.results.map((h) => h.path), ["a"]);
   } finally {
     await cleanup();
   }
@@ -84,7 +84,47 @@ test("queryNotes with match any", async () => {
       where: { status: "done", priority: { gte: 5 } },
       match: "any",
     });
-    assert.deepEqual(hits.map((h) => h.path).sort(), ["a", "c"]);
+    assert.deepEqual(hits.results.map((h) => h.path).sort(), ["a", "c"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("queryNotes applies the default limit envelope with truncation", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "n1.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n2.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n3.md", content: "---\nstatus: active\n---\nbody\n" },
+  ]);
+  try {
+    const hits = await queryNotes(vaultPath, {
+      where: { status: "active" },
+      limit: 2,
+    });
+    assert.equal(hits.results.length, 2);
+    assert.equal(hits.returned, 2);
+    assert.equal(hits.omitted, 1);
+    assert.equal(hits.truncated, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("queryNotes limit: 0 returns all matches unbounded", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "n1.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n2.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n3.md", content: "---\nstatus: active\n---\nbody\n" },
+  ]);
+  try {
+    const hits = await queryNotes(vaultPath, {
+      where: { status: "active" },
+      limit: 0,
+    });
+    assert.equal(hits.results.length, 3);
+    assert.equal(hits.returned, 3);
+    assert.equal(hits.omitted, 0);
+    assert.equal(hits.truncated, false);
   } finally {
     await cleanup();
   }

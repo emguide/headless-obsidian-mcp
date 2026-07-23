@@ -430,11 +430,11 @@ Find notes by frontmatter condition — generalizes the `where` filter in `list_
 **Parameters:**
 - `where` (object, required): `key -> condition` map. A condition is a bare scalar (equality / array-membership) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`
 - `match` (string, optional): `"all"` (default) or `"any"`
-- `limit` (number, optional): Maximum number of notes to return
+- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 
 Comparisons are type-aware: numeric when both sides parse as numbers, chronological when both parse as dates, otherwise case-insensitive string compare.
 
-**Returns:** Array of note headers (same shape as `list_notes`).
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_property
 

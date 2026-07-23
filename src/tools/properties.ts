@@ -1,6 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { matchesWhere } from "./property-match.js";
+import { toListResponse } from "./list-response.js";
 import {
   ListPropertiesParams,
   PropertySchemaEntry,
@@ -9,7 +10,11 @@ import {
   QueryNotesParams,
   GetPropertyParams,
   NoteHeader,
+  ListResponse,
 } from "../types.js";
+
+/** Default cap on `query_notes` so an unbounded call is still bounded. */
+const DEFAULT_LIMIT = 100;
 
 /** Canonical vault name for a note path (forward slashes, no .md suffix). */
 function canonicalName(notePath: string): string {
@@ -106,7 +111,7 @@ export async function getPropertyValues(
 export async function queryNotes(
   vaultPath: string,
   params: QueryNotesParams
-): Promise<NoteHeader[]> {
+): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
   const { where, match = "all", limit } = params;
   if (!where || typeof where !== "object" || Array.isArray(where)) {
@@ -115,15 +120,15 @@ export async function queryNotes(
   if (match !== "all" && match !== "any") {
     throw new Error('match must be "all" or "any"');
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
   const index = await getIndex(vaultPath);
   const matched = index
     .getEntries()
     .filter((e) => matchesWhere(e.frontmatter, where, match));
-  const limited = limit !== undefined ? matched.slice(0, limit) : matched;
-  return limited.map(entryToHeader);
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return toListResponse(matched.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit);
 }
 
 /**
