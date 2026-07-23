@@ -133,10 +133,11 @@ Anything beyond trivial work (a single-line fix or a pure question) should be do
 
 ### list_vault_issues
 - **Purpose**: Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
-- **Input**: `kind` (required): `"orphans"` or `"unresolved_links"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap).
+- **Input**: `kind` (required): `"orphans"`, `"unresolved_links"`, or `"broken_anchors"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap).
 - **Output**: `{ results, returned, omitted, truncated }`. `results`' shape depends on `kind`:
   - `"orphans"`: Array of note headers (same shape as `list_notes`) for notes with no inbound and no outbound resolved links — the exact predicate `get_vault_stats` uses for `orphan_notes`.
   - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
+  - `"broken_anchors"`: `[[note#heading]]` links whose target note resolves but whose heading anchor matches no heading in that note — the complement of `unresolved_links` ("note resolves, heading doesn't"). Array of `{ source, targets: [{ target, anchor }] }` grouped by source note, same truncation semantics as `unresolved_links` (counts groups, not individual anchors). Block-ref anchors (`#^id`) and links to unresolved notes are excluded.
   `returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 - **Count relationship**: for the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), `orphans`' `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count. A group-limited result naturally shows fewer.
 - **Notes**: Index-backed (no file read).
@@ -194,7 +195,7 @@ Anything beyond trivial work (a single-line fix or a pure question) should be do
 
 **The write tools are off by default.** The server is read-only unless
 `OBSIDIAN_ALLOW_WRITES` is set to a truthy value (`1`, `true`, `yes`, `on`).
-When disabled, the seventeen write tools are hidden from `list_tools` and any call
+When disabled, the eighteen write tools are hidden from `list_tools` and any call
 to one is rejected — so an agent only ever sees the read tools. When enabled, all
 tools are exposed. The flag gates the MCP server (the agent-facing surface); the
 query CLI is the operator's own tool and is not gated. Flag helpers live in
@@ -280,6 +281,12 @@ change a tag or a section without reading and rewriting the whole note.
 - **Purpose**: Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
 - **Input**: `path` (required), `heading` (required — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`), `content` (required)
 - **Output**: `{ path, heading }`
+
+### rename_section
+- **Purpose**: Rename a heading in a note and rewrite every inbound `[[note#heading]]` anchor across the vault to the new heading — the heading-level analogue of `move_note`, closing the last structural edit that could silently break the link graph.
+- **Input**: `path` (required), `from` (required — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `read_section`/`replace_section`), `to` (required — new heading text), `update_anchors` (optional, default `true` — rewrite inbound anchors elsewhere in the vault).
+- **Output**: `{ path, from, to, updated_notes, updated_links }` — `from`/`to` are the resolved old/new heading; `updated_notes`/`updated_links` count inbound anchors rewritten (the note's own heading is always rewritten; counters cover only inbound anchors).
+- **Anchor matching**: Literal case-insensitive (trimmed) text — NOT Obsidian slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud.
 
 ### bulk_edit
 - **Purpose**: Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot, with per-note result reporting. Turns "tag these 30 notes" from 30 round trips (and 30 auto-snapshot commits) into one.
@@ -394,6 +401,7 @@ npm run query -- resolve "Alpha Project"                # title/alias/basename -
 npm run query -- stats                                  # Whole-vault statistics
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
+npm run query -- vault-issues broken_anchors --limit 50    # Resolved-note, dead-heading anchors, by source
 npm run query -- files --folder assets --extension png  # Non-markdown files (attachments)
 npm run query -- folders                                 # Folder tree with note counts
 npm run query -- folders --folder projects --depth 1     # Immediate subfolders of projects/
@@ -419,6 +427,8 @@ npm run query -- rename-property "projects/alpha" author authors
 npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
 npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
 npm run query -- replace-section "projects/alpha" "Summary" "new summary"
+npm run query -- rename-section "projects/alpha" "Old Heading" "New Heading"
+npm run query -- rename-section "projects/alpha" "Old" "New" --no-update-anchors
 npm run query -- move "projects/alpha" "archive/alpha"  # Rename + rewrite links
 npm run query -- move-file "assets/old.png" "assets/new.png"
 npm run query -- patch "projects/alpha" "old text" "new text" --all
