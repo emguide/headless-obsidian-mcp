@@ -33,8 +33,8 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Purpose**: Full-text search ranked by BM25 relevance — the most relevant notes first, rather than every literal match. Complements `search_notes` (which is literal/regex and unranked).
 - **Input**:
   - `query` (required): Free-text query (max 1000 chars). Multi-word queries are ranked by relevance.
-  - `limit` (optional): Maximum number of results (default: 10, max: 100)
-- **Output**: Array of note headers (same shape as `list_notes`) extended with `score` (BM25 relevance, higher = more relevant) and `snippet` (a short matched excerpt).
+  - `limit` (optional): Maximum number of results (default 100; `limit: 0` = unbounded; a positive limit is capped at 100)
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of ranked note headers (same shape as `list_notes`) extended with `score` (BM25 relevance, higher = more relevant) and `snippet` (a short matched excerpt); the other fields report what was dropped so a truncated result isn't mistaken for a complete one.
 - **Ranking**: Standard Okapi BM25 (`k1=1.2`, `b=0.75`) over a stemmed, stopword-filtered token stream. Title, heading, and tag terms are boosted (indexed at ×2 weight) so a title hit outranks a passing body mention. Built on the shared in-memory vault index — no per-query vault scan.
 - **Limitation**: Tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, Porter-stemmed), so non-Latin scripts (e.g. CJK) and accented characters are not well indexed for ranked search. Use `search_notes` (ripgrep) for literal non-ASCII matching.
 
@@ -54,8 +54,8 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Purpose**: Discover what exists in the vault. Returns lightweight note headers (no full contents), so an agent can orient itself before searching or reading.
 - **Input**:
   - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
-  - `limit` (optional): Maximum number of notes to return
-- **Output**: Array of note headers with `path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, and `modified` (ISO timestamp)
+  - `limit` (optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`); `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0` — so a capped first-orientation call isn't mistaken for a complete one.
 
 ### get_links
 - **Purpose**: Resolve the Obsidian link graph for a note, turning the flat vault into a navigable graph.
@@ -84,32 +84,32 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 ### list_tags
 - **Purpose**: Show the vault's topic index. Returns every tag with the number of notes using it, sorted by frequency.
 - **Input**: none
-- **Output**: Array of `{ tag, count }`. Unifies inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of `{ tag, count }`, unifying inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
 
 ### find_by_tag
 - **Purpose**: High-precision retrieval by human curation.
 - **Input**:
   - `tags` (required): Array of tags to match (with or without leading `#`)
   - `match` (optional): `"any"` (default) or `"all"`
-  - `limit` (optional): Maximum number of notes to return
-- **Output**: Array of note headers (same shape as `list_notes`)
+  - `limit` (optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### list_recent_notes
 - **Purpose**: Find current material. Returns notes ordered by recency (newest first).
 - **Input**:
-  - `limit` (optional): Maximum number of notes to return (default: 20)
+  - `limit` (optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
   - `since` (optional): Only include notes on or after this ISO date
   - `date_field` (optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
   - `where` (optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`; matches array members too)
-- **Output**: Array of note headers (same shape as `list_notes`)
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_related_notes
 - **Purpose**: Associative recall. Rank the notes most related to a given note, so an agent can ask "I'm looking at X — what else is relevant?" No embeddings or model: a transparent weighted blend of signals already held in the shared index.
 - **Input**:
   - `path` (required): Relative note path (with or without `.md`)
-  - `limit` (optional): Maximum number of related notes to return (default: 10)
+  - `limit` (optional): Maximum number of related notes to return (default 100; `limit: 0` = unbounded)
 - **Scoring**: direct link either direction (weight 4), each shared tag (3), each shared out-link / co-reference (2), each shared backlink / co-citation (2). Notes with no connecting signal are omitted; ties break by path.
-- **Output**: Array of note headers (same shape as `list_notes`) extended with `score`, `reasons`, `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons`, `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (those with a connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
 ### get_frontmatter
@@ -125,37 +125,38 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 
 ### list_vault_issues
 - **Purpose**: Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
-- **Input**: `kind` (required): `"orphans"` or `"unresolved_links"`. `limit` (optional): Cap on the number of returned rows/headers.
-- **Output**: Shape depends on `kind`:
+- **Input**: `kind` (required): `"orphans"` or `"unresolved_links"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap).
+- **Output**: `{ results, returned, omitted, truncated }`. `results`' shape depends on `kind`:
   - `"orphans"`: Array of note headers (same shape as `list_notes`) for notes with no inbound and no outbound resolved links — the exact predicate `get_vault_stats` uses for `orphan_notes`.
-  - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing.
-- **Count relationship**: `orphans` array length equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links` equals `get_vault_stats`'s `unresolved_links` count (both before any `limit` is applied).
+  - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
+  `returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`.
+- **Count relationship**: for the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), `orphans`' `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count. A group-limited result naturally shows fewer.
 - **Notes**: Index-backed (no file read).
 
 ### list_files
 - **Purpose**: List non-markdown files in the vault (attachments, images, PDFs) — the counterpart to `list_notes` for everything `list_notes` deliberately excludes.
-- **Input**: `folder` (optional): Restrict to files under this folder (relative to the vault root). `extension` (optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`). `limit` (optional): Maximum number of files to return.
-- **Output**: Array of `{ path, size, modified, extension }` — `path` is vault-relative with the extension preserved (unlike note paths, `.md` is never stripped here because these aren't notes), `modified` is an ISO timestamp, `extension` is lowercased without the dot.
+- **Input**: `folder` (optional): Restrict to files under this folder (relative to the vault root). `extension` (optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`). `limit` (optional): Maximum number of files to return (default `100`; pass `0` for unbounded — no cap).
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of file entries (`path`, `size`, `modified`, `extension`), bounded by `limit` (default `100`); `path` is vault-relative with the extension preserved (unlike note paths, `.md` is never stripped here because these aren't notes), `modified` is an ISO timestamp, `extension` is lowercased without the dot. `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 - **Notes**: Markdown files are never returned. Reuses the same directory walk and ignore rules as the vault index, but does not read from or write to the index itself.
 
 ### list_properties
 - **Purpose**: The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
 - **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`)
-- **Output**: Array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. Index-backed.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`. Index-backed.
 
 ### get_property_values
 - **Purpose**: Distinct values of one frontmatter property with per-note counts — a faceted breakdown, e.g. to see every `status` value in use.
-- **Input**: `key` (required), `limit` (optional)
-- **Output**: `{ key, values: [{ value, count }] }`, sorted by `count` descending then value. Array-valued properties count each element once per note. Index-backed.
+- **Input**: `key` (required), `limit` (optional, default 100; `limit: 0` = unbounded)
+- **Output**: `{ key, results, returned, omitted, truncated }` — `results` is `[{ value, count }]`, sorted by `count` descending then value, bounded by `limit`. Array-valued properties count each element once per note. Index-backed.
 
 ### query_notes
 - **Purpose**: Find notes by frontmatter condition — generalizes the `where` filter in `list_recent_notes` into its own tool.
 - **Input**:
   - `where` (required): Object of `key -> condition`. A condition is either a bare scalar (equality, or array-membership when the note's value is an array) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`.
   - `match` (optional): `"all"` (default — every condition must hold) or `"any"` (at least one)
-  - `limit` (optional): Maximum number of notes to return
+  - `limit` (optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 - **Comparisons**: Type-aware — numeric when both sides parse as numbers, chronological when both parse as dates, else case-insensitive string compare.
-- **Output**: Array of note headers (same shape as `list_notes`). Index-backed.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`); `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`. Index-backed.
 
 ### get_property
 - **Purpose**: Read a single frontmatter property from one note — cheaper than reading the whole note or its full frontmatter when only one field is needed.

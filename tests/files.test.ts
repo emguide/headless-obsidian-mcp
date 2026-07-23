@@ -18,7 +18,7 @@ after(() => fx.cleanup());
 
 test("lists only non-markdown files, skipping ignored dirs", async () => {
   const files = await listFiles(fx.vaultPath, {});
-  const paths = files.map((f) => f.path).sort();
+  const paths = files.results.map((f) => f.path).sort();
   assert.deepEqual(paths, ["assets/logo.png", "assets/report.PDF", "sub/pic.PNG"]);
   assert.ok(!paths.some((p) => p.endsWith(".md")));
   assert.ok(!paths.some((p) => p.startsWith(".trash")));
@@ -26,7 +26,7 @@ test("lists only non-markdown files, skipping ignored dirs", async () => {
 
 test("path keeps the extension and reports fields", async () => {
   const files = await listFiles(fx.vaultPath, {});
-  const png = files.find((f) => f.path === "assets/logo.png")!;
+  const png = files.results.find((f) => f.path === "assets/logo.png")!;
   assert.equal(png.extension, "png");
   assert.equal(typeof png.size, "number");
   assert.match(png.modified, /^\d{4}-\d{2}-\d{2}T/);
@@ -34,17 +34,33 @@ test("path keeps the extension and reports fields", async () => {
 
 test("folder scopes to a subtree", async () => {
   const files = await listFiles(fx.vaultPath, { folder: "assets" });
-  assert.deepEqual(files.map((f) => f.path).sort(), ["assets/logo.png", "assets/report.PDF"]);
+  assert.deepEqual(files.results.map((f) => f.path).sort(), ["assets/logo.png", "assets/report.PDF"]);
 });
 
 test("extension filter is dot-optional and case-insensitive", async () => {
   const png = await listFiles(fx.vaultPath, { extension: ".PNG" });
-  assert.deepEqual(png.map((f) => f.path).sort(), ["assets/logo.png", "sub/pic.PNG"]);
+  assert.deepEqual(png.results.map((f) => f.path).sort(), ["assets/logo.png", "sub/pic.PNG"]);
   const pdf = await listFiles(fx.vaultPath, { extension: "pdf" });
-  assert.deepEqual(pdf.map((f) => f.path), ["assets/report.PDF"]);
+  assert.deepEqual(pdf.results.map((f) => f.path), ["assets/report.PDF"]);
 });
 
 test("limit caps the result", async () => {
   const files = await listFiles(fx.vaultPath, { limit: 1 });
-  assert.equal(files.length, 1);
+  assert.equal(files.results.length, 1);
+});
+
+test("limit smaller than file count reports truncation", async () => {
+  const files = await listFiles(fx.vaultPath, { limit: 2 });
+  assert.equal(files.results.length, 2);
+  assert.equal(files.returned, 2);
+  assert.equal(files.omitted, 1);
+  assert.equal(files.truncated, true);
+});
+
+test("limit: 0 returns all files, unbounded", async () => {
+  const files = await listFiles(fx.vaultPath, { limit: 0 });
+  assert.equal(files.results.length, 3);
+  assert.equal(files.returned, 3);
+  assert.equal(files.omitted, 0);
+  assert.equal(files.truncated, false);
 });

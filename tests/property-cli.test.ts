@@ -16,7 +16,7 @@ test("CLI: properties lists the schema", async () => {
       env: { ...process.env, OBSIDIAN_VAULT_PATH: vaultPath },
     });
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.some((p: any) => p.key === "status"), true);
+    assert.equal(parsed.results.some((p: any) => p.key === "status"), true);
   } finally {
     await cleanup();
   }
@@ -34,7 +34,7 @@ test("CLI: query --where filters by condition", async () => {
       { env: { ...process.env, OBSIDIAN_VAULT_PATH: vaultPath } }
     );
     const parsed = JSON.parse(stdout);
-    assert.deepEqual(parsed.map((h: any) => h.path), ["a"]);
+    assert.deepEqual(parsed.results.map((h: any) => h.path), ["a"]);
   } finally {
     await cleanup();
   }

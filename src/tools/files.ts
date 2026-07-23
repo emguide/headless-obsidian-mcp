@@ -1,18 +1,27 @@
 import { assertVaultPath, walkVault } from "./vault.js";
-import { ListFilesParams, VaultFileEntry } from "../types.js";
+import { ListFilesParams, ListResponse, VaultFileEntry } from "../types.js";
+import { toListResponse } from "./list-response.js";
+
+/** Default cap on `list_files` so an unbounded call is still bounded. */
+const DEFAULT_LIMIT = 100;
 
 /**
  * List non-markdown files in the vault (attachments, images, PDFs) so an agent
  * can find the file it is asked to move. Reuses walkVault's traversal and
  * ignore rules, filtered to non-.md files. Does not touch the vault index.
+ *
+ * Bounded by default: with no `limit`, at most `DEFAULT_LIMIT` files are
+ * returned. Pass `limit: 0` for an unbounded list. The result is a
+ * `ListResponse` envelope reporting `returned`/`omitted`/`truncated` so a
+ * capped list is never mistaken for a complete one.
  */
 export async function listFiles(
   vaultPath: string,
   params: ListFilesParams = {}
-): Promise<VaultFileEntry[]> {
+): Promise<ListResponse<VaultFileEntry>> {
   assertVaultPath(vaultPath);
   const { folder, extension, limit } = params;
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
 
@@ -39,5 +48,6 @@ export async function listFiles(
     });
   }
 
-  return limit !== undefined ? out.slice(0, limit) : out;
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return toListResponse(out, effectiveLimit === 0 ? undefined : effectiveLimit);
 }

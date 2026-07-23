@@ -52,6 +52,28 @@ the existing `.slice(0, limit)` — no extra vault scan, no extra cost. That is
 what makes the convention affordable to apply everywhere rather than only where
 `search_notes` already does.
 
+### Uniform limit policy
+
+Adopted 2026-07-23, alongside the envelope: every list-style tool applies the
+same `limit` policy, so the whole surface behaves predictably.
+
+- **`DEFAULT_LIMIT = 100`** — when `limit` is omitted, at most 100 rows are
+  returned. This bounds an agent's first orientation call so it never blows up
+  context. This overrides the pre-existing per-tool defaults (`list_recent_notes`
+  was 20; `search_notes_ranked` and `get_related_notes` were 10) — all become 100.
+- **`limit: 0` = unbounded** — an explicit `0` returns every row, matching
+  `search_notes`.
+- **Validation** accepts `0` and rejects negative or non-integer values. The
+  error message stays `"limit must be a positive integer"` (unchanged wording,
+  even though `0` is now legal).
+- The two no-limit tools (`list_tags`, `list_properties`) take no `limit` at all
+  and are unaffected by this policy — they always return everything.
+
+This is a **behavior change** for the currently-unlimited tools (`find_by_tag`,
+`query_notes`, `list_files`, `list_vault_issues`, `get_property_values`): they
+become bounded-by-default at 100. It is layered on top of the envelope so a
+truncation caused by `DEFAULT_LIMIT` is always visible via `truncated`/`omitted`.
+
 ## Scope
 
 All list-style tools adopt the envelope, uniformly.
@@ -126,8 +148,9 @@ consistent shape.
 
 ## Error handling
 
-- Invalid `limit` (non-integer or `< 1`) continues to `throw` exactly as today.
-  Validation runs before slicing and is unchanged.
+- `limit` validation now accepts `0` (the unbounded sentinel) and rejects
+  negative or non-integer values. The `throw` message stays
+  `"limit must be a positive integer"`. Validation runs before slicing.
 - No new error paths are introduced. An empty filtered set is not an error; it
   yields the empty-result envelope above.
 
@@ -138,8 +161,12 @@ TDD, per tool. For each wrapped tool:
 1. **Truncation case** — a `limit` smaller than the true result count yields
    `truncated: true` with correct `returned` and `omitted` (and
    `returned + omitted === total`).
-2. **Complete case** — an unlimited or generously large call yields
+2. **Complete case** — an unlimited call (`limit: 0`) yields
    `truncated: false`, `omitted: 0`, and `returned === results.length`.
+3. **Default-limit case** — with `limit` omitted, no more than 100 rows are
+   returned; when the true count exceeds 100 the result is `truncated: true`.
+   (Only worth an explicit test where a fixture can exceed 100; otherwise the
+   omitted-limit path is covered by the complete case.)
 
 For the two no-limit tools (`list_tags`, `list_properties`): one test that a
 normal call reports `truncated: false, omitted: 0`.

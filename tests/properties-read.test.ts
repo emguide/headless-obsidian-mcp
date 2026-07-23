@@ -20,13 +20,13 @@ test("listProperties reports keys, counts, and types", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const props = await listProperties(vaultPath);
-    const status = props.find((p) => p.key === "status");
+    const status = props.results.find((p) => p.key === "status");
     assert.equal(status?.count, 3);
     assert.deepEqual(status?.types, ["string"]);
-    const priority = props.find((p) => p.key === "priority");
+    const priority = props.results.find((p) => p.key === "priority");
     assert.equal(priority?.count, 2);
     assert.deepEqual(priority?.types, ["number"]);
-    const nullField = props.find((p) => p.key === "null_field");
+    const nullField = props.results.find((p) => p.key === "null_field");
     assert.deepEqual(nullField?.types, ["null"]);
   } finally {
     await cleanup();
@@ -37,7 +37,19 @@ test("listProperties omits tags when include_tags is false", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const props = await listProperties(vaultPath, { include_tags: false });
-    assert.equal(props.some((p) => p.key === "tags"), false);
+    assert.equal(props.results.some((p) => p.key === "tags"), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("listProperties reports the full envelope with no truncation", async () => {
+  const { vaultPath, cleanup } = await vault();
+  try {
+    const props = await listProperties(vaultPath);
+    assert.equal(props.truncated, false);
+    assert.equal(props.omitted, 0);
+    assert.ok(props.results.some((p) => p.key === "status"));
   } finally {
     await cleanup();
   }
@@ -47,8 +59,9 @@ test("getPropertyValues facets distinct values with counts", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const res = await getPropertyValues(vaultPath, { key: "status" });
-    assert.equal(res.values.find((v) => v.value === "active")?.count, 2);
-    assert.equal(res.values.find((v) => v.value === "done")?.count, 1);
+    assert.equal(res.key, "status");
+    assert.equal(res.results.find((v) => v.value === "active")?.count, 2);
+    assert.equal(res.results.find((v) => v.value === "done")?.count, 1);
   } finally {
     await cleanup();
   }
@@ -58,8 +71,44 @@ test("getPropertyValues counts array elements individually", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const res = await getPropertyValues(vaultPath, { key: "aliases" });
-    assert.equal(res.values.find((v) => v.value === "k")?.count, 1);
-    assert.equal(res.values.find((v) => v.value === "j")?.count, 1);
+    assert.equal(res.results.find((v) => v.value === "k")?.count, 1);
+    assert.equal(res.results.find((v) => v.value === "j")?.count, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("getPropertyValues truncates with a limit smaller than the distinct-value count", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "a.md", content: "---\nstatus: alpha\n---\nbody\n" },
+    { path: "b.md", content: "---\nstatus: beta\n---\nbody\n" },
+    { path: "c.md", content: "---\nstatus: gamma\n---\nbody\n" },
+  ]);
+  try {
+    const res = await getPropertyValues(vaultPath, { key: "status", limit: 2 });
+    assert.equal(res.key, "status");
+    assert.equal(res.results.length, 2);
+    assert.equal(res.returned, 2);
+    assert.equal(res.omitted, 1);
+    assert.equal(res.truncated, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("getPropertyValues limit: 0 returns all distinct values unbounded", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "a.md", content: "---\nstatus: alpha\n---\nbody\n" },
+    { path: "b.md", content: "---\nstatus: beta\n---\nbody\n" },
+    { path: "c.md", content: "---\nstatus: gamma\n---\nbody\n" },
+  ]);
+  try {
+    const res = await getPropertyValues(vaultPath, { key: "status", limit: 0 });
+    assert.equal(res.key, "status");
+    assert.equal(res.results.length, 3);
+    assert.equal(res.returned, 3);
+    assert.equal(res.omitted, 0);
+    assert.equal(res.truncated, false);
   } finally {
     await cleanup();
   }
@@ -71,7 +120,7 @@ test("queryNotes finds notes by condition", async () => {
     const hits = await queryNotes(vaultPath, {
       where: { status: "active", priority: { gt: 3 } },
     });
-    assert.deepEqual(hits.map((h) => h.path), ["a"]);
+    assert.deepEqual(hits.results.map((h) => h.path), ["a"]);
   } finally {
     await cleanup();
   }
@@ -84,7 +133,47 @@ test("queryNotes with match any", async () => {
       where: { status: "done", priority: { gte: 5 } },
       match: "any",
     });
-    assert.deepEqual(hits.map((h) => h.path).sort(), ["a", "c"]);
+    assert.deepEqual(hits.results.map((h) => h.path).sort(), ["a", "c"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("queryNotes applies the default limit envelope with truncation", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "n1.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n2.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n3.md", content: "---\nstatus: active\n---\nbody\n" },
+  ]);
+  try {
+    const hits = await queryNotes(vaultPath, {
+      where: { status: "active" },
+      limit: 2,
+    });
+    assert.equal(hits.results.length, 2);
+    assert.equal(hits.returned, 2);
+    assert.equal(hits.omitted, 1);
+    assert.equal(hits.truncated, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("queryNotes limit: 0 returns all matches unbounded", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "n1.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n2.md", content: "---\nstatus: active\n---\nbody\n" },
+    { path: "n3.md", content: "---\nstatus: active\n---\nbody\n" },
+  ]);
+  try {
+    const hits = await queryNotes(vaultPath, {
+      where: { status: "active" },
+      limit: 0,
+    });
+    assert.equal(hits.results.length, 3);
+    assert.equal(hits.returned, 3);
+    assert.equal(hits.omitted, 0);
+    assert.equal(hits.truncated, false);
   } finally {
     await cleanup();
   }

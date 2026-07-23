@@ -1,6 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { matchesWhere } from "./property-match.js";
+import { toListResponse } from "./list-response.js";
 import {
   ListPropertiesParams,
   PropertySchemaEntry,
@@ -9,7 +10,11 @@ import {
   QueryNotesParams,
   GetPropertyParams,
   NoteHeader,
+  ListResponse,
 } from "../types.js";
+
+/** Default cap for this module's list-style tools so an unbounded call is still bounded. */
+const DEFAULT_LIMIT = 100;
 
 /** Canonical vault name for a note path (forward slashes, no .md suffix). */
 function canonicalName(notePath: string): string {
@@ -34,7 +39,7 @@ function typeOf(value: unknown): string {
 export async function listProperties(
   vaultPath: string,
   params: ListPropertiesParams = {}
-): Promise<PropertySchemaEntry[]> {
+): Promise<ListResponse<PropertySchemaEntry>> {
   assertVaultPath(vaultPath);
   const includeTags = params.include_tags !== false;
   const index = await getIndex(vaultPath);
@@ -51,13 +56,14 @@ export async function listProperties(
     }
   }
 
-  return [...counts.entries()]
+  const props = [...counts.entries()]
     .map(([key, count]) => ({
       key,
       count,
       types: [...(types.get(key) ?? [])].sort(),
     }))
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  return toListResponse(props);
 }
 
 /**
@@ -67,13 +73,13 @@ export async function listProperties(
 export async function getPropertyValues(
   vaultPath: string,
   params: PropertyValuesParamsRead
-): Promise<{ key: string; values: PropertyValueCount[] }> {
+): Promise<{ key: string } & ListResponse<PropertyValueCount>> {
   assertVaultPath(vaultPath);
   const { key, limit } = params;
   if (!key || typeof key !== "string") {
     throw new Error("key must be a non-empty string");
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
   const index = await getIndex(vaultPath);
@@ -92,11 +98,11 @@ export async function getPropertyValues(
     }
   }
 
-  let values = [...counts.values()].sort(
+  const values = [...counts.values()].sort(
     (a, b) => b.count - a.count || String(a.value).localeCompare(String(b.value))
   );
-  if (limit !== undefined) values = values.slice(0, limit);
-  return { key, values };
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return { key, ...toListResponse(values, effectiveLimit === 0 ? undefined : effectiveLimit) };
 }
 
 /**
@@ -106,7 +112,7 @@ export async function getPropertyValues(
 export async function queryNotes(
   vaultPath: string,
   params: QueryNotesParams
-): Promise<NoteHeader[]> {
+): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
   const { where, match = "all", limit } = params;
   if (!where || typeof where !== "object" || Array.isArray(where)) {
@@ -115,15 +121,15 @@ export async function queryNotes(
   if (match !== "all" && match !== "any") {
     throw new Error('match must be "all" or "any"');
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
   const index = await getIndex(vaultPath);
   const matched = index
     .getEntries()
     .filter((e) => matchesWhere(e.frontmatter, where, match));
-  const limited = limit !== undefined ? matched.slice(0, limit) : matched;
-  return limited.map(entryToHeader);
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return toListResponse(matched.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit);
 }
 
 /**

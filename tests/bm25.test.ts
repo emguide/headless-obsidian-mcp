@@ -15,7 +15,7 @@ test("ranks the document with more query-term hits higher", () => {
     b: ["cat", "dog", "dog"],
     c: ["fish"],
   });
-  const hits = idx.search(["cat"], 10);
+  const { hits } = idx.search(["cat"], 10);
   assert.equal(hits[0].docId, "a");
   assert.ok(hits.find((h) => h.docId === "b"));
   assert.ok(!hits.find((h) => h.docId === "c")); // no query term -> excluded
@@ -30,15 +30,15 @@ test("a rarer term contributes more via IDF", () => {
   });
   // 'rare' appears in 1 of 4 docs; 'common' in all 4. A doc matching 'rare'
   // should score higher than one matching only 'common'.
-  const rareHit = idx.search(["rare"], 10)[0];
-  const commonHit = idx.search(["common"], 10)[0];
+  const rareHit = idx.search(["rare"], 10).hits[0];
+  const commonHit = idx.search(["common"], 10).hits[0];
   assert.ok(rareHit.score > commonHit.score);
 });
 
 test("empty query or no match returns an empty array", () => {
   const idx = build({ a: ["cat"] });
-  assert.deepEqual(idx.search([], 10), []);
-  assert.deepEqual(idx.search(["zebra"], 10), []);
+  assert.deepEqual(idx.search([], 10), { hits: [], total: 0 });
+  assert.deepEqual(idx.search(["zebra"], 10), { hits: [], total: 0 });
 });
 
 test("respects the limit", () => {
@@ -47,7 +47,18 @@ test("respects the limit", () => {
     b: ["x"],
     c: ["x"],
   });
-  assert.equal(idx.search(["x"], 2).length, 2);
+  assert.equal(idx.search(["x"], 2).hits.length, 2);
+});
+
+test("search reports total matches beyond the limit", () => {
+  const idx = build({
+    d1: ["x"],
+    d2: ["x"],
+    d3: ["x"],
+  });
+  const res = idx.search(["x"], 2);
+  assert.equal(res.hits.length, 2);
+  assert.equal(res.total, 3);
 });
 
 test("breaks score ties by docId ascending for determinism", () => {
@@ -57,7 +68,7 @@ test("breaks score ties by docId ascending for determinism", () => {
     mid: ["x"],
   });
   // Identical single-token docs => identical scores => docId order.
-  const hits = idx.search(["x"], 10);
+  const { hits } = idx.search(["x"], 10);
   assert.deepEqual(
     hits.map((h) => h.docId),
     ["alpha", "mid", "zeta"]
@@ -69,6 +80,6 @@ test("multi-term query sums per-term contributions", () => {
     a: ["cat", "dog"],
     b: ["cat"],
   });
-  const hits = idx.search(["cat", "dog"], 10);
+  const { hits } = idx.search(["cat", "dog"], 10);
   assert.equal(hits[0].docId, "a"); // matches both terms
 });

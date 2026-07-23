@@ -62,6 +62,22 @@ export interface SearchNotesResponse {
   matches_capped_in: string[];
 }
 
+/**
+ * The self-describing shape every list-style tool returns: the (possibly
+ * limited) rows plus enough metadata to tell a complete result from a
+ * truncated one. `omitted = total - returned`; `truncated = omitted > 0`.
+ */
+export interface ListResponse<T> {
+  /** The returned rows (at most `limit` when a limit was applied). */
+  results: T[];
+  /** Number of rows in `results` (== results.length). */
+  returned: number;
+  /** Rows dropped by the limit (0 when nothing was dropped). */
+  omitted: number;
+  /** True when at least one row was omitted. */
+  truncated: boolean;
+}
+
 /** Lightweight description of a note, without its full body. */
 export interface NoteHeader {
   /** Relative path without the .md suffix. */
@@ -121,7 +137,7 @@ export interface FindByTagParams {
 export interface RelatedNotesParams {
   /** The note to find neighbours for (relative path, with or without .md). */
   path: string;
-  /** Maximum number of related notes to return. Default: 10. */
+  /** Maximum number of related notes to return. Default 100; 0 = unbounded. */
   limit?: number;
 }
 
@@ -188,7 +204,7 @@ export interface UnresolvedLinkGroup {
 }
 
 export interface RecentNotesParams {
-  /** Maximum number of notes to return. Default: 20. */
+  /** Maximum number of notes to return. Default 100; 0 = unbounded. */
   limit?: number;
   /** Only include notes modified/dated on or after this ISO date. */
   since?: string;
@@ -201,7 +217,7 @@ export interface RecentNotesParams {
 export interface RankedSearchParams {
   /** Free-text query; ranked by BM25 relevance. */
   query: string;
-  /** Maximum number of results to return. Default: 10. */
+  /** Maximum number of results to return. Default 100; 0 = unbounded (a positive limit is capped at 100). */
   limit?: number;
 }
 

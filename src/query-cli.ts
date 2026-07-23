@@ -190,7 +190,7 @@ program
 program
   .command("search-ranked <query>")
   .description("BM25 relevance-ranked full-text search")
-  .option("-l, --limit <n>", "Maximum number of results (default: 10, max: 100)")
+  .option("-l, --limit <n>", "Maximum number of results (default 100; 0 = unbounded)")
   .action(async (query: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args: any = { query };
@@ -301,7 +301,7 @@ program
   .command("related")
   .description("Find the notes most related to a given note, ranked with reasons")
   .argument("<path>", "Relative note path")
-  .option("-l, --limit <n>", "Maximum number of related notes to return (default: 10)")
+  .option("-l, --limit <n>", "Maximum number of related notes to return (default 100; 0 = unbounded)")
   .action(async (path: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {

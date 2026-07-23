@@ -249,11 +249,13 @@ Full-text search ranked by BM25 relevance — the most relevant notes first, rat
 
 **Parameters:**
 - `query` (string, required): Free-text query (max 1000 chars)
-- `limit` (number, optional): Maximum number of results (default: 10, max: 100)
+- `limit` (number, optional): Maximum number of results (default 100; `limit: 0` = unbounded; a positive limit is capped at 100)
 
-**Returns:** Array of note headers (same shape as `list_notes`) extended with:
+**Returns:** `{ results, returned, omitted, truncated }` — `results` is an array of note headers (same shape as `list_notes`) extended with:
 - `score`: BM25 relevance score (higher = more relevant)
 - `snippet`: A short matched excerpt
+
+`returned`/`omitted`/`truncated` report how many rows came back vs. were dropped by the limit, so a truncated result isn't mistaken for a complete one.
 
 Note: tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, stemmed), so non-Latin scripts (e.g. CJK) and accented characters aren't well indexed here — use `search_notes` for literal non-ASCII matching.
 
@@ -280,9 +282,9 @@ List notes in the vault as lightweight headers, without full contents. Use it to
 
 **Parameters:**
 - `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `limit` (number, optional): Maximum number of notes to return
+- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Array of note headers with `path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, and `modified` (ISO timestamp).
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_links
 
@@ -327,7 +329,7 @@ Aggregate every tag across the vault, unifying inline `#tags` (including nested 
 
 **Parameters:** none
 
-**Returns:** Array of `{ tag, count }` sorted by frequency.
+**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of `{ tag, count }` sorted by frequency. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
 
 ### find_by_tag
 
@@ -336,21 +338,21 @@ Find notes matching one or more tags.
 **Parameters:**
 - `tags` (array, required): Tags to match (with or without leading `#`)
 - `match` (string, optional): `"any"` (default) or `"all"`
-- `limit` (number, optional): Maximum number of notes to return
+- `limit` (number, optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
 
-**Returns:** Array of note headers (same shape as `list_notes`).
+**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### list_recent_notes
 
 List notes ordered by recency, newest first.
 
 **Parameters:**
-- `limit` (number, optional): Maximum number of notes to return (default: 20)
+- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 - `since` (string, optional): Only include notes on or after this ISO date
 - `date_field` (string, optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
 - `where` (object, optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`)
 
-**Returns:** Array of note headers (same shape as `list_notes`).
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_related_notes
 
@@ -358,9 +360,9 @@ Find the notes most related to a given note and rank them — associative recall
 
 **Parameters:**
 - `path` (string, required): Relative note path (with or without `.md`)
-- `limit` (number, optional): Maximum number of related notes to return (default: 10)
+- `limit` (number, optional): Maximum number of related notes to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (notes with at least one connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_frontmatter
 
@@ -385,13 +387,13 @@ Vault-hygiene findings the index already knows about but that `get_vault_stats` 
 
 **Parameters:**
 - `kind` (string, required): `"orphans"` or `"unresolved_links"`
-- `limit` (number, optional): Cap on the number of returned rows/headers
+- `limit` (number, optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Shape depends on `kind`:
+**Returns:** `{ results, returned, omitted, truncated }`. `results`' shape depends on `kind`:
 - `"orphans"`: Array of note headers (same shape as `list_notes`) — notes with no inbound and no outbound resolved links (the same predicate behind `get_vault_stats`'s `orphan_notes`)
-- `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing
+- `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
 
-The `orphans` array length equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links` equals `get_vault_stats`'s `unresolved_links` count (both before `limit` is applied). Index-backed.
+`returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`. For the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), the `orphans` `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count — a group-limited result naturally shows fewer. Index-backed.
 
 ### list_files
 
@@ -400,9 +402,9 @@ List non-markdown files in the vault (attachments, images, PDFs) — the counter
 **Parameters:**
 - `folder` (string, optional): Restrict to files under this folder (relative to the vault root)
 - `extension` (string, optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`)
-- `limit` (number, optional): Maximum number of files to return
+- `limit` (number, optional): Maximum number of files to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Array of `{ path, size, modified, extension }` — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot. Markdown files are never returned; does not touch the vault index.
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of file entries (`path`, `size`, `modified`, `extension`) — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`. Markdown files are never returned; does not touch the vault index.
 
 ### list_properties
 
@@ -411,7 +413,7 @@ The vault's frontmatter schema — every property key in use, with how many note
 **Parameters:**
 - `include_tags` (boolean, optional): Include the `tags` key (default: true; set false since it's already covered by `list_tags`)
 
-**Returns:** Array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`.
+**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
 
 ### get_property_values
 
@@ -419,9 +421,9 @@ Distinct values of one frontmatter property, with per-note counts — a faceted 
 
 **Parameters:**
 - `key` (string, required): The property key
-- `limit` (number, optional): Maximum number of values to return
+- `limit` (number, optional): Maximum number of values to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** `{ key, values: [{ value, count }] }`, sorted by `count` descending. Array-valued properties count each element once per note.
+**Returns:** `{ key, results, returned, omitted, truncated }`. `results` is `[{ value, count }]`, sorted by `count` descending, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of values dropped by the limit, and `truncated` is `true` when `omitted > 0`. Array-valued properties count each element once per note.
 
 ### query_notes
 
@@ -430,11 +432,11 @@ Find notes by frontmatter condition — generalizes the `where` filter in `list_
 **Parameters:**
 - `where` (object, required): `key -> condition` map. A condition is a bare scalar (equality / array-membership) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`
 - `match` (string, optional): `"all"` (default) or `"any"`
-- `limit` (number, optional): Maximum number of notes to return
+- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 
 Comparisons are type-aware: numeric when both sides parse as numbers, chronological when both parse as dates, otherwise case-insensitive string compare.
 
-**Returns:** Array of note headers (same shape as `list_notes`).
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_property
 

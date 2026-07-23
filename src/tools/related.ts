@@ -1,6 +1,10 @@
 import { resolveNotePath, assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader, VaultIndex, IndexEntry } from "./vault-index.js";
-import { RelatedNotesParams, RelatedNote } from "../types.js";
+import { RelatedNotesParams, RelatedNote, ListResponse } from "../types.js";
+import { toListResponse } from "./list-response.js";
+
+/** Default cap on `get_related_notes` so an unbounded call can't be issued by accident. */
+const DEFAULT_LIMIT = 100;
 
 /**
  * Relatedness weights. A direct link is the strongest single signal (two notes
@@ -37,18 +41,23 @@ function intersect(a: string[], b: string[]): string[] {
  * shared back-links (co-citation). Turns the flat vault into associative
  * memory: "I'm looking at X - what else is relevant?" Every hit carries the
  * reasons it surfaced, so the ranking is explainable rather than opaque.
+ *
+ * Bounded by default: with no `limit`, at most `DEFAULT_LIMIT` related notes
+ * are returned. Pass `limit: 0` for an unbounded list. The result is a
+ * `ListResponse` envelope where `total` (returned + omitted) is the number of
+ * notes with at least one connecting signal, before any limit is applied.
  */
 export async function getRelatedNotes(
   vaultPath: string,
   params: RelatedNotesParams
-): Promise<RelatedNote[]> {
+): Promise<ListResponse<RelatedNote>> {
   assertVaultPath(vaultPath);
 
-  const { path, limit = 10 } = params;
+  const { path, limit } = params;
   if (!path || typeof path !== "string") {
     throw new Error("A note path is required for get_related_notes");
   }
-  if (!Number.isInteger(limit) || limit < 1) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
 
@@ -84,7 +93,8 @@ export async function getRelatedNotes(
   }
 
   related.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
-  return related.slice(0, limit);
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return toListResponse(related, effectiveLimit === 0 ? undefined : effectiveLimit);
 }
 
 interface ScoreContext {
