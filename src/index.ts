@@ -98,7 +98,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const tools = [
       {
         name: "search_notes",
-        description: "Search through Obsidian notes using ripgrep. Returns matching notes with context lines, bounded by file and per-file match caps to avoid flooding context. Returns { results, truncated, files_returned, files_omitted, matches_capped_in }.",
+        description: "Search notes with ripgrep, optionally scoped by folder, tags, or a frontmatter where filter (index-resolved candidates, then rg over just those notes). Returns { results, truncated, files_returned, files_omitted, matches_capped_in }.",
         inputSchema: {
           type: "object",
           properties: {
@@ -129,7 +129,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             max_matches_per_file: {
               type: "number",
               description: "Max matches to return per file (default: 20, 0 = unlimited)"
-            }
+            },
+            folder: { type: "string", description: "Restrict to notes under this folder (relative to the vault root)." },
+            tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
+            match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
+            where: { type: "object", description: "Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax)." }
           },
           required: ["pattern"]
         }

@@ -10,6 +10,14 @@ export interface SearchNotesParams {
   limit?: number;
   /** Max matches returned per file. Default 20; 0 = unlimited. */
   max_matches_per_file?: number;
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Restrict to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
+  /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
+  where?: Record<string, unknown>;
 }
 
 export interface NoteMetadata {

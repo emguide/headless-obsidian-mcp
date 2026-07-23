@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { relative } from "node:path";
 import { SearchNotesParams, SearchResult, SearchNotesResponse } from "../types.js";
+import { getIndex } from "./vault-index.js";
+import { matchesWhere } from "./property-match.js";
+import type { Condition } from "./property-match.js";
 
 interface RipgrepResult {
   stdout: string;
@@ -41,7 +44,11 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     multiline = false,
     context_lines = 5,
     limit = 20,
-    max_matches_per_file = 20
+    max_matches_per_file = 20,
+    folder,
+    tags,
+    match = "any",
+    where,
   } = params;
 
   // Input validation
@@ -82,33 +89,82 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     throw new Error('Vault path must be a non-empty string');
   }
 
-  const args = [
+  const hasFilter = folder !== undefined || tags !== undefined || where !== undefined;
+  let candidatePaths: string[] | null = null; // null = whole-vault (no filter)
+
+  if (hasFilter) {
+    if (tags !== undefined && (!Array.isArray(tags) || tags.length === 0)) {
+      throw new Error("tags must be a non-empty array when provided");
+    }
+    if (match !== "any" && match !== "all") {
+      throw new Error('match must be "any" or "all"');
+    }
+    if (where !== undefined && (typeof where !== "object" || where === null || Array.isArray(where))) {
+      throw new Error("where must be an object of property conditions");
+    }
+
+    const index = await getIndex(vaultPath);
+    const wantedTags = tags?.map((t) => String(t).replace(/^#/, "").toLowerCase());
+    const folderPrefix = folder
+      ? folder.replace(/\\/g, "/").replace(/\/$/, "") + "/"
+      : undefined;
+
+    const matched = index.getEntries().filter((entry) => {
+      if (folderPrefix && !(entry.path + "/").startsWith(folderPrefix) && !entry.path.startsWith(folderPrefix)) {
+        return false;
+      }
+      if (wantedTags) {
+        const noteSet = new Set(entry.tags.map((t) => t.toLowerCase()));
+        const ok = match === "all"
+          ? wantedTags.every((w) => noteSet.has(w))
+          : wantedTags.some((w) => noteSet.has(w));
+        if (!ok) return false;
+      }
+      if (where) {
+        if (!matchesWhere(entry.frontmatter, where as Record<string, Condition>, "all")) return false;
+      }
+      return true;
+    });
+
+    candidatePaths = matched.map((e) => e.fullPath);
+
+    // Zero-candidate guard: never fall through to a whole-vault rg (which would
+    // search the cwd given no path args). Return the empty result directly.
+    if (candidatePaths.length === 0) {
+      return { results: [], truncated: false, files_returned: 0, files_omitted: 0, matches_capped_in: [] };
+    }
+  }
+
+  const baseArgs = [
     "--json",
     "--type", "md",
     "--context", context_lines.toString(),
   ];
+  if (!case_sensitive) baseArgs.push("--ignore-case");
+  if (whole_word) baseArgs.push("--word-regexp");
+  if (multiline) baseArgs.push("--multiline");
 
-  if (!case_sensitive) {
-    args.push("--ignore-case");
-  }
+  // Collect rg stdout across one or more invocations. With filters we pass an
+  // explicit candidate path list, chunked so a large vault never overflows
+  // ARG_MAX; without filters we search the whole vault root once.
+  let stdout = "";
+  const CHUNK = 500; // conservative path-count per rg call
+  const runChunk = async (paths: string[]): Promise<void> => {
+    const args = [...baseArgs, "--", pattern, ...paths];
+    const r = await runRipgrep(args);
+    if (r.code !== 0 && r.code !== 1) {
+      console.error(`ripgrep failed with code ${r.code}:`, r.stderr);
+      throw new Error(`Search failed`);
+    }
+    stdout += r.stdout;
+  };
 
-  if (whole_word) {
-    args.push("--word-regexp");
-  }
-
-  if (multiline) {
-    args.push("--multiline");
-  }
-
-  // Use -- separator to prevent pattern from being interpreted as flags
-  args.push("--", pattern, vaultPath);
-
-  const { stdout, stderr, code } = await runRipgrep(args);
-
-  if (code !== 0 && code !== 1) {
-    // Log full error details to stderr for debugging
-    console.error(`ripgrep failed with code ${code}:`, stderr);
-    throw new Error(`Search failed`);
+  if (candidatePaths === null) {
+    await runChunk([vaultPath]);
+  } else {
+    for (let i = 0; i < candidatePaths.length; i += CHUNK) {
+      await runChunk(candidatePaths.slice(i, i + CHUNK));
+    }
   }
 
   if (!stdout.trim()) {
