@@ -52,7 +52,7 @@ export class BM25 {
     return this.docs.size;
   }
 
-  search(queryTokens: string[], limit: number, allowedIds?: Set<string>): { hits: BM25Hit[]; total: number } {
+  search(queryTokens: string[], limit: number, allowedIds?: Set<string>, offset = 0): { hits: BM25Hit[]; total: number } {
     if (!this.finalized) this.finalize();
     if (queryTokens.length === 0 || this.docs.size === 0) return { hits: [], total: 0 };
     if (allowedIds && allowedIds.size === 0) return { hits: [], total: 0 };
@@ -79,6 +79,9 @@ export class BM25 {
     const ranked = [...scores.entries()]
       .map(([docId, score]) => ({ docId, score }))
       .sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId));
-    return { hits: ranked.slice(0, limit), total: ranked.length };
+    // Window the ranked list: skip `offset`, then take `limit`. `slice` clamps
+    // to length, so an over-large offset (or `offset + MAX_SAFE_INTEGER` for the
+    // unbounded-limit case) simply yields the tail / an empty array.
+    return { hits: ranked.slice(offset, offset + limit), total: ranked.length };
   }
 }
