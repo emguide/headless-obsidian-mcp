@@ -1,7 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex } from "./vault-index.js";
 import { FolderEntry, ListFoldersParams, ListResponse } from "../types.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 
 /** Default cap so the first orientation call is bounded (matches list_notes). */
 const DEFAULT_LIMIT = 100;
@@ -34,8 +34,9 @@ export async function listFolders(
 ): Promise<ListResponse<FolderEntry>> {
   assertVaultPath(vaultPath);
 
-  const { folder, depth, limit } = params;
+  const { folder, depth, limit, offset } = params;
   assertBound(limit, "limit");
+  assertNonNegativeInt(offset, "offset");
   assertBound(depth, "depth");
 
   const index = await getIndex(vaultPath);
@@ -93,5 +94,5 @@ export async function listFolders(
   rows.sort((a, b) => a.path.localeCompare(b.path));
 
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
-  return toListResponse(rows, effectiveLimit === 0 ? undefined : effectiveLimit);
+  return toListResponse(rows, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }

@@ -1,7 +1,7 @@
 import { resolveNotePath, assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader, VaultIndex, IndexEntry } from "./vault-index.js";
 import { RelatedNotesParams, RelatedNote, ListResponse } from "../types.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 
 /** Default cap on `get_related_notes` so an unbounded call can't be issued by accident. */
 const DEFAULT_LIMIT = 100;
@@ -53,13 +53,14 @@ export async function getRelatedNotes(
 ): Promise<ListResponse<RelatedNote>> {
   assertVaultPath(vaultPath);
 
-  const { path, limit } = params;
+  const { path, limit, offset } = params;
   if (!path || typeof path !== "string") {
     throw new Error("A note path is required for get_related_notes");
   }
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
 
   // Validate the path (guards against traversal escapes) before touching the index.
   resolveNotePath(vaultPath, path);
@@ -94,7 +95,7 @@ export async function getRelatedNotes(
 
   related.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
-  return toListResponse(related, effectiveLimit === 0 ? undefined : effectiveLimit);
+  return toListResponse(related, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }
 
 interface ScoreContext {

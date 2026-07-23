@@ -382,6 +382,8 @@ export interface ListFilesParams {
   extension?: string;
   /** Maximum number of files to return. */
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 /** A non-markdown vault file with lightweight filesystem metadata. */

@@ -1,7 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { matchesWhere } from "./property-match.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 import {
   ListPropertiesParams,
   PropertySchemaEntry,
@@ -75,13 +75,14 @@ export async function getPropertyValues(
   params: PropertyValuesParamsRead
 ): Promise<{ key: string } & ListResponse<PropertyValueCount>> {
   assertVaultPath(vaultPath);
-  const { key, limit } = params;
+  const { key, limit, offset } = params;
   if (!key || typeof key !== "string") {
     throw new Error("key must be a non-empty string");
   }
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
   const index = await getIndex(vaultPath);
 
   // Count by stringified value so distinct object identities collapse sensibly.
@@ -102,7 +103,7 @@ export async function getPropertyValues(
     (a, b) => b.count - a.count || String(a.value).localeCompare(String(b.value))
   );
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
-  return { key, ...toListResponse(values, effectiveLimit === 0 ? undefined : effectiveLimit) };
+  return { key, ...toListResponse(values, effectiveLimit === 0 ? undefined : effectiveLimit, offset) };
 }
 
 /**
@@ -114,7 +115,7 @@ export async function queryNotes(
   params: QueryNotesParams
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
-  const { where, match = "all", limit } = params;
+  const { where, match = "all", limit, offset } = params;
   if (!where || typeof where !== "object" || Array.isArray(where)) {
     throw new Error("where must be an object of property conditions");
   }
@@ -124,12 +125,13 @@ export async function queryNotes(
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
   const index = await getIndex(vaultPath);
   const matched = index
     .getEntries()
     .filter((e) => matchesWhere(e.frontmatter, where, match));
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
-  return toListResponse(matched.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit);
+  return toListResponse(matched.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }
 
 /**

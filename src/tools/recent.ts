@@ -2,7 +2,7 @@ import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader, IndexEntry } from "./vault-index.js";
 import { RecentNotesParams, NoteHeader, ListResponse } from "../types.js";
 import { matchesWhere } from "./property-match.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 
 /** Default cap on `list_recent_notes` so an unbounded call can't be issued by accident. */
 const DEFAULT_LIMIT = 100;
@@ -32,10 +32,11 @@ export async function listRecentNotes(
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
-  const { limit, since, date_field, where } = params;
+  const { limit, since, date_field, where, offset } = params;
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
 
   let sinceEpoch: number | null = null;
   if (since !== undefined) {
@@ -60,5 +61,5 @@ export async function listRecentNotes(
 
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
   const sorted = selected.slice().sort((a, b) => sortDateOf(b) - sortDateOf(a));
-  return toListResponse(sorted.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit);
+  return toListResponse(sorted.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }
