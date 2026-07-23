@@ -237,6 +237,29 @@ export interface RankedSearchResult extends NoteHeader {
   snippet: string;
 }
 
+/** Which identity field a resolve_note query matched a note on. */
+export type ResolveMatchField = "title" | "alias" | "basename";
+
+/** One note that matched a resolve_note query. */
+export interface ResolveMatch {
+  /** Canonical note path (no .md suffix). */
+  path: string;
+  /** The note's display title. */
+  title: string;
+  /** The strongest field the query matched on (title > alias > basename). */
+  matched_on: ResolveMatchField;
+}
+
+/** Result of resolving a human name (title/alias/basename) to note paths. */
+export interface ResolveNoteResult {
+  /** Echo of the query. */
+  query: string;
+  /** All matching notes, sorted by path. */
+  matches: ResolveMatch[];
+  /** The single path iff exactly one note matched, else null. */
+  resolved: string | null;
+}
+
 export interface PropertySchemaEntry {
   key: string;
   count: number;

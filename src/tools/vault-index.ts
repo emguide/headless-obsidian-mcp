@@ -11,7 +11,14 @@ import {
 } from "./vault.js";
 import { tokenize } from "./text/tokenize.js";
 import { BM25 } from "./text/bm25.js";
-import { NoteHeader, RankedSearchResult, ParsedHeading, ListResponse } from "../types.js";
+import {
+  NoteHeader,
+  RankedSearchResult,
+  ParsedHeading,
+  ListResponse,
+  ResolveMatch,
+  ResolveMatchField,
+} from "../types.js";
 
 /**
  * A fully-parsed note in the index. Raw file contents are not retained —
@@ -29,6 +36,8 @@ export interface IndexEntry {
   linkTargets: string[];
   headline?: string;
   title: string;
+  /** Frontmatter `aliases` (string or array), normalized to trimmed strings. */
+  aliases: string[];
   /** Fence-aware headings in document order (shared parser). */
   headings: ParsedHeading[];
   /** BM25 token stream: body plus title/headings/tags injected at ×2 weight. */
@@ -47,6 +56,9 @@ export class VaultIndex {
   private entries = new Map<string, IndexEntry>();
   private byPath = new Map<string, string>();
   private byBasename = new Map<string, string[]>();
+  // Lowercased identity string (title/alias/basename) -> the notes carrying it,
+  // each tagged with which field produced the key. Backs resolveName().
+  private byName = new Map<string, Array<{ path: string; field: ResolveMatchField }>>();
   private backlinkMap = new Map<string, string[]>();
   private outboundMap = new Map<string, string[]>();
   private bm25 = new BM25();
@@ -86,8 +98,17 @@ export class VaultIndex {
   private rebuildDerived(): void {
     this.byPath.clear();
     this.byBasename.clear();
+    this.byName.clear();
     this.backlinkMap.clear();
     this.outboundMap.clear();
+
+    const addName = (name: string, path: string, field: ResolveMatchField): void => {
+      const key = name.trim().toLowerCase();
+      if (!key) return;
+      const list = this.byName.get(key) ?? [];
+      list.push({ path, field });
+      this.byName.set(key, list);
+    };
 
     for (const e of this.entries.values()) {
       this.byPath.set(e.path.toLowerCase(), e.path);
@@ -95,6 +116,11 @@ export class VaultIndex {
       const list = this.byBasename.get(base) ?? [];
       list.push(e.path);
       this.byBasename.set(base, list);
+
+      // Index every identity string for exact-name resolution.
+      addName(base, e.path, "basename");
+      if (e.title) addName(e.title, e.path, "title");
+      for (const alias of e.aliases) addName(alias, e.path, "alias");
     }
     // Deterministic basename resolution: prefer the alphabetically-first path.
     for (const list of this.byBasename.values()) {
@@ -141,6 +167,37 @@ export class VaultIndex {
     const base = key.split("/").pop()!;
     const candidates = this.byBasename.get(base);
     return candidates && candidates.length > 0 ? candidates[0] : null;
+  }
+
+  /**
+   * Resolve a human-facing name (title, alias, or basename) to matching notes
+   * by exact, case-insensitive equality. A note matching on more than one field
+   * appears once, labeled with its strongest field (title > alias > basename).
+   * Results are sorted by path. Empty when nothing matches (not an error).
+   */
+  resolveName(query: string): ResolveMatch[] {
+    const key = query.trim().toLowerCase();
+    if (!key) return [];
+    const hits = this.byName.get(key);
+    if (!hits || hits.length === 0) return [];
+
+    // Collapse per-note duplicates to the strongest field.
+    const rank: Record<ResolveMatchField, number> = { title: 0, alias: 1, basename: 2 };
+    const strongest = new Map<string, ResolveMatchField>();
+    for (const { path, field } of hits) {
+      const current = strongest.get(path);
+      if (current === undefined || rank[field] < rank[current]) {
+        strongest.set(path, field);
+      }
+    }
+
+    return [...strongest.entries()]
+      .map(([path, matched_on]) => ({
+        path,
+        title: this.entries.get(path)?.title ?? path.split("/").pop()!,
+        matched_on,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }
 
   /** All entries, sorted by path. */
@@ -228,6 +285,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let linkTargets: string[] = [];
   let headline: string | undefined;
   let title = basename(f.path);
+  let aliases: string[] = [];
   let headings: ParsedHeading[] = [];
   let tokens: string[] = [];
 
@@ -242,6 +300,13 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     if (typeof frontmatter.title === "string" && frontmatter.title.trim()) {
       title = frontmatter.title.trim();
     }
+    // Aliases: accept a single string or an array; keep trimmed non-empty strings.
+    const rawAliases = frontmatter.aliases;
+    const aliasList = Array.isArray(rawAliases) ? rawAliases : [rawAliases];
+    aliases = aliasList
+      .filter((a): a is string => typeof a === "string")
+      .map((a) => a.trim())
+      .filter((a) => a.length > 0);
     // BM25 tokens: body once, then boosted fields (title, headings, tags) an
     // extra time (×2 weight) so a title/heading/tag hit outranks a passing
     // body mention even when the term never appears in the body at all.
@@ -262,6 +327,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     linkTargets,
     headline,
     title,
+    aliases,
     headings,
     tokens,
   };

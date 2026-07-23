@@ -172,6 +172,15 @@ Anything beyond trivial work (a single-line fix or a pure question) should be do
 - **Output**: `{ path, key, value, present }` where `present` distinguishes an absent key from a key explicitly set to `null`. Index-backed.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
+### resolve_note
+- **Purpose**: Map a human-facing note name to its canonical path. Humans refer to notes by title or alias; every other tool addresses by path — this closes that gap directly, removing the search-then-guess round trip of running `search_notes_ranked` and eyeballing the top hit.
+- **Input**: `query` (required) — the human-facing name (title, alias, or basename) to resolve.
+- **Output**: `{ query, matches, resolved }`:
+  - `matches`: array of `{ path, title, matched_on }`, sorted by path. `matched_on` is `"title" | "alias" | "basename"`. A note matching on more than one field appears **once**, labeled with its strongest field (precedence `title > alias > basename`).
+  - `resolved`: the single path when exactly one note matches, else `null` (ambiguous or no match). The tool **never guesses** among candidates.
+- **Matching**: Exact, case-insensitive equality against frontmatter `title`, each frontmatter `aliases[]` entry (a single string or an array), and the file basename. No partial/substring/fuzzy matching — that is `search_notes_ranked`'s job. A no-match is a normal empty result, not an error.
+- **Index-backed**: A single map lookup over the shared index (the index now also records each note's `aliases`); no per-call vault scan.
+
 ## Writing tools
 
 **The write tools are off by default.** The server is read-only unless
@@ -320,9 +329,9 @@ refused rather than proceeding without the safety net. Implemented in
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
 `list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`,
 `query_notes`, `list_properties`, `get_property_values`, `get_outline`,
-`list_vault_issues`) share an
+`list_vault_issues`, `resolve_note`) share an
 in-memory index (`src/tools/vault-index.ts`) that parses each note once
-(frontmatter, tags, wikilinks, headings) and caches the result. Each tool call
+(frontmatter, tags, wikilinks, headings, aliases) and caches the result. Each tool call
 refreshes the index by walking the vault and re-reading only files whose size
 or mtime changed, so repeated calls are map lookups rather than full-vault
 scans. Both the backlink graph and the resolved outbound-link graph are
@@ -372,6 +381,7 @@ npm run query -- recent --date-field updated --since 2026-07-01
 npm run query -- related "projects/alpha"              # Notes related to alpha
 npm run query -- related "projects/alpha" --limit 5    # Top 5 related notes
 npm run query -- frontmatter "projects/alpha"          # Just the frontmatter
+npm run query -- resolve "Alpha Project"                # title/alias/basename -> path
 npm run query -- stats                                  # Whole-vault statistics
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
