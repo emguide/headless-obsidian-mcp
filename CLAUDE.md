@@ -97,11 +97,11 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 ### list_recent_notes
 - **Purpose**: Find current material. Returns notes ordered by recency (newest first).
 - **Input**:
-  - `limit` (optional): Maximum number of notes to return (default: 20)
+  - `limit` (optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
   - `since` (optional): Only include notes on or after this ISO date
   - `date_field` (optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
   - `where` (optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`; matches array members too)
-- **Output**: Array of note headers (same shape as `list_notes`)
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_related_notes
 - **Purpose**: Associative recall. Rank the notes most related to a given note, so an agent can ask "I'm looking at X — what else is relevant?" No embeddings or model: a transparent weighted blend of signals already held in the shared index.

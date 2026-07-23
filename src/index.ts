@@ -286,13 +286,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_recent_notes",
-        description: "List notes ordered by recency (newest first), as lightweight headers. Sort by filesystem mtime or a frontmatter date field, with optional since cutoff and frontmatter equality filters. Use it to find current material.",
+        description: "List notes ordered by recency (newest first), as lightweight headers. Sort by filesystem mtime or a frontmatter date field, with optional since cutoff and frontmatter equality filters. Use it to find current material. Returns { results, returned, omitted, truncated }: results is capped at 100 by default (pass limit: 0 for all notes), and truncated is true when the cap dropped notes (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
             limit: {
               type: "number",
-              description: "Maximum number of notes to return (default: 20)"
+              description: "Maximum number of notes to return (default 100; pass 0 for unbounded)"
             },
             since: {
               type: "string",

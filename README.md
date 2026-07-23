@@ -345,12 +345,12 @@ Find notes matching one or more tags.
 List notes ordered by recency, newest first.
 
 **Parameters:**
-- `limit` (number, optional): Maximum number of notes to return (default: 20)
+- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 - `since` (string, optional): Only include notes on or after this ISO date
 - `date_field` (string, optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
 - `where` (object, optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`)
 
-**Returns:** Array of note headers (same shape as `list_notes`).
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_related_notes
 
