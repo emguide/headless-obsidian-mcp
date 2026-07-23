@@ -46,8 +46,8 @@ test("search rejects a DoS-prone pattern", async () => {
 
 test("read_notes parses frontmatter and tags, preserving body text verbatim", async () => {
   const [note] = await readNotes(fx.vaultPath, ["projects/alpha"]);
-  assert.equal(note.name, "projects/alpha");
-  assert.equal(note.metadata.status, "active");
+  assert.equal(note.path, "projects/alpha");
+  assert.equal(note.frontmatter.status, "active");
   // `tags` unifies frontmatter `tags:` with inline `#tags`, matching the
   // index-backed tools (list_notes, find_by_tag, list_tags).
   assert.ok(note.tags.includes("productivity"), "inline tag");

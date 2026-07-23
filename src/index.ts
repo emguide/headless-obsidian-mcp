@@ -151,7 +151,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "read_notes",
-        description: "Read one or more Obsidian notes by their relative paths. Returns parsed note data including metadata and tags.",
+        description: "Read one or more Obsidian notes by their relative paths. Returns parsed note data: path, contents, frontmatter, and tags.",
         inputSchema: {
           type: "object",
           properties: {

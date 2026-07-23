@@ -50,12 +50,12 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
 
       const tags = collectTags(frontmatter, markdownContent);
 
-      const name = notePath.replace(/\.md$/, '');
+      const path = notePath.replace(/\.md$/, '');
 
       notes.push({
-        name,
+        path,
         contents: markdownContent.trim(),
-        metadata: frontmatter as NoteMetadata,
+        frontmatter: frontmatter as NoteMetadata,
         tags
       });
     } catch (error) {

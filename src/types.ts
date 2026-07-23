@@ -17,9 +17,9 @@ export interface NoteMetadata {
 }
 
 export interface Note {
-  name: string;
+  path: string;
   contents: string;
-  metadata: NoteMetadata;
+  frontmatter: NoteMetadata;
   tags: string[];
 }
 
