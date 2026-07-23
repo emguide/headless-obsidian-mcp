@@ -280,9 +280,9 @@ List notes in the vault as lightweight headers, without full contents. Use it to
 
 **Parameters:**
 - `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `limit` (number, optional): Maximum number of notes to return
+- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Array of note headers with `path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, and `modified` (ISO timestamp).
+**Returns:** `{ notes, total, returned, truncated }`. `notes` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`). `total` is the match count before the limit, `returned` is `notes.length`, and `truncated` is `true` when the limit dropped notes.
 
 ### get_links
 
