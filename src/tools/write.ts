@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir, unlink, rename, stat } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
+import matter from "gray-matter";
 import { getIndex } from "./vault-index.js";
 import { resolveNotePath, resolveVaultFile, rewriteWikilinks } from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
@@ -15,6 +16,7 @@ import {
   addSection,
   appendToSection,
   replaceSection,
+  validateFrontmatterValue,
 } from "./note-document.js";
 
 /**
@@ -116,6 +118,27 @@ async function editNote(
   return true;
 }
 
+/**
+ * Validate any leading frontmatter block in a content string against the same
+ * rules the dedicated frontmatter tools enforce (no nested maps, no non-scalar
+ * arrays, no markdown in string values). A no-op when the content has no leading
+ * frontmatter block. Throws before any write, so a rejected write takes no git
+ * snapshot and makes no filesystem change. Malformed YAML surfaces as a clean
+ * `Invalid frontmatter in content` error rather than a raw parser stack.
+ */
+function validateContentFrontmatter(content: string): void {
+  let doc: NoteDocument;
+  try {
+    doc = NoteDocument.parse(content);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
+    throw new Error(`Invalid frontmatter in content: ${msg}`);
+  }
+  for (const [key, value] of Object.entries(doc.data)) {
+    validateFrontmatterValue(key, value);
+  }
+}
+
 /* ---------------------------------------------------------------- content -- */
 
 export interface WriteNoteParams {
@@ -123,13 +146,40 @@ export interface WriteNoteParams {
   content: string;
   /** Allow replacing an existing note. Default false (refuse to clobber). */
   overwrite?: boolean;
+  /**
+   * Optional structured frontmatter. When provided (and non-empty), each field
+   * is validated and the note is serialized with canonical block-style YAML;
+   * `content` is then the body only. Passing this together with a frontmatter
+   * block inline in `content` is an error.
+   */
+  frontmatter?: Record<string, unknown>;
 }
 
 export async function writeNote(
   vaultPath: string,
-  { path, content, overwrite = false }: WriteNoteParams
+  { path, content, overwrite = false, frontmatter }: WriteNoteParams
 ): Promise<{ path: string; created: boolean }> {
   if (typeof content !== "string") throw new Error("content must be a string");
+
+  const hasFrontmatterParam =
+    frontmatter != null && Object.keys(frontmatter).length > 0;
+  let finalContent: string;
+  if (hasFrontmatterParam) {
+    // A structured param plus an inline block is ambiguous — refuse to guess.
+    if (NoteDocument.hasFrontmatterFence(content)) {
+      throw new Error(
+        "Provide frontmatter either as the `frontmatter` parameter or inline in content, not both."
+      );
+    }
+    for (const [key, value] of Object.entries(frontmatter!)) {
+      validateFrontmatterValue(key, value);
+    }
+    finalContent = matter.stringify(content, frontmatter!);
+  } else {
+    validateContentFrontmatter(content);
+    finalContent = content;
+  }
+
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (existed && !overwrite) {
@@ -137,7 +187,7 @@ export async function writeNote(
       `Note already exists: ${canonicalName(path)}. Pass overwrite:true to replace it.`
     );
   }
-  await commitWrite(vaultPath, path, content);
+  await commitWrite(vaultPath, path, finalContent);
   return { path: canonicalName(path), created: !existed };
 }
 
@@ -157,6 +207,7 @@ export async function appendNote(
   const existed = await fileExists(fullPath);
   if (!existed) {
     if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
+    validateContentFrontmatter(content);
     await commitWrite(vaultPath, path, content.endsWith("\n") ? content : content + "\n");
     return { path: canonicalName(path), created: true };
   }
@@ -188,6 +239,7 @@ export async function prependNote(
   const existed = await fileExists(fullPath);
   if (!existed) {
     if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
+    validateContentFrontmatter(content);
     await commitWrite(vaultPath, path, content.endsWith("\n") ? content : content + "\n");
     return { path: canonicalName(path), created: true };
   }

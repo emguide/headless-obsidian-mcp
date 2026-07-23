@@ -462,13 +462,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "write_note",
-        description: "Create a note, or overwrite an existing one. Refuses to overwrite unless overwrite:true is passed. Use the structure-aware tools (add_section, set_frontmatter, add_tag) for surgical edits instead of rewriting a whole note.",
+        description: "Create a note, or overwrite an existing one. Refuses to overwrite unless overwrite:true is passed. Pass structured frontmatter via the frontmatter param (validated, serialized canonically) or inline in content (also validated) — not both. Use the structure-aware tools (add_section, set_frontmatter, add_tag) for surgical edits instead of rewriting a whole note.",
         inputSchema: {
           type: "object",
           properties: {
             path: { type: "string", description: "Relative note path (with or without .md)" },
-            content: { type: "string", description: "Full note body (may include frontmatter)" },
-            overwrite: { type: "boolean", description: "Allow replacing an existing note (default: false)" }
+            content: { type: "string", description: "Note content. May include a leading frontmatter block (validated), or pass frontmatter via the frontmatter param and give body-only content here." },
+            overwrite: { type: "boolean", description: "Allow replacing an existing note (default: false)" },
+            frontmatter: { type: "object", description: "Optional frontmatter fields, validated and serialized canonically. When given, content is the body only. Do not also put a frontmatter block in content." }
           },
           required: ["path", "content"]
         }
@@ -480,7 +481,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             path: { type: "string", description: "Relative note path (with or without .md)" },
-            content: { type: "string", description: "Text to append" },
+            content: { type: "string", description: "Text to append. When this call creates the note (create:true, note missing), a leading frontmatter block is validated." },
             create: { type: "boolean", description: "Create the note if it does not exist (default: false)" }
           },
           required: ["path", "content"]
@@ -493,7 +494,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             path: { type: "string", description: "Relative note path (with or without .md)" },
-            content: { type: "string", description: "Text to prepend" },
+            content: { type: "string", description: "Text to prepend. When this call creates the note (create:true, note missing), a leading frontmatter block is validated; otherwise it is inserted after any existing frontmatter." },
             create: { type: "boolean", description: "Create the note if it does not exist (default: false)" }
           },
           required: ["path", "content"]

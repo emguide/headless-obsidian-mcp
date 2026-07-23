@@ -209,16 +209,16 @@ change a tag or a section without reading and rewriting the whole note.
 
 ### write_note
 - **Purpose**: Create a note, or overwrite an existing one.
-- **Input**: `path` (required), `content` (required), `overwrite` (optional, default `false` — refuses to clobber an existing note)
+- **Input**: `path` (required), `content` (required), `overwrite` (optional, default `false` — refuses to clobber an existing note), `frontmatter` (optional object — structured frontmatter, validated and serialized canonically; when given, `content` is the body only). Frontmatter may be supplied via the `frontmatter` param **or** inline in `content` (both are validated on the same rules as every other frontmatter write) — supplying both is an error.
 - **Output**: `{ path, created }`
 
 ### append_note
-- **Purpose**: Append text to the end of a note (with a separating newline).
+- **Purpose**: Append text to the end of a note (with a separating newline). When the call creates the note (`create:true` on a missing note), a leading frontmatter block in `content` is validated on the same rules as every other frontmatter write; appending to an existing note treats a leading `---` as body text.
 - **Input**: `path` (required), `content` (required), `create` (optional — create the note if missing)
 - **Output**: `{ path, created }`
 
 ### prepend_note
-- **Purpose**: Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it (never before the YAML fence).
+- **Purpose**: Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it (never before the YAML fence). When the call creates the note (`create:true` on a missing note), a leading frontmatter block in `content` is validated; when prepending to an existing note the text is inserted after the frontmatter, so it is never treated as frontmatter.
 - **Input**: `path` (required), `content` (required), `create` (optional — create the note if missing)
 - **Output**: `{ path, created }`
 
@@ -302,7 +302,11 @@ path-traversal protected via the same guard as read_notes.
 arrays containing non-scalar elements, and (3) markdown syntax in string values
 (bare URLs are allowed). Validation runs only on the keys a given write actually
 touches, so a pre-existing violation on an untouched key never blocks an
-unrelated edit.
+unrelated edit. The content-writing tools (`write_note`, and the create path of
+`append_note`/`prepend_note`) validate any hand-written leading frontmatter
+block on these same rules, so an agent creating a note by hand cannot bypass
+frontmatter integrity; malformed YAML in that block is rejected loudly rather
+than landing in the vault.
 
 ### Git guard (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
