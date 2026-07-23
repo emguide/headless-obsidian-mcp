@@ -192,13 +192,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_files",
-        description: "List non-markdown files in the vault (attachments, images, PDFs) so an agent can find a file to move. Returns { path, size, modified, extension } per file. Optional folder/extension/limit filters. Does not include notes (use list_notes) and never touches the index.",
+        description: "List non-markdown files in the vault (attachments, images, PDFs) so an agent can find a file to move. Returns { results, returned, omitted, truncated }: results is an array of { path, size, modified, extension }, capped at 100 by default (pass limit: 0 for all files), and truncated is true when the cap dropped files (omitted > 0). Does not include notes (use list_notes) and never touches the index.",
         inputSchema: {
           type: "object",
           properties: {
             folder: { type: "string", description: "Restrict to files under this folder (relative to the vault root)." },
             extension: { type: "string", description: "Filter by extension; leading dot optional, case-insensitive (e.g. 'png')." },
-            limit: { type: "number", description: "Maximum number of files to return." }
+            limit: {
+              type: "number",
+              description: "Maximum number of files to return (default 100; pass 0 for unbounded)"
+            }
           }
         }
       },

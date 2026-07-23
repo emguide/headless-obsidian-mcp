@@ -400,9 +400,9 @@ List non-markdown files in the vault (attachments, images, PDFs) — the counter
 **Parameters:**
 - `folder` (string, optional): Restrict to files under this folder (relative to the vault root)
 - `extension` (string, optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`)
-- `limit` (number, optional): Maximum number of files to return
+- `limit` (number, optional): Maximum number of files to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Array of `{ path, size, modified, extension }` — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot. Markdown files are never returned; does not touch the vault index.
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of file entries (`path`, `size`, `modified`, `extension`) — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`. Markdown files are never returned; does not touch the vault index.
 
 ### list_properties
 

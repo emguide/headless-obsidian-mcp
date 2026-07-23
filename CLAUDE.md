@@ -134,8 +134,8 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 
 ### list_files
 - **Purpose**: List non-markdown files in the vault (attachments, images, PDFs) — the counterpart to `list_notes` for everything `list_notes` deliberately excludes.
-- **Input**: `folder` (optional): Restrict to files under this folder (relative to the vault root). `extension` (optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`). `limit` (optional): Maximum number of files to return.
-- **Output**: Array of `{ path, size, modified, extension }` — `path` is vault-relative with the extension preserved (unlike note paths, `.md` is never stripped here because these aren't notes), `modified` is an ISO timestamp, `extension` is lowercased without the dot.
+- **Input**: `folder` (optional): Restrict to files under this folder (relative to the vault root). `extension` (optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`). `limit` (optional): Maximum number of files to return (default `100`; pass `0` for unbounded — no cap).
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of file entries (`path`, `size`, `modified`, `extension`), bounded by `limit` (default `100`); `path` is vault-relative with the extension preserved (unlike note paths, `.md` is never stripped here because these aren't notes), `modified` is an ISO timestamp, `extension` is lowercased without the dot. `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 - **Notes**: Markdown files are never returned. Reuses the same directory walk and ignore rules as the vault index, but does not read from or write to the index itself.
 
 ### list_properties
