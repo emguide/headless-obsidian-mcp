@@ -1,6 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
-import { ListNotesParams, ListNotesResponse } from "../types.js";
+import { ListNotesParams, ListResponse, NoteHeader } from "../types.js";
+import { toListResponse } from "./list-response.js";
 
 /** Default cap on `list_notes` so the first orientation call is bounded. */
 const DEFAULT_LIMIT = 100;
@@ -12,13 +13,13 @@ const DEFAULT_LIMIT = 100;
  *
  * Bounded by default: with no `limit`, at most `DEFAULT_LIMIT` notes are
  * returned. Pass `limit: 0` for an unbounded list (matching `search_notes`).
- * The result is an envelope reporting `total`/`returned`/`truncated` so a
- * capped list is never mistaken for a complete one.
+ * The result is a `ListResponse` envelope reporting `returned`/`omitted`/
+ * `truncated` so a capped list is never mistaken for a complete one.
  */
 export async function listNotes(
   vaultPath: string,
   params: ListNotesParams = {}
-): Promise<ListNotesResponse> {
+): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
   const { folder, limit } = params;
@@ -39,19 +40,11 @@ export async function listNotes(
     entries = entries.filter((e) => (e.path + "/").startsWith(prefix));
   }
 
-  const total = entries.length;
-
   // Resolve the effective cap: explicit 0 => unbounded; omitted => default.
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
-  if (effectiveLimit !== 0) {
-    entries = entries.slice(0, effectiveLimit);
-  }
 
-  const notes = entries.map(entryToHeader);
-  return {
-    notes,
-    total,
-    returned: notes.length,
-    truncated: total > notes.length,
-  };
+  return toListResponse(
+    entries.map(entryToHeader),
+    effectiveLimit === 0 ? undefined : effectiveLimit
+  );
 }

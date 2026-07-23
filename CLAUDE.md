@@ -55,7 +55,7 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Input**:
   - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
   - `limit` (optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
-- **Output**: `{ notes, total, returned, truncated }` — `notes` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`); `total` is the count before the limit, `returned` is `notes.length`, and `truncated` is `true` when the limit dropped notes — so a capped first-orientation call isn't mistaken for a complete one.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`); `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0` — so a capped first-orientation call isn't mistaken for a complete one.
 
 ### get_links
 - **Purpose**: Resolve the Obsidian link graph for a note, turning the flat vault into a navigable graph.

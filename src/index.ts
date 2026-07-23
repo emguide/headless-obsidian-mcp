@@ -175,7 +175,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_notes",
-        description: "List notes in the vault as lightweight headers (path, title, tags, first heading, size, modified time) without full contents. Use it to discover what exists and orient before searching or reading. Returns { notes, total, returned, truncated }: notes is capped at 100 by default (pass limit: 0 for all notes), and truncated is true when the cap dropped notes.",
+        description: "List notes in the vault as lightweight headers (path, title, tags, first heading, size, modified time) without full contents. Use it to discover what exists and orient before searching or reading. Returns { results, returned, omitted, truncated }: results is capped at 100 by default (pass limit: 0 for all notes), and truncated is true when the cap dropped notes (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
