@@ -11,8 +11,12 @@ const DEFAULT_LIMIT = 100;
  * it, sorted by count (descending) then name. Unifies inline `#tags` with
  * frontmatter `tags:` so the vault's full topic index is visible to the agent.
  */
-export async function listTags(vaultPath: string): Promise<ListResponse<TagCount>> {
+export async function listTags(
+  vaultPath: string,
+  offset?: number
+): Promise<ListResponse<TagCount>> {
   assertVaultPath(vaultPath);
+  assertNonNegativeInt(offset, "offset");
   const index = await getIndex(vaultPath);
   const counts = new Map<string, number>();
 
@@ -25,7 +29,7 @@ export async function listTags(vaultPath: string): Promise<ListResponse<TagCount
   const tags = [...counts.entries()]
     .map(([tag, count]) => ({ tag, count }))
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-  return toListResponse(tags);
+  return toListResponse(tags, undefined, offset ?? 0);
 }
 
 /**

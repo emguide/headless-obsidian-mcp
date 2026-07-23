@@ -41,6 +41,7 @@ export async function listProperties(
   params: ListPropertiesParams = {}
 ): Promise<ListResponse<PropertySchemaEntry>> {
   assertVaultPath(vaultPath);
+  assertNonNegativeInt(params.offset, "offset");
   const includeTags = params.include_tags !== false;
   const index = await getIndex(vaultPath);
 
@@ -63,7 +64,7 @@ export async function listProperties(
       types: [...(types.get(key) ?? [])].sort(),
     }))
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
-  return toListResponse(props);
+  return toListResponse(props, undefined, params.offset ?? 0);
 }
 
 /**

@@ -2,7 +2,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { listNotes } from "../src/tools/list.js";
 import { listRecentNotes } from "../src/tools/recent.js";
-import { queryNotes } from "../src/tools/properties.js";
+import { queryNotes, listProperties } from "../src/tools/properties.js";
+import { listTags } from "../src/tools/tags.js";
 import { makeVault, sampleNotes, Fixture } from "./fixtures.js";
 
 let fx: Fixture;
@@ -107,6 +108,37 @@ test("queryNotes: offset paginates a where-filtered set", async () => {
 test("queryNotes: negative offset rejected", async () => {
   await assert.rejects(
     () => queryNotes(fx.vaultPath, { where: {}, offset: -1 }),
+    /offset must be a non-negative integer/
+  );
+});
+
+test("listTags: offset skips leading tag rows (no-limit tool still paginates)", async () => {
+  const full = await listTags(fx.vaultPath);
+  assert.ok(full.results.length >= 2, "fixture must have >= 2 distinct tags");
+  const off = await listTags(fx.vaultPath, 1);
+  assert.equal(off.skipped, 1);
+  assert.equal(off.truncated, false); // no limit => nothing omitted after the window
+  assert.deepEqual(off.results, full.results.slice(1));
+});
+
+test("listTags: negative offset rejected", async () => {
+  await assert.rejects(
+    () => listTags(fx.vaultPath, -1),
+    /offset must be a non-negative integer/
+  );
+});
+
+test("listProperties: offset skips leading property rows", async () => {
+  const full = await listProperties(fx.vaultPath, {});
+  assert.ok(full.results.length >= 2, "fixture must have >= 2 distinct property keys");
+  const off = await listProperties(fx.vaultPath, { offset: 1 });
+  assert.equal(off.skipped, 1);
+  assert.deepEqual(off.results, full.results.slice(1));
+});
+
+test("listProperties: negative offset rejected", async () => {
+  await assert.rejects(
+    () => listProperties(fx.vaultPath, { offset: -1 }),
     /offset must be a non-negative integer/
   );
 });

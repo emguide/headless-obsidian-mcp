@@ -170,6 +170,7 @@ program
   .option("-c, --context <lines>", "Number of context lines to show", "5")
   .option("-l, --limit <n>", "Max files to return (default: 20, 0 = unlimited)")
   .option("--max-matches <n>", "Max matches per file (default: 20, 0 = unlimited)")
+  .option("--offset <n>", "Matching files to skip before the window (pagination)")
   .option("--folder <folder>", "Restrict to notes under this folder")
   .option("--tag <tag...>", "Restrict to notes with these tags (repeatable)")
   .option("--match <mode>", "tags match mode: any (default) or all")
@@ -194,6 +195,7 @@ program
       ...(context !== 5 && { context_lines: context }),
       ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
       ...(options.maxMatches !== undefined && { max_matches_per_file: parseInt(options.maxMatches, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
       ...(options.folder && { folder: options.folder }),
       ...(options.tag && { tags: options.tag }),           // commander collects repeated --tag into an array
       ...(options.match && { match: options.match }),
@@ -206,6 +208,7 @@ program
   .command("search-ranked <query>")
   .description("BM25 relevance-ranked full-text search, optionally scoped by folder/tags/where")
   .option("-l, --limit <n>", "Maximum number of results (default 100; 0 = unbounded)")
+  .option("--offset <n>", "Ranked hits to skip before the window (pagination; reaches hits past the 100 cap)")
   .option("--folder <folder>", "Restrict to notes under this folder")
   .option("--tag <tag...>", "Restrict to notes with these tags (repeatable)")
   .option("--match <mode>", "tags match mode: any (default) or all")
@@ -214,6 +217,7 @@ program
     const verbose = command.parent?.opts().verbose ?? false;
     const args: any = { query };
     if (options.limit !== undefined) args.limit = parseInt(options.limit, 10);
+    if (options.offset !== undefined) args.offset = parseInt(options.offset, 10);
     if (options.folder !== undefined) args.folder = options.folder;
     if (options.tag) args.tags = options.tag; // commander collects repeated --tag into an array
     if (options.match !== undefined) args.match = options.match;
@@ -248,11 +252,13 @@ program
   .description("List notes as lightweight headers")
   .option("-f, --folder <folder>", "Restrict to notes under this folder")
   .option("-l, --limit <n>", "Maximum number of notes to return")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       ...(options.folder && { folder: options.folder }),
-      ...(options.limit && { limit: parseInt(options.limit, 10) })
+      ...(options.limit && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) })
     };
     await queryTool("list_notes", args, verbose);
   });
@@ -263,12 +269,14 @@ program
   .option("-f, --folder <folder>", "Restrict to folders under this folder")
   .option("-d, --depth <n>", "Relative depth cap (1 = immediate children)")
   .option("-l, --limit <n>", "Maximum number of folders to return")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       ...(options.folder && { folder: options.folder }),
       ...(options.depth && { depth: parseInt(options.depth, 10) }),
       ...(options.limit && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
     };
     await queryTool("list_folders", args, verbose);
   });
@@ -306,9 +314,13 @@ program
 program
   .command("tags")
   .description("List every tag in the vault with note counts")
-  .action(async (_options: any, command: Command) => {
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
+  .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
-    await queryTool("list_tags", {}, verbose);
+    const args = {
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) })
+    };
+    await queryTool("list_tags", args, verbose);
   });
 
 program
@@ -317,12 +329,14 @@ program
   .argument("<tags...>", "Tags to match (with or without leading #)")
   .option("-a, --all", "Require all tags (default: any)")
   .option("-l, --limit <n>", "Maximum number of notes to return")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (tags: string[], options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       tags,
       ...(options.all && { match: "all" }),
-      ...(options.limit && { limit: parseInt(options.limit, 10) })
+      ...(options.limit && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) })
     };
     await queryTool("find_by_tag", args, verbose);
   });
@@ -333,12 +347,14 @@ program
   .option("-l, --limit <n>", "Maximum number of notes to return (default: 20)")
   .option("-s, --since <date>", "Only include notes on or after this ISO date")
   .option("-d, --date-field <field>", "Frontmatter date field to sort by")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       ...(options.limit && { limit: parseInt(options.limit, 10) }),
       ...(options.since && { since: options.since }),
-      ...(options.dateField && { date_field: options.dateField })
+      ...(options.dateField && { date_field: options.dateField }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) })
     };
     await queryTool("list_recent_notes", args, verbose);
   });
@@ -348,11 +364,13 @@ program
   .description("Find the notes most related to a given note, ranked with reasons")
   .argument("<path>", "Relative note path")
   .option("-l, --limit <n>", "Maximum number of related notes to return (default 100; 0 = unbounded)")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (path: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       path,
       ...(options.limit && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
     };
     await queryTool("get_related_notes", args, verbose);
   });
@@ -387,11 +405,13 @@ program
   .command("vault-issues <kind>")
   .description("List orphans or unresolved_links")
   .option("-l, --limit <n>", "Maximum number of rows to return")
+  .option("-o, --offset <n>", "Rows/groups to skip before the window (pagination)")
   .action(async (kind: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       kind,
       ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
     };
     await queryTool("list_vault_issues", args, verbose);
   });
@@ -402,12 +422,14 @@ program
   .option("-f, --folder <folder>", "Restrict to files under this folder")
   .option("-e, --extension <ext>", "Filter by extension (dot optional)")
   .option("-l, --limit <n>", "Maximum number of files to return")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       ...(options.folder && { folder: options.folder }),
       ...(options.extension && { extension: options.extension }),
       ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
     };
     await queryTool("list_files", args, verbose);
   });
@@ -662,16 +684,26 @@ program
   .command("properties")
   .description("List the frontmatter property schema (keys, counts, types)")
   .option("--no-tags", "Omit the tags key")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)", (v) => parseInt(v, 10))
   .action(async (options: any, command: Command) => {
-    await queryTool("list_properties", { include_tags: options.tags }, command.parent?.opts().verbose);
+    await queryTool(
+      "list_properties",
+      { include_tags: options.tags, ...(options.offset !== undefined && { offset: options.offset }) },
+      command.parent?.opts().verbose
+    );
   });
 
 program
   .command("property-values <key>")
   .description("List distinct values of a property with counts")
   .option("-l, --limit <n>", "Maximum number of values", (v) => parseInt(v, 10))
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)", (v) => parseInt(v, 10))
   .action(async (key: string, options: any, command: Command) => {
-    await queryTool("get_property_values", { key, limit: options.limit }, command.parent?.opts().verbose);
+    await queryTool(
+      "get_property_values",
+      { key, limit: options.limit, ...(options.offset !== undefined && { offset: options.offset }) },
+      command.parent?.opts().verbose
+    );
   });
 
 program
@@ -680,6 +712,7 @@ program
   .requiredOption("--where <json>", "Conditions as a JSON object")
   .option("--match <mode>", "all (default) or any", "all")
   .option("-l, --limit <n>", "Maximum number of notes", (v) => parseInt(v, 10))
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)", (v) => parseInt(v, 10))
   .action(async (options: any, command: Command) => {
     let where: any;
     try {
@@ -691,7 +724,7 @@ program
     }
     await queryTool(
       "query_notes",
-      { where, match: options.match, limit: options.limit },
+      { where, match: options.match, limit: options.limit, ...(options.offset !== undefined && { offset: options.offset }) },
       command.parent?.opts().verbose
     );
   });
