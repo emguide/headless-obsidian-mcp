@@ -34,8 +34,12 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Input**:
   - `query` (required): Free-text query (max 1000 chars). Multi-word queries are ranked by relevance.
   - `limit` (optional): Maximum number of results (default: 10, max: 100)
+  - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `tags` (optional): Restrict to notes carrying these tags (leading `#` optional)
+  - `match` (optional): Semantics of `tags` — `"any"` (default) or `"all"`
+  - `where` (optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
 - **Output**: Array of note headers (same shape as `list_notes`) extended with `score` (BM25 relevance, higher = more relevant) and `snippet` (a short matched excerpt).
-- **Ranking**: Standard Okapi BM25 (`k1=1.2`, `b=0.75`) over a stemmed, stopword-filtered token stream. Title, heading, and tag terms are boosted (indexed at ×2 weight) so a title hit outranks a passing body mention. Built on the shared in-memory vault index — no per-query vault scan.
+- **Ranking**: Standard Okapi BM25 (`k1=1.2`, `b=0.75`) over a stemmed, stopword-filtered token stream. Title, heading, and tag terms are boosted (indexed at ×2 weight) so a title hit outranks a passing body mention. Built on the shared in-memory vault index — no per-query vault scan. Scopes to a candidate set via the same `folder`/`tags`/`where`/`match` filters as `search_notes` (resolved from the shared index first, then ranked over just those notes), so "the most relevant note about X among my work notes" is expressible.
 - **Limitation**: Tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, Porter-stemmed), so non-Latin scripts (e.g. CJK) and accented characters are not well indexed for ranked search. Use `search_notes` (ripgrep) for literal non-ASCII matching.
 
 ### read_notes  
@@ -340,6 +344,8 @@ npm run query -- search "TODO" --case-sensitive        # Case-sensitive search
 npm run query -- search "test" --whole-word             # Whole words only
 npm run query -- search "pattern" --context 10         # Custom context lines
 npm run query -- search-ranked "kubernetes networking" --limit 5   # BM25 ranked
+npm run query -- search-ranked "kubernetes" --folder work --tag active --match all   # scoped ranked
+npm run query -- search-ranked "kubernetes" --where '{"status":"active"}'            # scoped by frontmatter
 npm run query -- search "productivity" --limit 20 --max-matches 20   # Bounded literal search
 npm run query -- search "kubernetes" --tag work --match all   # Filtered to notes tagged #work
 npm run query -- search "alpha" --where '{"status":"active"}' # Filtered by frontmatter
