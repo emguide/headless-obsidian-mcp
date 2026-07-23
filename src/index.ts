@@ -19,6 +19,7 @@ import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
+import { resolveNote } from "./tools/resolve.js";
 import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
@@ -346,6 +347,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           },
           required: ["path"]
+        }
+      },
+      {
+        name: "resolve_note",
+        description: "Resolve a human-facing note name (frontmatter title, an alias, or the file basename) to its canonical note path — an exact, case-insensitive, index-backed lookup that removes the search-then-guess round trip for \"what's the path of the note called X?\". Matching is exact, never fuzzy (use search_notes_ranked for approximate matching). Returns { query, matches, resolved }: matches is the array of { path, title, matched_on } (matched_on is \"title\"|\"alias\"|\"basename\"; a note matching on several fields appears once, labeled with its strongest field, title > alias > basename), sorted by path; resolved is the single path when exactly one note matches, else null (ambiguous or no match — it never guesses).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "The human-facing name to resolve (title, alias, or basename)"
+            }
+          },
+          required: ["query"]
         }
       },
       {
@@ -820,6 +835,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error("A note path is required for get_frontmatter");
         }
         const result = await getFrontmatter(VAULT_PATH, path);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "resolve_note": {
+        const { query } = args as unknown as { query: string };
+        if (!query || typeof query !== "string") {
+          throw new Error("A query is required for resolve_note");
+        }
+        const result = await resolveNote(VAULT_PATH, query);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

@@ -144,6 +144,9 @@ npm run query -- related "projects/alpha" --limit 5
 npm run query -- frontmatter "projects/alpha"
 npm run query -- stats
 
+# Resolve a human name (title/alias/basename) to a note path
+npm run query -- resolve "Alpha Project"
+
 # Vault hygiene: orphaned notes and broken wikilinks (drill-down from stats)
 npm run query -- vault-issues orphans
 npm run query -- vault-issues unresolved_links --limit 50
@@ -458,6 +461,17 @@ Read a single frontmatter property from one note — cheaper than reading the wh
 
 **Returns:** `{ path, key, value, present }` where `present` distinguishes an absent key from a key explicitly set to `null`.
 
+### resolve_note
+
+Map a human-facing note name to its canonical path. Humans refer to notes by title or alias; every other tool addresses by path — this closes that gap directly, removing the search-then-guess round trip of running `search_notes_ranked` and eyeballing the top hit.
+
+**Parameters:**
+- `query` (string, required): The human-facing name (title, alias, or basename) to resolve
+
+**Returns:** `{ query, matches, resolved }`. `matches` is an array of `{ path, title, matched_on }` sorted by path, where `matched_on` is `"title" | "alias" | "basename"`; a note matching on more than one field appears once, labeled with its strongest field (precedence `title > alias > basename`). `resolved` is the single path when exactly one note matches, else `null` (ambiguous or no match) — the tool never guesses among candidates.
+
+Matching is exact and case-insensitive against frontmatter `title`, each frontmatter `aliases[]` entry (a single string or an array), and the file basename. No partial/substring/fuzzy matching — that is `search_notes_ranked`'s job. A no-match is a normal empty result, not an error. Index-backed.
+
 ### write_note
 
 Create a note, or overwrite an existing one.
@@ -766,7 +780,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `bulk_edit`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_properties`, `get_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `bulk_edit`).
 
 ## Acknowledgments
 

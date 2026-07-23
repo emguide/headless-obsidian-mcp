@@ -14,6 +14,7 @@ import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
+import { resolveNote } from "./tools/resolve.js";
 import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
@@ -85,6 +86,8 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await getRelatedNotes(VAULT_PATH!, args);
     } else if (toolName === "get_frontmatter") {
       result = await getFrontmatter(VAULT_PATH!, args.path);
+    } else if (toolName === "resolve_note") {
+      result = await resolveNote(VAULT_PATH!, args.query);
     } else if (toolName === "get_vault_stats") {
       result = await getVaultStats(VAULT_PATH!);
     } else if (toolName === "list_vault_issues") {
@@ -342,6 +345,15 @@ program
   .action(async (path: string, _options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     await queryTool("get_frontmatter", { path }, verbose);
+  });
+
+program
+  .command("resolve")
+  .description("Resolve a title/alias/basename to a note path (exact, case-insensitive)")
+  .argument("<query>", "Human-facing note name (title, alias, or basename)")
+  .action(async (query: string, _options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool("resolve_note", { query }, verbose);
   });
 
 program
