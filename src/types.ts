@@ -62,6 +62,22 @@ export interface SearchNotesResponse {
   matches_capped_in: string[];
 }
 
+/**
+ * The self-describing shape every list-style tool returns: the (possibly
+ * limited) rows plus enough metadata to tell a complete result from a
+ * truncated one. `omitted = total - returned`; `truncated = omitted > 0`.
+ */
+export interface ListResponse<T> {
+  /** The returned rows (at most `limit` when a limit was applied). */
+  results: T[];
+  /** Number of rows in `results` (== results.length). */
+  returned: number;
+  /** Rows dropped by the limit (0 when nothing was dropped). */
+  omitted: number;
+  /** True when at least one row was omitted. */
+  truncated: boolean;
+}
+
 /** Lightweight description of a note, without its full body. */
 export interface NoteHeader {
   /** Relative path without the .md suffix. */
