@@ -213,16 +213,28 @@ export async function deleteNote(
   vaultPath: string,
   notePath: string,
   { permanent = false }: DeleteNoteOptions = {}
-): Promise<{ path: string; deleted: boolean; trashed: boolean; trash_path?: string }> {
+): Promise<{
+  path: string;
+  deleted: boolean;
+  trashed: boolean;
+  trash_path?: string;
+  dangled_backlinks: string[];
+}> {
   const fullPath = resolveNotePath(vaultPath, notePath);
   if (!(await fileExists(fullPath))) {
     throw new Error(`Note not found: ${canonicalName(notePath)}`);
   }
+
+  // Capture backlinks from the pre-delete index before touching the filesystem,
+  // so the caller learns which notes now contain a broken [[wikilink]].
+  const index = await getIndex(vaultPath);
+  const dangled_backlinks = index.backlinks(canonicalName(notePath));
+
   await snapshotBeforeWrite(vaultPath);
 
   if (permanent) {
     await unlink(fullPath);
-    return { path: canonicalName(notePath), deleted: true, trashed: false };
+    return { path: canonicalName(notePath), deleted: true, trashed: false, dangled_backlinks };
   }
 
   // Move into `.trash`, preserving the note's relative path. If a note of the
@@ -242,6 +254,7 @@ export async function deleteNote(
     deleted: true,
     trashed: true,
     trash_path: trashRel.split(sep).join("/"),
+    dangled_backlinks,
   };
 }
 

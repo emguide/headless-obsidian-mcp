@@ -437,7 +437,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "delete_note",
-        description: "Delete a note. Trash-safe by default: the note is moved to the vault's .trash folder so the deletion is recoverable. Pass permanent:true to unlink it outright. Errors if the note does not exist.",
+        description: "Delete a note. Trash-safe by default (moved to .trash, recoverable); pass permanent:true to unlink. Returns { path, deleted, trashed, trash_path?, dangled_backlinks } where dangled_backlinks lists the notes that linked to the deleted note and now have a broken [[wikilink]].",
         inputSchema: {
           type: "object",
           properties: {

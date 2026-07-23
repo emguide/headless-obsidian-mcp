@@ -435,7 +435,7 @@ Delete a note. **Trash-safe by default:** the note is moved to the vault's `.tra
 - `path` (string, required): Relative note path
 - `permanent` (boolean, optional): Unlink the file outright instead of trashing it (default: false)
 
-**Returns:** `{ path, deleted, trashed, trash_path? }`
+**Returns:** `{ path, deleted, trashed, trash_path?, dangled_backlinks }` — `dangled_backlinks` lists the notes that linked to the deleted note and now have a broken `[[wikilink]]` (reported only; those notes are not modified).
 
 ### move_note
 
