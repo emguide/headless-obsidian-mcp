@@ -204,7 +204,7 @@ export interface UnresolvedLinkGroup {
 }
 
 export interface RecentNotesParams {
-  /** Maximum number of notes to return. Default: 20. */
+  /** Maximum number of notes to return. Default 100; 0 = unbounded. */
   limit?: number;
   /** Only include notes modified/dated on or after this ISO date. */
   since?: string;
@@ -217,7 +217,7 @@ export interface RecentNotesParams {
 export interface RankedSearchParams {
   /** Free-text query; ranked by BM25 relevance. */
   query: string;
-  /** Maximum number of results to return. Default: 10. */
+  /** Maximum number of results to return. Default 100; 0 = unbounded (a positive limit is capped at 100). */
   limit?: number;
 }
 
