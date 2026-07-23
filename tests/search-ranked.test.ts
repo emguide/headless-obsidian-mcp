@@ -122,3 +122,14 @@ test("searchRanked does not throw when a winning note's file is deleted before t
     await fx2.cleanup();
   }
 });
+
+test("searchRanked restricts results to allowedIds", async () => {
+  const idx = await getIndex(fx.vaultPath);
+  const res = await idx.searchRanked("networking", 10, new Set(["aside"]));
+  assert.deepEqual(res.map((r) => r.path), ["aside"]);
+});
+
+test("searchRanked with empty allowedIds returns nothing", async () => {
+  const idx = await getIndex(fx.vaultPath);
+  assert.deepEqual(await idx.searchRanked("networking", 10, new Set()), []);
+});

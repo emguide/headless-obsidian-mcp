@@ -168,10 +168,11 @@ export class VaultIndex {
    * Rank notes by BM25 relevance to a free-text query. Snippets are read from
    * the ≤ limit winning files at query time (never stored in the index).
    */
-  async searchRanked(query: string, limit: number): Promise<RankedSearchResult[]> {
+  async searchRanked(query: string, limit: number, allowedIds?: Set<string>): Promise<RankedSearchResult[]> {
     const queryTokens = tokenize(query);
     if (queryTokens.length === 0) return [];
-    const hits = this.bm25.search(queryTokens, limit);
+    if (allowedIds && allowedIds.size === 0) return [];
+    const hits = this.bm25.search(queryTokens, limit, allowedIds);
 
     // Raw (unstemmed) query words used only to locate a snippet line.
     const rawWords = query
