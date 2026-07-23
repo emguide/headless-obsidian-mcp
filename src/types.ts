@@ -203,6 +203,14 @@ export interface RankedSearchParams {
   query: string;
   /** Maximum number of results to return. Default: 10. */
   limit?: number;
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Restrict to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
+  /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
+  where?: Record<string, Condition>;
 }
 
 /** A ranked search hit: a note header plus its relevance score and a snippet. */
