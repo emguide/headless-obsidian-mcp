@@ -78,7 +78,7 @@ test("resolveSelection rejects an empty select", async () => {
   await assert.rejects(() => resolveSelection(fx.vaultPath, {}), /requires/);
 });
 
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bulkEdit } from "../src/tools/bulk.js";
 import { GIT_AUTOCOMMIT_ENV } from "../src/tools/git-guard.js";
@@ -163,6 +163,11 @@ test("bulkEdit takes exactly one snapshot for a multi-note batch", async () => {
   await git(local.vaultPath, ["config", "user.name", "t"]);
   await git(local.vaultPath, ["add", "-A"]);
   await git(local.vaultPath, ["commit", "--no-verify", "-m", "init"]);
+
+  // Leave the tree DIRTY so the guard has pre-existing state to snapshot.
+  // (On a clean tree snapshotBeforeWrite is a no-op — see git-guard.ts:43-45.)
+  await writeFile(join(local.vaultPath, "scratch.md"), "# scratch\n", "utf-8");
+
   const before = (await git(local.vaultPath, ["rev-list", "--count", "HEAD"])).stdout.trim();
 
   process.env[GIT_AUTOCOMMIT_ENV] = "1";
@@ -177,7 +182,8 @@ test("bulkEdit takes exactly one snapshot for a multi-note batch", async () => {
   }
 
   const after = (await git(local.vaultPath, ["rev-list", "--count", "HEAD"])).stdout.trim();
-  // Exactly one snapshot commit was added (the batch writes stay uncommitted).
+  // Exactly ONE snapshot commit — not one per matched note — captured the
+  // pre-existing dirty state. The batch writes themselves stay uncommitted.
   assert.equal(Number(after) - Number(before), 1);
   await local.cleanup();
 });
