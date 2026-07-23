@@ -1,9 +1,17 @@
 import { readFile, stat, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import process from "node:process";
 import { ListResponse } from "../types.js";
 import { resolveVaultFile } from "./vault.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
+import { expand } from "./template-expand.js";
+import {
+  writeNote,
+  appendNote,
+  prependNote,
+  appendNoteSection,
+} from "./write.js";
+import { LinkHealth } from "./link-health.js";
 
 /** Env override for the template folder; wins over `.obsidian/templates.json`. */
 export const TEMPLATE_FOLDER_ENV = "OBSIDIAN_TEMPLATE_FOLDER";
@@ -141,4 +149,102 @@ export async function readTemplate(
       `Template not found: ${base}. Available: ${avail.join(", ") || "(none)"}`
     );
   }
+}
+
+/** {{title}} resolves to the note's basename, matching Obsidian. */
+function titleOf(notePath: string): string {
+  return basename(notePath).replace(/\.md$/, "");
+}
+
+/** Expand a named template's placeholders for a given target note path. */
+async function expandTemplateFor(
+  vaultPath: string,
+  template: string,
+  targetPath: string
+): Promise<string> {
+  const cfg = await resolveTemplateConfig(vaultPath);
+  const { raw } = await readTemplate(vaultPath, template);
+  return expand(raw, {
+    title: titleOf(targetPath),
+    now: new Date(),
+    dateFormat: cfg.dateFormat,
+    timeFormat: cfg.timeFormat,
+  });
+}
+
+/**
+ * Create a new note from a template. Expands `{{title}}` (= the new note's
+ * basename), `{{date}}`, `{{time}}`, then delegates to `write_note` — inheriting
+ * its path-guard, git-guard, frontmatter validation, overwrite refusal, and
+ * link-health reporting.
+ */
+export async function applyTemplate(
+  vaultPath: string,
+  {
+    template,
+    path,
+    overwrite = false,
+  }: { template: string; path: string; overwrite?: boolean }
+): Promise<{ path: string; created: boolean } & LinkHealth> {
+  const content = await expandTemplateFor(vaultPath, template, path);
+  return writeNote(vaultPath, { path, content, overwrite });
+}
+
+/**
+ * Expand a template into an *existing* note at `position` (`append` |
+ * `prepend` | `section`). `{{title}}` = the existing note's basename. Delegates
+ * to the matching content-write path, inheriting link-health and the section
+ * tools' fail-loud ambiguity behavior. The target note must already exist —
+ * a missing note surfaces the underlying "Note not found" error (fail-loud);
+ * creating a note is `apply_template`'s job, not this one.
+ */
+export async function insertTemplate(
+  vaultPath: string,
+  {
+    template,
+    path,
+    position,
+    section,
+    create_section = false,
+  }: {
+    template: string;
+    path: string;
+    position: "append" | "prepend" | "section";
+    section?: string;
+    create_section?: boolean;
+  }
+): Promise<{ path: string; position: string } & LinkHealth> {
+  if (position === "section" && (!section || !section.length)) {
+    throw new Error(
+      'insert_template position "section" requires a section heading.'
+    );
+  }
+  const content = await expandTemplateFor(vaultPath, template, path);
+
+  let health: LinkHealth;
+  if (position === "append") {
+    const r = await appendNote(vaultPath, { path, content });
+    health = {
+      unresolved_links: r.unresolved_links,
+      broken_anchors: r.broken_anchors,
+    };
+  } else if (position === "prepend") {
+    const r = await prependNote(vaultPath, { path, content });
+    health = {
+      unresolved_links: r.unresolved_links,
+      broken_anchors: r.broken_anchors,
+    };
+  } else {
+    const r = await appendNoteSection(vaultPath, {
+      path,
+      heading: section!,
+      content,
+      create: create_section,
+    });
+    health = {
+      unresolved_links: r.unresolved_links,
+      broken_anchors: r.broken_anchors,
+    };
+  }
+  return { path: path.replace(/\.md$/, ""), position, ...health };
 }
