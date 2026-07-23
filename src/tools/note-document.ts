@@ -511,3 +511,20 @@ export function replaceSection(
 
   doc.body = joinBody(parts, trailingNewline);
 }
+
+/**
+ * Rename an existing heading, keeping its `#`-level and body intact. `from` is a
+ * bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud
+ * ambiguity behavior as {@link replaceSection}. Returns the old bare heading text
+ * (the leaf of the resolved path) so callers can rewrite inbound `#anchor` links.
+ */
+export function renameSection(doc: NoteDocument, from: string, to: string): string {
+  const { lines, trailingNewline } = splitBody(doc.body);
+  const target = resolveSection(lines, from);
+  const headingLine = target.heading.line;
+  const oldText = target.heading.text;
+  const hashes = "#".repeat(target.heading.level);
+  lines[headingLine] = `${hashes} ${to.trim()}`;
+  doc.body = joinBody(lines, trailingNewline);
+  return oldText;
+}
