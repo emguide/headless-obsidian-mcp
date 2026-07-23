@@ -189,12 +189,27 @@ program
 
 program
   .command("search-ranked <query>")
-  .description("BM25 relevance-ranked full-text search")
+  .description("BM25 relevance-ranked full-text search, optionally scoped by folder/tags/where")
   .option("-l, --limit <n>", "Maximum number of results (default: 10, max: 100)")
+  .option("--folder <folder>", "Restrict to notes under this folder")
+  .option("--tag <tag...>", "Restrict to notes with these tags (repeatable)")
+  .option("--match <mode>", "tags match mode: any (default) or all")
+  .option("--where <json>", "Frontmatter filter as JSON")
   .action(async (query: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args: any = { query };
     if (options.limit !== undefined) args.limit = parseInt(options.limit, 10);
+    if (options.folder !== undefined) args.folder = options.folder;
+    if (options.tag) args.tags = options.tag; // commander collects repeated --tag into an array
+    if (options.match !== undefined) args.match = options.match;
+    if (options.where !== undefined) {
+      try {
+        args.where = JSON.parse(options.where);
+      } catch (e) {
+        console.error("Error:", "Invalid --where JSON: " + (e instanceof Error ? e.message : String(e)));
+        process.exit(1);
+      }
+    }
     await queryTool("search_notes_ranked", args, verbose);
   });
 
