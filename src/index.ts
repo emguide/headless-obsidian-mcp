@@ -142,7 +142,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "search_notes_ranked",
         description:
-          "Full-text search ranked by BM25 relevance. Returns the most relevant notes first (title/heading/tag matches boosted), each with a relevance score and a matched snippet. Complements search_notes (which is literal/regex, unranked).",
+          "Full-text search ranked by BM25 relevance. Returns the most relevant notes first (title/heading/tag matches boosted), each with a relevance score and a matched snippet. Complements search_notes (which is literal/regex, unranked). Returns { results, returned, omitted, truncated }: results is ranked note headers with score and snippet, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
@@ -257,7 +257,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_tags",
-        description: "List every tag used across the vault with the number of notes using it, sorted by frequency. Unifies inline #tags and frontmatter tags:. Use it to see the vault's topic index.",
+        description: "List every tag used across the vault with the number of notes using it, sorted by frequency. Unifies inline #tags and frontmatter tags:. Use it to see the vault's topic index. Returns { results, returned, omitted, truncated }: results is the tag/count rows; there is no limit, so truncated is always false and results is the complete set.",
         inputSchema: {
           type: "object",
           properties: {}
@@ -265,7 +265,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "find_by_tag",
-        description: "Find notes matching one or more tags, returning lightweight headers. High-precision retrieval based on human curation.",
+        description: "Find notes matching one or more tags. High-precision retrieval based on human curation. Returns { results, returned, omitted, truncated }: results is note headers, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
@@ -281,7 +281,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of notes to return"
+              description: "Maximum number of notes to return (default 100; pass 0 for unbounded)"
             }
           },
           required: ["tags"]
@@ -314,7 +314,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_related_notes",
-        description: "Find the notes most related to a given note, ranked, without embeddings: a transparent blend of shared tags, direct links, shared out-links (co-reference), and shared backlinks (co-citation). Each result carries the reasons it surfaced. Use it for associative recall - 'I'm looking at X, what else is relevant?'",
+        description: "Find the notes most related to a given note, ranked, without embeddings: a transparent blend of shared tags, direct links, shared out-links (co-reference), and shared backlinks (co-citation). Each result carries the reasons it surfaced. Use it for associative recall - 'I'm looking at X, what else is relevant?' Returns { results, returned, omitted, truncated }: results is related note headers with score/reasons, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
@@ -346,7 +346,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_properties",
-        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties.",
+        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties. Returns { results, returned, omitted, truncated }: results is the property rows; there is no limit, so truncated is always false and results is the complete set.",
         inputSchema: {
           type: "object",
           properties: {
@@ -356,7 +356,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_property_values",
-        description: "List the distinct values of one frontmatter property with the number of notes each appears in, most frequent first. Array-valued properties count each element. A faceted index for a single key.",
+        description: "List the distinct values of one frontmatter property with the number of notes each appears in, most frequent first. Array-valued properties count each element. A faceted index for a single key. Returns { key, results, returned, omitted, truncated }: results is the value/count rows, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped rows (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
@@ -368,13 +368,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "query_notes",
-        description: "Find notes whose frontmatter satisfies a set of conditions, returning lightweight headers. Each condition is a bare scalar (equality / array-membership) or an operator object { eq, ne, gt, gte, lt, lte, exists, contains }. Comparisons are type-aware (numbers, ISO dates, strings). match: all (default) or any.",
+        description: "Find notes whose frontmatter satisfies a set of conditions. Each condition is a bare scalar (equality / array-membership) or an operator object { eq, ne, gt, gte, lt, lte, exists, contains }. Comparisons are type-aware (numbers, ISO dates, strings). match: all (default) or any. Returns { results, returned, omitted, truncated }: results is note headers, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
             where: { type: "object", description: "Map of property key to condition (scalar or { eq/ne/gt/gte/lt/lte/exists/contains })" },
             match: { type: "string", enum: ["all", "any"], description: "Require all (default) or any of the conditions" },
-            limit: { type: "number", description: "Maximum number of notes to return" }
+            limit: { type: "number", description: "Maximum number of notes to return (default 100; pass 0 for unbounded)" }
           },
           required: ["where"]
         }
@@ -401,7 +401,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_vault_issues",
-        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links). Index-backed.",
+        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links). Index-backed. Returns { results, returned, omitted, truncated }: results is orphan note headers or { source, targets } groups depending on kind, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped rows (omitted > 0). For unresolved_links, the cap counts groups (source notes), not individual targets.",
         inputSchema: {
           type: "object",
           properties: {
@@ -412,7 +412,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of rows/groups to return (default 100; 0 = unbounded). For unresolved_links, this counts groups (source notes), not individual targets."
+              description: "Maximum number of rows/groups to return (default 100; pass 0 for unbounded). For unresolved_links, this counts groups (source notes), not individual targets."
             }
           },
           required: ["kind"]
