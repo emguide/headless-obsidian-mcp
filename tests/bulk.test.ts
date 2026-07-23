@@ -78,6 +78,20 @@ test("resolveSelection rejects an empty select", async () => {
   await assert.rejects(() => resolveSelection(fx.vaultPath, {}), /requires/);
 });
 
+test("resolveSelection rejects a non-object where", async () => {
+  await assert.rejects(
+    () => resolveSelection(fx.vaultPath, { where: "draft" as any }),
+    /where must be an object/
+  );
+});
+
+test("resolveSelection rejects an empty paths array with no filter", async () => {
+  await assert.rejects(
+    () => resolveSelection(fx.vaultPath, { paths: [] }),
+    /paths is empty/
+  );
+});
+
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bulkEdit } from "../src/tools/bulk.js";

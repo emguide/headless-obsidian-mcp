@@ -9,7 +9,7 @@ import {
   renameProperty,
 } from "./note-document.js";
 import { getIndex } from "./vault-index.js";
-import { matchesWhere } from "./property-match.js";
+import { matchesWhere, Condition } from "./property-match.js";
 import { resolveNotePath } from "./vault.js";
 import { writeResolved } from "./write.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
@@ -41,11 +41,16 @@ export function validateOperations(operations: unknown): BulkOperation[] {
       case "remove_tag":
         if (!nonEmptyArray((raw as any).tags)) throw new Error("tags must be a non-empty array");
         break;
-      case "set_frontmatter":
-        if (!(raw as any).set && !(raw as any).unset) {
-          throw new Error("set_frontmatter requires `set` and/or `unset`");
+      case "set_frontmatter": {
+        const s = (raw as any).set;
+        const u = (raw as any).unset;
+        const hasSet = s != null && typeof s === "object" && !Array.isArray(s) && Object.keys(s).length > 0;
+        const hasUnset = Array.isArray(u) && u.length > 0;
+        if (!hasSet && !hasUnset) {
+          throw new Error("set_frontmatter requires a non-empty `set` object and/or non-empty `unset` array");
         }
         break;
+      }
       case "add_property_values":
       case "remove_property_values":
         if (!(raw as any).key || typeof (raw as any).key !== "string") {
@@ -98,7 +103,7 @@ export function applyOperations(doc: NoteDocument, operations: BulkOperation[]):
 
 export interface BulkSelect {
   paths?: string[];
-  where?: Record<string, unknown>;
+  where?: Record<string, Condition>;
   tags?: string[];
   match?: "all" | "any";
   folder?: string;
@@ -113,6 +118,13 @@ export async function resolveSelection(
   vaultPath: string,
   select: BulkSelect
 ): Promise<string[]> {
+  if (select.where != null && (typeof select.where !== "object" || Array.isArray(select.where))) {
+    throw new Error("select.where must be an object of frontmatter conditions");
+  }
+  if (Array.isArray(select.paths) && select.paths.length === 0 && select.where == null && !(Array.isArray(select.tags) && select.tags.length > 0)) {
+    throw new Error("select.paths is empty; provide at least one path or use a filter (`where`/`tags`)");
+  }
+
   const hasPaths = Array.isArray(select.paths) && select.paths.length > 0;
   const hasFilter = select.where != null || (Array.isArray(select.tags) && select.tags.length > 0);
   if (hasPaths && hasFilter) {
@@ -135,7 +147,8 @@ export async function resolveSelection(
     entries = entries.filter((e) => (e.path + "/").startsWith(prefix));
   }
   if (select.where != null) {
-    entries = entries.filter((e) => matchesWhere(e.frontmatter, select.where as any, match));
+    const where = select.where;
+    entries = entries.filter((e) => matchesWhere(e.frontmatter, where, match));
   }
   if (Array.isArray(select.tags) && select.tags.length > 0) {
     const wanted = select.tags.map((t) => String(t).replace(/^#/, "").toLowerCase());
