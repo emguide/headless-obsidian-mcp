@@ -47,8 +47,9 @@ test("getPropertyValues facets distinct values with counts", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const res = await getPropertyValues(vaultPath, { key: "status" });
-    assert.equal(res.values.find((v) => v.value === "active")?.count, 2);
-    assert.equal(res.values.find((v) => v.value === "done")?.count, 1);
+    assert.equal(res.key, "status");
+    assert.equal(res.results.find((v) => v.value === "active")?.count, 2);
+    assert.equal(res.results.find((v) => v.value === "done")?.count, 1);
   } finally {
     await cleanup();
   }
@@ -58,8 +59,44 @@ test("getPropertyValues counts array elements individually", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const res = await getPropertyValues(vaultPath, { key: "aliases" });
-    assert.equal(res.values.find((v) => v.value === "k")?.count, 1);
-    assert.equal(res.values.find((v) => v.value === "j")?.count, 1);
+    assert.equal(res.results.find((v) => v.value === "k")?.count, 1);
+    assert.equal(res.results.find((v) => v.value === "j")?.count, 1);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("getPropertyValues truncates with a limit smaller than the distinct-value count", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "a.md", content: "---\nstatus: alpha\n---\nbody\n" },
+    { path: "b.md", content: "---\nstatus: beta\n---\nbody\n" },
+    { path: "c.md", content: "---\nstatus: gamma\n---\nbody\n" },
+  ]);
+  try {
+    const res = await getPropertyValues(vaultPath, { key: "status", limit: 2 });
+    assert.equal(res.key, "status");
+    assert.equal(res.results.length, 2);
+    assert.equal(res.returned, 2);
+    assert.equal(res.omitted, 1);
+    assert.equal(res.truncated, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("getPropertyValues limit: 0 returns all distinct values unbounded", async () => {
+  const { vaultPath, cleanup } = await makeVault([
+    { path: "a.md", content: "---\nstatus: alpha\n---\nbody\n" },
+    { path: "b.md", content: "---\nstatus: beta\n---\nbody\n" },
+    { path: "c.md", content: "---\nstatus: gamma\n---\nbody\n" },
+  ]);
+  try {
+    const res = await getPropertyValues(vaultPath, { key: "status", limit: 0 });
+    assert.equal(res.key, "status");
+    assert.equal(res.results.length, 3);
+    assert.equal(res.returned, 3);
+    assert.equal(res.omitted, 0);
+    assert.equal(res.truncated, false);
   } finally {
     await cleanup();
   }

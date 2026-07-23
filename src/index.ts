@@ -361,7 +361,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             key: { type: "string", description: "The frontmatter property key to facet" },
-            limit: { type: "number", description: "Maximum number of distinct values to return" }
+            limit: { type: "number", description: "Maximum number of distinct values to return (default 100; pass 0 for unbounded)" }
           },
           required: ["key"]
         }

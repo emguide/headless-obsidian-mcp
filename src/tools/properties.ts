@@ -13,7 +13,7 @@ import {
   ListResponse,
 } from "../types.js";
 
-/** Default cap on `query_notes` so an unbounded call is still bounded. */
+/** Default cap for this module's list-style tools so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
 
 /** Canonical vault name for a note path (forward slashes, no .md suffix). */
@@ -72,13 +72,13 @@ export async function listProperties(
 export async function getPropertyValues(
   vaultPath: string,
   params: PropertyValuesParamsRead
-): Promise<{ key: string; values: PropertyValueCount[] }> {
+): Promise<{ key: string } & ListResponse<PropertyValueCount>> {
   assertVaultPath(vaultPath);
   const { key, limit } = params;
   if (!key || typeof key !== "string") {
     throw new Error("key must be a non-empty string");
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
   const index = await getIndex(vaultPath);
@@ -97,11 +97,11 @@ export async function getPropertyValues(
     }
   }
 
-  let values = [...counts.values()].sort(
+  const values = [...counts.values()].sort(
     (a, b) => b.count - a.count || String(a.value).localeCompare(String(b.value))
   );
-  if (limit !== undefined) values = values.slice(0, limit);
-  return { key, values };
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return { key, ...toListResponse(values, effectiveLimit === 0 ? undefined : effectiveLimit) };
 }
 
 /**

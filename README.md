@@ -419,9 +419,9 @@ Distinct values of one frontmatter property, with per-note counts — a faceted 
 
 **Parameters:**
 - `key` (string, required): The property key
-- `limit` (number, optional): Maximum number of values to return
+- `limit` (number, optional): Maximum number of values to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** `{ key, values: [{ value, count }] }`, sorted by `count` descending. Array-valued properties count each element once per note.
+**Returns:** `{ key, results, returned, omitted, truncated }`. `results` is `[{ value, count }]`, sorted by `count` descending, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of values dropped by the limit, and `truncated` is `true` when `omitted > 0`. Array-valued properties count each element once per note.
 
 ### query_notes
 

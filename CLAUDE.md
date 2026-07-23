@@ -146,8 +146,8 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 
 ### get_property_values
 - **Purpose**: Distinct values of one frontmatter property with per-note counts — a faceted breakdown, e.g. to see every `status` value in use.
-- **Input**: `key` (required), `limit` (optional)
-- **Output**: `{ key, values: [{ value, count }] }`, sorted by `count` descending then value. Array-valued properties count each element once per note. Index-backed.
+- **Input**: `key` (required), `limit` (optional, default 100; `limit: 0` = unbounded)
+- **Output**: `{ key, results, returned, omitted, truncated }` — `results` is `[{ value, count }]`, sorted by `count` descending then value, bounded by `limit`. Array-valued properties count each element once per note. Index-backed.
 
 ### query_notes
 - **Purpose**: Find notes by frontmatter condition — generalizes the `where` filter in `list_recent_notes` into its own tool.
