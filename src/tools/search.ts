@@ -45,6 +45,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     context_lines = 5,
     limit = 20,
     max_matches_per_file = 20,
+    offset = 0,
     folder,
     tags,
     match = "any",
@@ -85,6 +86,10 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     throw new Error('max_matches_per_file must be a non-negative integer (0 = unlimited)');
   }
 
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('offset must be a non-negative integer');
+  }
+
   if (!vaultPath || typeof vaultPath !== 'string') {
     throw new Error('Vault path must be a non-empty string');
   }
@@ -109,7 +114,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     // Zero-candidate guard: never fall through to a whole-vault rg (which would
     // search the cwd given no path args). Return the empty result directly.
     if (candidatePaths.length === 0) {
-      return { results: [], truncated: false, files_returned: 0, files_omitted: 0, matches_capped_in: [] };
+      return { results: [], truncated: false, files_returned: 0, files_skipped: 0, files_omitted: 0, matches_capped_in: [] };
     }
   }
 
@@ -146,7 +151,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
   }
 
   if (!stdout.trim()) {
-    return { results: [], truncated: false, files_returned: 0, files_omitted: 0, matches_capped_in: [] };
+    return { results: [], truncated: false, files_returned: 0, files_skipped: 0, files_omitted: 0, matches_capped_in: [] };
   }
 
   const results: SearchResult[] = [];
@@ -158,8 +163,10 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
 
   let currentFile = '';
   let currentMatches: SearchResult['matches'] = [];
+  let filesSeen = 0;    // distinct matching files encountered so far
+  let filesSkipped = 0; // distinct matching files dropped before the window by offset
   let filesOmitted = 0;
-  let skippingCurrentFile = false; // true once fileLimit reached; count distinct extra files
+  let skippingCurrentFile = false; // true when the current file is outside the window (offset or limit)
   let matchCapReachedForFile = false; // true once matchLimit reached within the current file
 
   const flushCurrent = () => {
@@ -186,11 +193,18 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
         currentMatches = [];
         matchCapReachedForFile = false;
 
-        // Decide whether this new file fits under the file cap.
-        skippingCurrentFile = fileLimit > 0 && results.length >= fileLimit;
-        if (skippingCurrentFile) {
-          filesOmitted += 1;
+        // Window the matching files: offset first (skip the leading `offset`
+        // files outright), then the file cap over the post-offset window.
+        if (filesSeen < offset) {
+          filesSkipped += 1;
+          skippingCurrentFile = true;
+        } else {
+          skippingCurrentFile = fileLimit > 0 && results.length >= fileLimit;
+          if (skippingCurrentFile) {
+            filesOmitted += 1;
+          }
         }
+        filesSeen += 1;
       }
 
       if (skippingCurrentFile) {
@@ -237,8 +251,11 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
 
   return {
     results,
+    // Skipping forward via offset never sets truncated (matches the envelope
+    // rule); only a dropped-after-window file or a per-file match cap does.
     truncated: filesOmitted > 0 || cappedFiles.size > 0,
     files_returned: results.length,
+    files_skipped: filesSkipped,
     files_omitted: filesOmitted,
     matches_capped_in: [...cappedFiles]
   };

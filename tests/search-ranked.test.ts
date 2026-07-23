@@ -67,6 +67,7 @@ test("empty query returns an empty envelope", async () => {
   assert.deepEqual(await idx.searchRanked("   ", 10), {
     results: [],
     returned: 0,
+    skipped: 0,
     omitted: 0,
     truncated: false,
   });
