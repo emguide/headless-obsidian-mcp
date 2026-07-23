@@ -149,9 +149,10 @@ npm run query -- stats
 # Resolve a human name (title/alias/basename) to a note path
 npm run query -- resolve "Alpha Project"
 
-# Vault hygiene: orphaned notes and broken wikilinks (drill-down from stats)
+# Vault hygiene: orphaned notes, broken wikilinks, and dead heading anchors (drill-down from stats)
 npm run query -- vault-issues orphans
 npm run query -- vault-issues unresolved_links --limit 50
+npm run query -- vault-issues broken_anchors --limit 50
 
 # List non-markdown files (attachments/images), optionally scoped/filtered
 npm run query -- files --folder assets --extension png
@@ -197,6 +198,8 @@ npm run query -- bulk-edit --select '{"where":{"status":"draft"}}' \
 npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
 npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
 npm run query -- replace-section "projects/alpha" "Summary" "new summary"
+npm run query -- rename-section "projects/alpha" "Old Heading" "New Heading"
+npm run query -- rename-section "projects/alpha" "Old" "New" --no-update-anchors
 
 # Move / rename a note (rewrites wikilinks that point to it)
 npm run query -- move "projects/alpha" "archive/alpha"
@@ -415,13 +418,14 @@ Summarize the whole vault in a single call, derived entirely from the shared ind
 Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
 
 **Parameters:**
-- `kind` (string, required): `"orphans"` or `"unresolved_links"`
+- `kind` (string, required): `"orphans"`, `"unresolved_links"`, or `"broken_anchors"`
 - `limit` (number, optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap)
 - `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
 **Returns:** `{ results, returned, skipped, omitted, truncated }`. `results`' shape depends on `kind`:
 - `"orphans"`: Array of note headers (same shape as `list_notes`) — notes with no inbound and no outbound resolved links (the same predicate behind `get_vault_stats`'s `orphan_notes`)
 - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
+- `"broken_anchors"`: `[[note#heading]]` links whose target note resolves but whose heading anchor matches no heading in that note — the complement of `unresolved_links` ("note resolves, heading doesn't"). Array of `{ source, targets: [{ target, anchor }] }` grouped by source note; `returned`/`omitted`/`truncated` count groups (source notes), not individual anchors, same as `unresolved_links`. Block-ref anchors (`#^id`) and links to unresolved notes are excluded.
 
 `returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`. For the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), the `orphans` `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count — a group-limited result naturally shows fewer. Index-backed.
 
@@ -667,6 +671,22 @@ Replace the body under an existing heading (the heading line is kept). Errors if
 
 **Returns:** `{ path, heading }`
 
+### rename_section
+
+Rename a heading in a note and rewrite every inbound `[[note#heading]]` anchor across the vault to the new heading — the heading-level analogue of `move_note`, closing the last structural edit that could silently break the link graph.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `from` (string, required): Heading to rename — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `read_section`/`replace_section`
+- `to` (string, required): New heading text
+- `update_anchors` (boolean, optional): Rewrite inbound `[[note#heading]]` anchors elsewhere in the vault (default: true)
+
+**Returns:** `{ path, from, to, updated_notes, updated_links }` — `from`/`to` are the resolved old/new heading; `updated_notes` counts OTHER notes touched (the renamed note itself is always touched, so it's excluded); `updated_links` counts every anchor rewritten, including the renamed note's own self-references (`[[#Old]]`/`[[thisnote#Old]]`) alongside inbound anchors elsewhere.
+
+Anchor matching is literal, case-insensitive (trimmed) text — not Obsidian's slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud.
+
+If the renamed heading's leaf text is duplicated elsewhere in the same note (e.g. the same heading under a different parent), inbound anchors meant for the OTHER occurrence may also get rewritten — Obsidian anchors carry no parent context, so matching is by literal heading text alone.
+
 ### bulk_edit
 
 Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot, with per-note result reporting. Turns "tag these 30 notes" from 30 round trips (and 30 auto-snapshot commits) into one.
@@ -749,14 +769,14 @@ expose them:
 export OBSIDIAN_ALLOW_WRITES=1
 ```
 
-When disabled, the seventeen write tools (`write_note`, `append_note`,
+When disabled, the eighteen write tools (`write_note`, `append_note`,
 `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`,
 `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`,
 `remove_property_values`, `rename_property`, `add_section`,
-`append_to_section`, `replace_section`, `bulk_edit`) are hidden from the tool
-list and any call to one is rejected, so an agent only ever sees the read
-tools. The flag gates the MCP server; the query CLI is the operator's own tool
-and is not affected by it.
+`append_to_section`, `replace_section`, `rename_section`, `bulk_edit`) are
+hidden from the tool list and any call to one is rejected, so an agent only
+ever sees the read tools. The flag gates the MCP server; the query CLI is the
+operator's own tool and is not affected by it.
 
 ### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
@@ -814,7 +834,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `get_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `bulk_edit`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `get_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`).
 
 ## Acknowledgments
 

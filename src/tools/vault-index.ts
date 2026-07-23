@@ -5,9 +5,11 @@ import {
   walkVault,
   collectTags,
   extractLinkTargets,
+  extractLinkRefs,
   parseHeadings,
   assertVaultPath,
   VaultFile,
+  LinkRef,
 } from "./vault.js";
 import { tokenize } from "./text/tokenize.js";
 import { BM25 } from "./text/bm25.js";
@@ -34,6 +36,8 @@ export interface IndexEntry {
   tags: string[];
   /** Raw wikilink targets (alias/anchor stripped), in document order. */
   linkTargets: string[];
+  /** Wikilink refs retaining heading/block anchors, in document order. */
+  linkRefs: LinkRef[];
   headline?: string;
   title: string;
   /** Frontmatter `aliases` (string or array), normalized to trimmed strings. */
@@ -289,6 +293,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let frontmatter: Record<string, unknown> = {};
   let tags: string[] = [];
   let linkTargets: string[] = [];
+  let linkRefs: LinkRef[] = [];
   let headline: string | undefined;
   let title = basename(f.path);
   let aliases: string[] = [];
@@ -301,6 +306,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     frontmatter = parsed.data as Record<string, unknown>;
     tags = collectTags(frontmatter, parsed.content);
     linkTargets = extractLinkTargets(parsed.content);
+    linkRefs = extractLinkRefs(parsed.content);
     headings = parseHeadings(parsed.content);
     headline = headings[0]?.text;
     if (typeof frontmatter.title === "string" && frontmatter.title.trim()) {
@@ -331,6 +337,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     frontmatter,
     tags,
     linkTargets,
+    linkRefs,
     headline,
     title,
     aliases,

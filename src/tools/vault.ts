@@ -188,11 +188,16 @@ export function extractLinkTargets(content: string): string[] {
  * `mapTarget` receives the bare target (alias + `#anchor` stripped, trimmed) and
  * returns a replacement target, or null to leave the link untouched. The embed
  * prefix (`!`), display alias (`|alias`), and anchor (`#heading`) are preserved.
+ * Optionally, `mapAnchor` receives the link's target and its heading anchor text
+ * (block refs `#^id` are never passed to it) and returns a replacement anchor,
+ * or null to leave it untouched; `mapTarget` and `mapAnchor` are independent, so
+ * a link's target and anchor can each be rewritten (or not) separately.
  * Returns the rewritten content and the number of links changed.
  */
 export function rewriteWikilinks(
   content: string,
-  mapTarget: (target: string) => string | null
+  mapTarget: (target: string) => string | null,
+  mapAnchor?: (target: string, anchor: string) => string | null
 ): { content: string; changed: number } {
   let changed = 0;
   const next = content.replace(/(!?)\[\[([^\]]+)\]\]/g, (whole, bang: string, inner: string) => {
@@ -201,13 +206,73 @@ export function rewriteWikilinks(
     const alias = pipe === -1 ? "" : inner.slice(pipe); // includes leading "|"
     const hash = left.indexOf("#");
     const target = hash === -1 ? left : left.slice(0, hash);
-    const anchor = hash === -1 ? "" : left.slice(hash); // includes leading "#"
-    const replacement = mapTarget(target.trim());
-    if (replacement == null) return whole;
+    const rawAnchor = hash === -1 ? "" : left.slice(hash); // includes leading "#", verbatim
+    const trimmedTarget = target.trim();
+
+    const newTarget = mapTarget(trimmedTarget);
+    // Only consult mapAnchor for heading anchors (not block refs) when asked.
+    let newAnchor: string | null = null;
+    if (mapAnchor && hash !== -1) {
+      const anchorText = rawAnchor.slice(1).trim(); // drop "#", trim
+      if (!anchorText.startsWith("^")) {
+        newAnchor = mapAnchor(trimmedTarget, anchorText);
+      }
+    }
+    if (newTarget == null && newAnchor == null) return whole;
     changed++;
-    return `${bang}[[${replacement}${anchor}${alias}]]`;
+    const finalTarget = newTarget == null ? trimmedTarget : newTarget;
+    // Preserve the anchor byte-for-byte unless mapAnchor supplied a replacement.
+    const finalAnchor = newAnchor == null ? rawAnchor : `#${newAnchor}`;
+    return `${bang}[[${finalTarget}${finalAnchor}${alias}]]`;
   });
   return { content: next, changed };
+}
+
+/** A wikilink's note target plus its heading/block anchor, if any. */
+export interface LinkRef {
+  /** Note target (alias + anchor stripped, trimmed). Empty for a `[[#anchor]]` self-link. */
+  target: string;
+  /** Raw anchor text after `#` (trimmed), or null when the link has no anchor. */
+  anchor: string | null;
+  /** True when the anchor was a block ref (`#^id`) rather than a heading. */
+  isBlockRef: boolean;
+}
+
+/**
+ * Extract every wikilink/embed as a {@link LinkRef}, preserving the heading or
+ * block anchor that {@link extractLinkTargets} discards. Order matches document
+ * order. A `[[#heading]]` self-link yields an empty `target`.
+ */
+export function extractLinkRefs(content: string): LinkRef[] {
+  const refs: LinkRef[] = [];
+  let match: RegExpExecArray | null;
+  WIKILINK_RE.lastIndex = 0;
+  while ((match = WIKILINK_RE.exec(content)) !== null) {
+    const inner = match[1];
+    const left = inner.split("|")[0];
+    const hash = left.indexOf("#");
+    const target = (hash === -1 ? left : left.slice(0, hash)).trim();
+    let anchor: string | null = null;
+    let isBlockRef = false;
+    if (hash !== -1) {
+      let raw = left.slice(hash + 1).trim();
+      if (raw.startsWith("^")) {
+        isBlockRef = true;
+        raw = raw.slice(1).trim();
+      }
+      anchor = raw;
+    }
+    refs.push({ target, anchor, isBlockRef });
+  }
+  return refs;
+}
+
+/**
+ * Whether a heading's text matches a link anchor. Literal case-insensitive,
+ * trimmed equality — deliberately NOT Obsidian's slug normalization.
+ */
+export function headingMatchesAnchor(headingText: string, anchor: string): boolean {
+  return headingText.trim().toLowerCase() === anchor.trim().toLowerCase();
 }
 
 /**

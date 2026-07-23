@@ -47,6 +47,7 @@ import {
   addNotePropertyValues,
   removeNotePropertyValues,
   renameNoteProperty,
+  renameSectionInVault,
   isWriteTool,
   WriteNoteParams,
   AppendNoteParams,
@@ -60,6 +61,7 @@ import {
   SectionEditParams,
   PropertyValuesParams,
   RenamePropertyParams,
+  RenameSectionParams,
 } from "./tools/write.js";
 import { bulkEdit, BulkEditParams } from "./tools/bulk.js";
 import {
@@ -483,13 +485,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_vault_issues",
-        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links). Index-backed. Returns { results, returned, omitted, truncated }: results is orphan note headers or { source, targets } groups depending on kind, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped rows (omitted > 0). For unresolved_links, the cap counts groups (source notes), not individual targets.",
+        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links); kind:'broken_anchors' returns, grouped by source note, the [[note#heading]] anchors that resolve to a note but not to any heading in it. Index-backed. Returns { results, returned, omitted, truncated }: results is orphan note headers or { source, targets } groups depending on kind, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped rows (omitted > 0). For unresolved_links and broken_anchors, the cap counts groups (source notes), not individual targets.",
         inputSchema: {
           type: "object",
           properties: {
             kind: {
               type: "string",
-              enum: ["orphans", "unresolved_links"],
+              enum: ["orphans", "unresolved_links", "broken_anchors"],
               description: "Which issue list to return."
             },
             limit: {
@@ -568,6 +570,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             update_links: { type: "boolean", description: "Rewrite wikilinks in other notes that point to this note (default: true)" }
           },
           required: ["from", "to"]
+        }
+      },
+      {
+        name: "rename_section",
+        description: "Rename a heading in a note and rewrite every inbound [[note#heading]] anchor across the vault to the new heading, so renaming a section never breaks the link graph. Fails loud on a missing or ambiguous heading. Anchors match case-insensitively; block refs (#^id) are never rewritten.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative note path (with or without .md)" },
+            from: { type: "string", description: "Existing heading — a bare heading or a \" > \"-joined heading-path" },
+            to: { type: "string", description: "New heading text" },
+            update_anchors: { type: "boolean", description: "Rewrite inbound [[note#heading]] anchors elsewhere in the vault (default: true)" }
+          },
+          required: ["path", "from", "to"]
         }
       },
       {
@@ -977,6 +993,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "move_note": {
         const result = await moveNote(VAULT_PATH, (args ?? {}) as unknown as MoveNoteParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "rename_section": {
+        const result = await renameSectionInVault(VAULT_PATH, (args ?? {}) as unknown as RenameSectionParams);
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
 
       case "move_file": {
