@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir, unlink, rename, stat } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import { getIndex } from "./vault-index.js";
-import { resolveNotePath, resolveVaultFile, rewriteWikilinks } from "./vault.js";
+import { resolveNotePath, resolveVaultFile, rewriteWikilinks, headingMatchesAnchor } from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
 import {
   NoteDocument,
@@ -15,6 +15,7 @@ import {
   addSection,
   appendToSection,
   replaceSection,
+  renameSection,
 } from "./note-document.js";
 
 /**
@@ -38,6 +39,7 @@ export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "add_section",
   "append_to_section",
   "replace_section",
+  "rename_section",
   "bulk_edit",
 ]);
 
@@ -443,6 +445,91 @@ export async function patchNote(
   const next = parts.join(replace);
   await commitWrite(vaultPath, path, next);
   return { path: canonicalName(path), replacements };
+}
+
+export interface RenameSectionParams {
+  path: string;
+  from: string;
+  to: string;
+  /** Rewrite inbound `[[note#from]]` anchors elsewhere in the vault. Default true. */
+  update_anchors?: boolean;
+}
+
+/**
+ * Rename a heading in a note and (by default) rewrite every inbound
+ * `[[note#oldHeading]]` anchor across the vault to the new heading — the
+ * heading-level analogue of {@link moveNote}. Anchors match case-insensitively
+ * (literal text, not Obsidian slugs); block refs (`#^id`) are never rewritten.
+ * Fails loud on a missing or ambiguous `from` heading.
+ */
+export async function renameSectionInVault(
+  vaultPath: string,
+  { path, from, to, update_anchors = true }: RenameSectionParams
+): Promise<{
+  path: string;
+  from: string;
+  to: string;
+  updated_notes: number;
+  updated_links: number;
+}> {
+  if (typeof from !== "string" || from.trim().length === 0) {
+    throw new Error("from must be a non-empty string");
+  }
+  if (typeof to !== "string" || to.trim().length === 0) {
+    throw new Error("to must be a non-empty string");
+  }
+
+  const canon = canonicalName(path);
+
+  // Capture backlinks + resolve the canonical note path from the pre-write index.
+  let backlinks: string[] = [];
+  let notePath = canon;
+  if (update_anchors) {
+    const index = await getIndex(vaultPath);
+    notePath = index.resolve(canon) ?? canon;
+    backlinks = index.backlinks(notePath);
+  }
+
+  // Rename the local heading (fails loud before any snapshot on missing/ambiguous).
+  const raw = await readRaw(vaultPath, path);
+  const doc = NoteDocument.parse(raw);
+  const oldHeading = renameSection(doc, from, to);
+
+  await snapshotBeforeWrite(vaultPath);
+  await writeResolved(vaultPath, path, doc.serialize());
+
+  let updatedNotes = 0;
+  let updatedLinks = 0;
+  if (update_anchors && backlinks.length > 0) {
+    const noteLower = notePath.toLowerCase();
+    const noteBase = notePath.split("/").pop()!.toLowerCase();
+    for (const backlink of backlinks) {
+      let btext: string;
+      try {
+        btext = await readFile(resolveNotePath(vaultPath, backlink), "utf-8");
+      } catch {
+        continue;
+      }
+      const { content, changed } = rewriteWikilinks(
+        btext,
+        () => null, // never change the note target
+        (target, anchor) => {
+          const norm = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
+          const pointsHere =
+            norm === noteLower || (!norm.includes("/") && norm === noteBase);
+          if (!pointsHere) return null;
+          return headingMatchesAnchor(oldHeading, anchor) ? to.trim() : null;
+        }
+      );
+      if (changed > 0) {
+        await writeResolved(vaultPath, backlink, content);
+        updatedNotes++;
+        updatedLinks += changed;
+      }
+    }
+  }
+
+  return { path: canon, from: oldHeading, to: to.trim(), updated_notes: updatedNotes, updated_links: updatedLinks };
 }
 
 /* ------------------------------------------------------------------- tags -- */
