@@ -164,6 +164,21 @@ export interface VaultStats {
   first_modified: string | null;
 }
 
+/** Parameters for list_vault_issues. */
+export interface ListVaultIssuesParams {
+  kind: "orphans" | "unresolved_links";
+  /** Cap on the number of returned rows/headers. */
+  limit?: number;
+}
+
+/** Unresolved outbound links from one source note. */
+export interface UnresolvedLinkGroup {
+  /** Path of the note containing the broken links. */
+  source: string;
+  /** Raw link targets that do not resolve to any note. */
+  targets: string[];
+}
+
 export interface RecentNotesParams {
   /** Maximum number of notes to return. Default: 20. */
   limit?: number;

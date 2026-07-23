@@ -20,6 +20,7 @@ import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
 import { getVaultStats } from "./tools/stats.js";
+import { listVaultIssues } from "./tools/vault-issues.js";
 import {
   listProperties,
   getPropertyValues,
@@ -69,6 +70,7 @@ import {
   QueryNotesParams,
   GetPropertyParams,
   ReadSectionParams,
+  ListVaultIssuesParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -373,6 +375,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {}
+        }
+      },
+      {
+        name: "list_vault_issues",
+        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links). Index-backed.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            kind: {
+              type: "string",
+              enum: ["orphans", "unresolved_links"],
+              description: "Which issue list to return."
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of rows/headers to return."
+            }
+          },
+          required: ["kind"]
         }
       },
       {
@@ -751,6 +772,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_vault_stats": {
         const result = await getVaultStats(VAULT_PATH);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "list_vault_issues": {
+        const result = await listVaultIssues(VAULT_PATH, (args ?? {}) as unknown as ListVaultIssuesParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
