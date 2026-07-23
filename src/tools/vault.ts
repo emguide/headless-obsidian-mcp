@@ -33,14 +33,6 @@ export function assertVaultPath(vaultPath: string): void {
   }
 }
 
-/** Normalize a filesystem path to a vault-relative, forward-slash, no-.md name. */
-function toVaultName(resolvedVault: string, fullPath: string): string {
-  return relative(resolvedVault, fullPath)
-    .split(sep)
-    .join("/")
-    .replace(/\.md$/, "");
-}
-
 /**
  * Resolve a user-supplied note path to an absolute path inside the vault,
  * guarding against path-traversal escapes. Mirrors the checks used by
