@@ -9,7 +9,8 @@ import {
   renameProperty,
 } from "./note-document.js";
 import { getIndex } from "./vault-index.js";
-import { matchesWhere, Condition } from "./property-match.js";
+import { Condition } from "./property-match.js";
+import { resolveCandidates } from "./candidate-filter.js";
 import { resolveNotePath } from "./vault.js";
 import { writeResolved } from "./write.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
@@ -140,23 +141,13 @@ export async function resolveSelection(
 
   const match = select.match ?? "all";
   const index = await getIndex(vaultPath);
-  let entries = index.getEntries();
-
-  if (select.folder && select.folder.trim()) {
-    const prefix = select.folder.replace(/[\\/]+$/, "").replace(/\\/g, "/") + "/";
-    entries = entries.filter((e) => (e.path + "/").startsWith(prefix));
-  }
-  if (select.where != null) {
-    const where = select.where;
-    entries = entries.filter((e) => matchesWhere(e.frontmatter, where, match));
-  }
-  if (Array.isArray(select.tags) && select.tags.length > 0) {
-    const wanted = select.tags.map((t) => String(t).replace(/^#/, "").toLowerCase());
-    entries = entries.filter((e) => {
-      const noteSet = new Set(e.tags.map((t) => t.toLowerCase()));
-      return match === "all" ? wanted.every((w) => noteSet.has(w)) : wanted.some((w) => noteSet.has(w));
-    });
-  }
+  let entries = resolveCandidates(index, {
+    folder: select.folder,
+    where: select.where,
+    tags: Array.isArray(select.tags) && select.tags.length > 0 ? select.tags : undefined,
+    tagMatch: match,   // bulk: match governs both tags...
+    whereMatch: match, // ...and where
+  });
   if (select.limit !== undefined) {
     if (!Number.isInteger(select.limit) || select.limit < 1) {
       throw new Error("limit must be a positive integer");
