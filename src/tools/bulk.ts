@@ -7,6 +7,8 @@ import {
   removePropertyValues,
   renameProperty,
 } from "./note-document.js";
+import { getIndex } from "./vault-index.js";
+import { matchesWhere } from "./property-match.js";
 
 export type BulkOperation =
   | { op: "add_tag"; tags: string[] }
@@ -88,4 +90,61 @@ export function applyOperations(doc: NoteDocument, operations: BulkOperation[]):
     }
   }
   return changed;
+}
+
+export interface BulkSelect {
+  paths?: string[];
+  where?: Record<string, unknown>;
+  tags?: string[];
+  match?: "all" | "any";
+  folder?: string;
+  limit?: number;
+}
+
+function canonicalName(notePath: string): string {
+  return notePath.replace(/\\/g, "/").replace(/\.md$/, "");
+}
+
+export async function resolveSelection(
+  vaultPath: string,
+  select: BulkSelect
+): Promise<string[]> {
+  const hasPaths = Array.isArray(select.paths) && select.paths.length > 0;
+  const hasFilter = select.where != null || (Array.isArray(select.tags) && select.tags.length > 0);
+  if (hasPaths && hasFilter) {
+    throw new Error("select accepts either `paths` or a filter (`where`/`tags`), not both");
+  }
+  if (!hasPaths && !hasFilter) {
+    throw new Error("select requires `paths`, `where`, or `tags`");
+  }
+
+  if (hasPaths) {
+    return select.paths!.map(canonicalName);
+  }
+
+  const match = select.match ?? "all";
+  const index = await getIndex(vaultPath);
+  let entries = index.getEntries();
+
+  if (select.folder && select.folder.trim()) {
+    const prefix = select.folder.replace(/[\\/]+$/, "").replace(/\\/g, "/") + "/";
+    entries = entries.filter((e) => (e.path + "/").startsWith(prefix));
+  }
+  if (select.where != null) {
+    entries = entries.filter((e) => matchesWhere(e.frontmatter, select.where as any, match));
+  }
+  if (Array.isArray(select.tags) && select.tags.length > 0) {
+    const wanted = select.tags.map((t) => String(t).replace(/^#/, "").toLowerCase());
+    entries = entries.filter((e) => {
+      const noteSet = new Set(e.tags.map((t) => t.toLowerCase()));
+      return match === "all" ? wanted.every((w) => noteSet.has(w)) : wanted.some((w) => noteSet.has(w));
+    });
+  }
+  if (select.limit !== undefined) {
+    if (!Number.isInteger(select.limit) || select.limit < 1) {
+      throw new Error("limit must be a positive integer");
+    }
+    entries = entries.slice(0, select.limit);
+  }
+  return entries.map((e) => e.path);
 }
