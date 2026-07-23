@@ -39,6 +39,7 @@ import {
   queryNotes,
   getProperty,
 } from "./tools/properties.js";
+import { bulkEdit } from "./tools/bulk.js";
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH;
 if (!VAULT_PATH) {
@@ -124,6 +125,8 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await removeNotePropertyValues(VAULT_PATH!, args);
     } else if (toolName === "rename_property") {
       result = await renameNoteProperty(VAULT_PATH!, args);
+    } else if (toolName === "bulk_edit") {
+      result = await bulkEdit(VAULT_PATH!, args);
     } else {
       throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -521,6 +524,24 @@ program
       content: readContent(content, options.file),
     };
     await queryTool("replace_section", args, verbose);
+  });
+
+program
+  .command("bulk-edit")
+  .description("Apply frontmatter mutations to many notes (JSON select + operations)")
+  .requiredOption("--select <json>", "Selection JSON: {paths:[...]} or {where:{...}} / {tags:[...]}")
+  .requiredOption("--operations <json>", "Operations JSON array, e.g. [{\"op\":\"add_tag\",\"tags\":[\"x\"]}]")
+  .option("--dry-run", "Preview matched notes without writing")
+  .option("--expected-count <n>", "Abort if the match count differs", (v) => parseInt(v, 10))
+  .action(async (options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      select: JSON.parse(options.select),
+      operations: JSON.parse(options.operations),
+      ...(options.dryRun && { dry_run: true }),
+      ...(options.expectedCount !== undefined && { expected_count: options.expectedCount }),
+    };
+    await queryTool("bulk_edit", args, verbose);
   });
 
 program
