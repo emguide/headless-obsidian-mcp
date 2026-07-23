@@ -54,8 +54,8 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Purpose**: Discover what exists in the vault. Returns lightweight note headers (no full contents), so an agent can orient itself before searching or reading.
 - **Input**:
   - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
-  - `limit` (optional): Maximum number of notes to return
-- **Output**: Array of note headers with `path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, and `modified` (ISO timestamp)
+  - `limit` (optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
+- **Output**: `{ notes, total, returned, truncated }` — `notes` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`); `total` is the count before the limit, `returned` is `notes.length`, and `truncated` is `true` when the limit dropped notes — so a capped first-orientation call isn't mistaken for a complete one.
 
 ### get_links
 - **Purpose**: Resolve the Obsidian link graph for a note, turning the flat vault into a navigable graph.

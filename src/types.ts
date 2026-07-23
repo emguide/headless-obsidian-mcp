@@ -78,6 +78,18 @@ export interface NoteHeader {
   modified: string;
 }
 
+/** The bounded result of `listNotes`, with truncation metadata. */
+export interface ListNotesResponse {
+  /** Matching note headers, at most `limit` entries (unless limit is 0). */
+  notes: NoteHeader[];
+  /** Notes matching the folder filter, before the limit was applied. */
+  total: number;
+  /** Number of notes in `notes` (== notes.length). */
+  returned: number;
+  /** True if the limit dropped notes (total > returned). */
+  truncated: boolean;
+}
+
 /** A markdown heading with its level and 0-based source line index. */
 export interface ParsedHeading {
   text: string;
