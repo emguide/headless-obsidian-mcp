@@ -662,9 +662,11 @@ Rename a heading in a note and rewrite every inbound `[[note#heading]]` anchor a
 - `to` (string, required): New heading text
 - `update_anchors` (boolean, optional): Rewrite inbound `[[note#heading]]` anchors elsewhere in the vault (default: true)
 
-**Returns:** `{ path, from, to, updated_notes, updated_links }` — `from`/`to` are the resolved old/new heading; `updated_notes`/`updated_links` count inbound anchors rewritten (the note's own heading is always rewritten; the counters cover only inbound anchors).
+**Returns:** `{ path, from, to, updated_notes, updated_links }` — `from`/`to` are the resolved old/new heading; `updated_notes` counts OTHER notes touched (the renamed note itself is always touched, so it's excluded); `updated_links` counts every anchor rewritten, including the renamed note's own self-references (`[[#Old]]`/`[[thisnote#Old]]`) alongside inbound anchors elsewhere.
 
 Anchor matching is literal, case-insensitive (trimmed) text — not Obsidian's slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud.
+
+If the renamed heading's leaf text is duplicated elsewhere in the same note (e.g. the same heading under a different parent), inbound anchors meant for the OTHER occurrence may also get rewritten — Obsidian anchors carry no parent context, so matching is by literal heading text alone.
 
 ### bulk_edit
 

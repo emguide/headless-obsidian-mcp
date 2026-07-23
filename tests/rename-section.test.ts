@@ -78,3 +78,67 @@ test("renameSectionInVault fails loud on ambiguous heading", async () => {
   );
   await fx3.cleanup();
 });
+
+test("renameSectionInVault rewrites the renamed note's own self-reference anchors", async () => {
+  const fx4 = await makeVault([
+    {
+      path: "thenote.md",
+      content:
+        "# Thenote\n\n" +
+        "## Old Heading\n\n" +
+        "See also [[thenote#Old Heading]] and [[#Old Heading]].\n\n" +
+        "## Other Heading\n\n" +
+        "Unrelated [[thenote#Other Heading]] and [[#Other Heading]] stay put.\n",
+    },
+  ]);
+
+  const r = await renameSectionInVault(fx4.vaultPath, {
+    path: "thenote",
+    from: "Old Heading",
+    to: "New Heading",
+  });
+
+  const note = await read(fx4.vaultPath, "thenote.md");
+  assert.match(note, /## New Heading/);
+  assert.match(note, /\[\[thenote#New Heading\]\]/);
+  assert.match(note, /\[\[#New Heading\]\]/);
+  assert.doesNotMatch(note, /Old Heading/);
+
+  // The differently-headed self-references are untouched.
+  assert.match(note, /\[\[thenote#Other Heading\]\]/);
+  assert.match(note, /\[\[#Other Heading\]\]/);
+
+  // No other notes were touched, but the two self-anchors count as updated_links.
+  assert.equal(r.updated_notes, 0);
+  assert.equal(r.updated_links, 2);
+
+  await fx4.cleanup();
+});
+
+test("renameSectionInVault with update_anchors:false leaves the note's own self-references alone too", async () => {
+  const fx5 = await makeVault([
+    {
+      path: "thenote.md",
+      content:
+        "# Thenote\n\n" +
+        "## Old Heading\n\n" +
+        "See also [[thenote#Old Heading]] and [[#Old Heading]].\n",
+    },
+  ]);
+
+  const r = await renameSectionInVault(fx5.vaultPath, {
+    path: "thenote",
+    from: "Old Heading",
+    to: "New Heading",
+    update_anchors: false,
+  });
+
+  const note = await read(fx5.vaultPath, "thenote.md");
+  assert.match(note, /## New Heading/); // heading itself still renamed
+  assert.match(note, /\[\[thenote#Old Heading\]\]/); // self-ref left stale, untouched
+  assert.match(note, /\[\[#Old Heading\]\]/); // bare self-link left stale, untouched
+  assert.equal(r.updated_links, 0);
+  assert.equal(r.updated_notes, 0);
+
+  await fx5.cleanup();
+});

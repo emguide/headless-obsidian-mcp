@@ -482,6 +482,9 @@ export async function renameSectionInVault(
   const canon = canonicalName(path);
 
   // Capture backlinks + resolve the canonical note path from the pre-write index.
+  // Also gates the self-anchor rewrite below: when update_anchors is false,
+  // notePath is never index-resolved, so noteLower/noteBase built from it
+  // would be unreliable for matching — gating avoids relying on them at all.
   let backlinks: string[] = [];
   let notePath = canon;
   if (update_anchors) {
@@ -489,20 +492,56 @@ export async function renameSectionInVault(
     notePath = index.resolve(canon) ?? canon;
     backlinks = index.backlinks(notePath);
   }
+  const noteLower = notePath.toLowerCase();
+  const noteBase = notePath.split("/").pop()!.toLowerCase();
+
+  // Shared predicate: does a wikilink target (already trimmed) point at THIS
+  // note? Used both for inbound backlinks (target never empty there) and for
+  // the renamed note's own self-references, where an empty target denotes a
+  // bare `[[#anchor]]` self-link.
+  const pointsToThisNote = (target: string): boolean => {
+    const norm = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
+    return norm === "" || norm === noteLower || (!norm.includes("/") && norm === noteBase);
+  };
 
   // Rename the local heading (fails loud before any snapshot on missing/ambiguous).
   const raw = await readRaw(vaultPath, path);
   const doc = NoteDocument.parse(raw);
   const oldHeading = renameSection(doc, from, to);
 
+  // Rewrite the renamed note's OWN self-reference anchors — both the bare
+  // self-link form (`[[#Old Heading]]`, empty target) and the full
+  // self-reference form (`[[thenote#Old Heading]]`). The backlink graph
+  // excludes self-links (see vault-index.ts), so without this the renamed
+  // note's own body would keep pointing at the heading text that no longer
+  // exists. This is purely additive over `rewriteWikilinks` — never touches
+  // the link target, only the anchor, and only when it matches oldHeading.
+  // Gated by update_anchors: false means "rename the heading only, touch no
+  // anchors anywhere" — consistent, least-surprise behavior.
+  let selfRewritten = doc.serialize();
+  let selfChanged = 0;
+  if (update_anchors) {
+    const rewritten = rewriteWikilinks(
+      selfRewritten,
+      () => null, // never change the note target
+      (target, anchor) => {
+        if (!pointsToThisNote(target)) return null;
+        return headingMatchesAnchor(oldHeading, anchor) ? to.trim() : null;
+      }
+    );
+    selfRewritten = rewritten.content;
+    selfChanged = rewritten.changed;
+  }
+
   await snapshotBeforeWrite(vaultPath);
-  await writeResolved(vaultPath, path, doc.serialize());
+  await writeResolved(vaultPath, path, selfRewritten);
 
   let updatedNotes = 0;
-  let updatedLinks = 0;
+  // Self-anchor rewrites count toward updated_links (inbound-anchor-equivalent
+  // edits), but NOT toward updated_notes — that counter means "other notes
+  // touched", and the renamed note itself is always touched by definition.
+  let updatedLinks = selfChanged;
   if (update_anchors && backlinks.length > 0) {
-    const noteLower = notePath.toLowerCase();
-    const noteBase = notePath.split("/").pop()!.toLowerCase();
     for (const backlink of backlinks) {
       let btext: string;
       try {
@@ -514,10 +553,7 @@ export async function renameSectionInVault(
         btext,
         () => null, // never change the note target
         (target, anchor) => {
-          const norm = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
-          const pointsHere =
-            norm === noteLower || (!norm.includes("/") && norm === noteBase);
-          if (!pointsHere) return null;
+          if (!pointsToThisNote(target)) return null;
           return headingMatchesAnchor(oldHeading, anchor) ? to.trim() : null;
         }
       );
