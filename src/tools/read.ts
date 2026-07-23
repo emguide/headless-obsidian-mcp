@@ -1,10 +1,10 @@
 import { readFile, stat } from "node:fs/promises";
 import { join, resolve, relative } from "node:path";
 import matter from "gray-matter";
-import { Note, NoteMetadata } from "../types.js";
+import { Note, NoteMetadata, ReadNotesResult } from "../types.js";
 import { collectTags } from "./vault.js";
 
-export async function readNotes(vaultPath: string, notePaths: string[]): Promise<Note[]> {
+export async function readNotes(vaultPath: string, notePaths: string[]): Promise<ReadNotesResult> {
   // Input validation
   if (!vaultPath || typeof vaultPath !== 'string') {
     throw new Error('Vault path must be a non-empty string');
@@ -19,6 +19,7 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
   }
 
   const notes: Note[] = [];
+  const errors: Array<{ path: string; error: string }> = [];
   const resolvedVaultPath = resolve(vaultPath);
 
   for (const notePath of notePaths) {
@@ -64,13 +65,13 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
 
       const message = error instanceof Error ? error.message : String(error);
 
-      // Don't expose detailed file system errors - just indicate the note wasn't found/readable
+      // Path traversal is a security violation, not a missing file: fail the whole batch.
       if (message.includes('path traversal')) {
-        throw error; // Re-throw security errors with full details
+        throw error;
       }
-      throw new Error(`Note not found or not readable: ${notePath}`);
+      errors.push({ path: notePath, error: `Note not found or not readable: ${notePath}` });
     }
   }
 
-  return notes;
+  return { notes, errors };
 }

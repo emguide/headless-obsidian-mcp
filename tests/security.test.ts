@@ -45,7 +45,7 @@ test("search rejects a DoS-prone pattern", async () => {
 });
 
 test("read_notes parses frontmatter and tags, preserving body text verbatim", async () => {
-  const [note] = await readNotes(fx.vaultPath, ["projects/alpha"]);
+  const [note] = (await readNotes(fx.vaultPath, ["projects/alpha"])).notes;
   assert.equal(note.path, "projects/alpha");
   assert.equal(note.frontmatter.status, "active");
   // `tags` unifies frontmatter `tags:` with inline `#tags`, matching the
@@ -71,7 +71,7 @@ test("read_notes tag extraction ignores URL anchors and numeric refs", async () 
     },
   ]);
   try {
-    const [note] = await readNotes(edge.vaultPath, ["tag-edge-cases"]);
+    const [note] = (await readNotes(edge.vaultPath, ["tag-edge-cases"])).notes;
     // `#` preceded by a word char (a URL anchor) is not a tag.
     assert.ok(!note.tags.includes("install"), "URL anchor must not be a tag");
     // A purely numeric ref (#123) is not a tag — a tag must start with a letter.

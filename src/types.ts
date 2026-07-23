@@ -23,6 +23,13 @@ export interface Note {
   tags: string[];
 }
 
+/** Result of a batch read: successful notes plus per-path failures. */
+export interface ReadNotesResult {
+  notes: Note[];
+  /** One entry per path that could not be read (missing, too large, wrong type). */
+  errors: Array<{ path: string; error: string }>;
+}
+
 export interface SearchResult {
   path: string;
   matches: Array<{

@@ -151,7 +151,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "read_notes",
-        description: "Read one or more Obsidian notes by their relative paths. Returns parsed note data: path, contents, frontmatter, and tags.",
+        description: "Read one or more Obsidian notes by their relative paths. Returns { notes, errors }: notes is the array of parsed notes (path, contents, frontmatter, tags); errors lists any paths that could not be read (missing/too large), so one bad path never fails the batch. Path traversal still errors the whole call.",
         inputSchema: {
           type: "object",
           properties: {
@@ -638,12 +638,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!Array.isArray(paths) || paths.length === 0) {
           throw new Error("Paths array is required for read_notes");
         }
-        const notes = await readNotes(VAULT_PATH, paths);
+        const result = await readNotes(VAULT_PATH, paths);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(notes)
+              text: JSON.stringify(result)
             }
           ]
         };
