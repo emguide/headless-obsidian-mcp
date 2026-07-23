@@ -32,6 +32,12 @@ export class NoteDocument {
   // length so `block + body === raw`.
   private static readonly FENCE = /^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/;
 
+  /** True when `raw` begins with a frontmatter fence — reuses the canonical
+   * FENCE regex so callers never re-declare it and risk drift. */
+  static hasFrontmatterFence(raw: string): boolean {
+    return NoteDocument.FENCE.test(raw);
+  }
+
   static parse(raw: string): NoteDocument {
     const match = NoteDocument.FENCE.exec(raw);
     if (!match) {

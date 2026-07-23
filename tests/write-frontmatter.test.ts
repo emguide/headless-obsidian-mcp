@@ -76,3 +76,42 @@ test("prependNote to an existing note does NOT validate inserted --- as frontmat
   assert.match(raw, /title: E/);
   assert.match(raw, /not: frontmatter/);
 });
+
+test("writeNote frontmatter param serializes canonically with body-only content", async () => {
+  await writeNote(fx.vaultPath, {
+    path: "param",
+    content: "# Body\n",
+    frontmatter: { title: "P", tags: ["x", "y"] },
+  });
+  const raw = await read(fx.vaultPath, "param.md");
+  assert.match(raw, /^---\n/);
+  assert.match(raw, /title: P/);
+  assert.match(raw, /# Body/);
+});
+
+test("writeNote frontmatter param rejects a rule violation", async () => {
+  await assert.rejects(
+    () => writeNote(fx.vaultPath, { path: "pv", content: "b", frontmatter: { author: { name: "y" } as unknown } }),
+    /nested object/i
+  );
+  assert.equal(await exists(fx.vaultPath, "pv.md"), false);
+});
+
+test("writeNote rejects frontmatter param AND an inline block together", async () => {
+  await assert.rejects(
+    () => writeNote(fx.vaultPath, {
+      path: "both",
+      content: "---\ntitle: X\n---\nbody\n",
+      frontmatter: { title: "Y" },
+    }),
+    /not both/i
+  );
+  assert.equal(await exists(fx.vaultPath, "both.md"), false);
+});
+
+test("writeNote with empty frontmatter object writes body-only, no conflict", async () => {
+  await writeNote(fx.vaultPath, { path: "empty-fm", content: "# Just body\n", frontmatter: {} });
+  const raw = await read(fx.vaultPath, "empty-fm.md");
+  assert.equal(raw.startsWith("---"), false);
+  assert.match(raw, /# Just body/);
+});
