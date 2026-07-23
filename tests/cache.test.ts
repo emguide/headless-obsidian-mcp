@@ -29,12 +29,12 @@ test("drops entries for deleted files", async () => {
   const fx = await makeVault(sampleNotes());
   try {
     const before = await listNotes(fx.vaultPath);
-    assert.ok(before.some((n) => n.path === "Beta Note"));
+    assert.ok(before.notes.some((n) => n.path === "Beta Note"));
 
     await rm(join(fx.vaultPath, "Beta Note.md"));
 
     const after = await listNotes(fx.vaultPath);
-    assert.ok(!after.some((n) => n.path === "Beta Note"));
+    assert.ok(!after.notes.some((n) => n.path === "Beta Note"));
   } finally {
     await fx.cleanup();
   }
