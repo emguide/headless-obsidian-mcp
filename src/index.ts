@@ -97,6 +97,11 @@ const server = new Server(
     capabilities: {
       tools: {},
     },
+    // The shared conventions are stated once here instead of being restated in
+    // every tool description; tool descriptions carry only their deviations.
+    instructions:
+      "Headless MCP server for an Obsidian vault. All paths (notes, files, folders) are relative to the vault root; on notes the .md extension is optional.\n\n" +
+      "Pagination convention: every list-style tool (the list_* tools plus search_notes_ranked, find_by_tag, query_notes, and get_related_notes) returns { results, returned, skipped, omitted, truncated } — a window [offset, offset + limit) over the full result set. limit defaults to 100 (0 = unbounded); offset defaults to 0, and skipping past the end returns an empty result, not an error. skipped counts rows dropped before the window by offset, omitted counts rows dropped after it by limit, so total = skipped + returned + omitted; truncated (omitted > 0) means a next page exists. search_notes paginates over matching files with the parallel names files_skipped / files_omitted. Deviations are noted on the tool itself.",
   }
 );
 
@@ -104,7 +109,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const tools = [
       {
         name: "search_notes",
-        description: "Search notes with ripgrep, optionally scoped by folder, tags, or a frontmatter where filter (index-resolved candidates, then rg over just those notes). Returns { results, truncated, files_returned, files_omitted, matches_capped_in }.",
+        description: "Search notes with ripgrep, optionally scoped by folder, tags, or a frontmatter where filter (index-resolved candidates, then rg over just those notes). Paginates over matching files: returns { results, truncated, files_returned, files_skipped, files_omitted, matches_capped_in }.",
         inputSchema: {
           type: "object",
           properties: {
@@ -138,9 +143,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             offset: {
               type: "number",
-              description: "Matching files to skip before the window, for pagination (default 0). Reported as files_skipped."
+              description: "Matching files to skip, for pagination (default 0)."
             },
-            folder: { type: "string", description: "Restrict to notes under this folder (relative to the vault root)." },
+            folder: { type: "string", description: "Restrict to notes under this folder." },
             tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
             match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
             where: { type: "object", description: "Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax)." }
@@ -151,7 +156,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "search_notes_ranked",
         description:
-          "Full-text search ranked by BM25 relevance, optionally scoped by folder, tags, or a frontmatter where filter. Returns the most relevant notes first (title/heading/tag matches boosted), each with a relevance score and a matched snippet. Complements search_notes (which is literal/regex, unranked). Returns { results, returned, omitted, truncated }: results is ranked note headers with score and snippet, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
+          "Full-text search ranked by BM25 relevance, optionally scoped by folder, tags, or a frontmatter where filter. Returns the most relevant notes first (title/heading/tag matches boosted) as note headers with score and snippet. Complements search_notes (which is literal/regex, unranked). A positive limit is capped at 100; offset pages past the cap.",
         inputSchema: {
           type: "object",
           properties: {
@@ -161,13 +166,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of results (default 100; pass 0 for unbounded; a positive limit is capped at 100).",
+              description: "Maximum number of results (default 100; 0 = unbounded; a positive limit is capped at 100).",
             },
             offset: {
               type: "number",
-              description: "Ranked hits to skip before the window, for pagination (default 0). With the 100-row cap, offset: 100 reaches hits 101-200 without limit: 0.",
+              description: "Ranked hits to skip, for pagination (default 0).",
             },
-            folder: { type: "string", description: "Restrict to notes under this folder (relative to the vault root)." },
+            folder: { type: "string", description: "Restrict to notes under this folder." },
             tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
             match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
             where: { type: "object", description: "Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax)." },
@@ -184,7 +189,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             paths: {
               type: "array",
               items: { type: "string" },
-              description: "Array of relative note paths (with or without .md extension)"
+              description: "Note paths (.md optional)"
             }
           },
           required: ["paths"]
@@ -192,53 +197,53 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_notes",
-        description: "List notes in the vault as lightweight headers (path, title, tags, first heading, size, modified time) without full contents. Use it to discover what exists and orient before searching or reading. Returns { results, returned, omitted, truncated }: results is capped at 100 by default (pass limit: 0 for all notes), and truncated is true when the cap dropped notes (omitted > 0).",
+        description: "List notes in the vault as lightweight headers (path, title, tags, first heading, size, modified time) without full contents. Use it to discover what exists and orient before searching or reading.",
         inputSchema: {
           type: "object",
           properties: {
             folder: {
               type: "string",
-              description: "Restrict to notes under this folder, relative to the vault root"
+              description: "Restrict to notes under this folder."
             },
             limit: {
               type: "number",
-              description: "Maximum number of notes to return (default 100; pass 0 for unbounded)"
+              description: "Maximum number of notes to return (default 100; 0 = unbounded)"
             },
             offset: {
               type: "number",
-              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows to skip, for pagination (default 0)."
             }
           }
         }
       },
       {
         name: "list_files",
-        description: "List non-markdown files in the vault (attachments, images, PDFs) so an agent can find a file to move. Returns { results, returned, omitted, truncated }: results is an array of { path, size, modified, extension }, capped at 100 by default (pass limit: 0 for all files), and truncated is true when the cap dropped files (omitted > 0). Does not include notes (use list_notes) and never touches the index.",
+        description: "List non-markdown files in the vault (attachments, images, PDFs) as { path, size, modified, extension } rows, e.g. to find a file to move. Never includes notes (use list_notes).",
         inputSchema: {
           type: "object",
           properties: {
-            folder: { type: "string", description: "Restrict to files under this folder (relative to the vault root)." },
+            folder: { type: "string", description: "Restrict to files under this folder." },
             extension: { type: "string", description: "Filter by extension; leading dot optional, case-insensitive (e.g. 'png')." },
             limit: {
               type: "number",
-              description: "Maximum number of files to return (default 100; pass 0 for unbounded)"
+              description: "Maximum number of files to return (default 100; 0 = unbounded)"
             },
             offset: {
               type: "number",
-              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows to skip, for pagination (default 0)."
             }
           }
         }
       },
       {
         name: "list_folders",
-        description: "Enumerate the vault's folders as a flat, bounded list so an agent can see the shape of the vault before searching or reading — the folder-level counterpart to list_notes. Returns { results, returned, omitted, truncated }: results is an array of { path, notes (direct), total_notes (recursive), subfolders }, sorted by path and capped at 100 by default (pass limit: 0 for all folders). Notes-only (attachment-only folders do not appear; use list_files for those). Root-level notes contribute no folder.",
+        description: "Enumerate the vault's folders as { path, notes (direct), total_notes (recursive), subfolders } rows sorted by path — the folder-level counterpart to list_notes, for seeing the vault's shape before searching or reading. Notes-only: attachment-only folders do not appear (use list_files), and root-level notes contribute no folder.",
         inputSchema: {
           type: "object",
           properties: {
             folder: {
               type: "string",
-              description: "Restrict to folders under this folder (relative to the vault root)"
+              description: "Restrict to folders under this folder."
             },
             depth: {
               type: "number",
@@ -246,11 +251,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of folders to return (default 100; pass 0 for unbounded)"
+              description: "Maximum number of folders to return (default 100; 0 = unbounded)"
             },
             offset: {
               type: "number",
-              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows to skip, for pagination (default 0)."
             }
           }
         }
@@ -263,7 +268,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             path: {
               type: "string",
-              description: "Relative note path (with or without .md extension)"
+              description: "Note path (.md optional)"
             }
           },
           required: ["path"]
@@ -277,7 +282,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             path: {
               type: "string",
-              description: "Relative note path (with or without .md extension)"
+              description: "Note path (.md optional)"
             }
           },
           required: ["path"]
@@ -291,7 +296,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             path: {
               type: "string",
-              description: "Relative note path (with or without .md extension)"
+              description: "Note path (.md optional)"
             },
             section: {
               type: "string",
@@ -307,20 +312,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_tags",
-        description: "List every tag used across the vault with the number of notes using it, sorted by frequency. Unifies inline #tags and frontmatter tags:. Use it to see the vault's topic index. Returns { results, returned, skipped, omitted, truncated }: results is the tag/count rows; there is no limit (truncated is always false), but offset can page through the full set.",
+        description: "List every tag used across the vault with the number of notes using it, sorted by frequency. Unifies inline #tags and frontmatter tags:. Use it to see the vault's topic index. No limit: the full set is returned (offset still pages; truncated is always false).",
         inputSchema: {
           type: "object",
           properties: {
             offset: {
               type: "number",
-              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows to skip, for pagination (default 0)."
             }
           }
         }
       },
       {
         name: "find_by_tag",
-        description: "Find notes matching one or more tags. High-precision retrieval based on human curation. Returns { results, returned, omitted, truncated }: results is note headers, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
+        description: "Find notes matching one or more tags, as note headers. High-precision retrieval based on human curation.",
         inputSchema: {
           type: "object",
           properties: {
@@ -336,11 +341,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of notes to return (default 100; pass 0 for unbounded)"
+              description: "Maximum number of notes to return (default 100; 0 = unbounded)"
             },
             offset: {
               type: "number",
-              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows to skip, for pagination (default 0)."
             }
           },
           required: ["tags"]
@@ -348,13 +353,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_recent_notes",
-        description: "List notes ordered by recency (newest first), as lightweight headers. Sort by filesystem mtime or a frontmatter date field, with optional since cutoff and frontmatter equality filters. Use it to find current material. Returns { results, returned, omitted, truncated }: results is capped at 100 by default (pass limit: 0 for all notes), and truncated is true when the cap dropped notes (omitted > 0).",
+        description: "List notes ordered by recency (newest first), as lightweight headers. Sort by filesystem mtime or a frontmatter date field, with optional since cutoff and frontmatter equality filters. Use it to find current material.",
         inputSchema: {
           type: "object",
           properties: {
             limit: {
               type: "number",
-              description: "Maximum number of notes to return (default 100; pass 0 for unbounded)"
+              description: "Maximum number of notes to return (default 100; 0 = unbounded)"
             },
             since: {
               type: "string",
@@ -370,28 +375,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             offset: {
               type: "number",
-              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows to skip, for pagination (default 0)."
             }
           }
         }
       },
       {
         name: "get_related_notes",
-        description: "Find the notes most related to a given note, ranked, without embeddings: a transparent blend of shared tags, direct links, shared out-links (co-reference), and shared backlinks (co-citation). Each result carries the reasons it surfaced. Use it for associative recall - 'I'm looking at X, what else is relevant?' Returns { results, returned, omitted, truncated }: results is related note headers with score/reasons, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
+        description: "Find the notes most related to a given note, ranked, without embeddings: a transparent blend of shared tags, direct links, shared out-links (co-reference), and shared backlinks (co-citation). Results are note headers with score and the reasons each surfaced. Use it for associative recall - 'I'm looking at X, what else is relevant?'",
         inputSchema: {
           type: "object",
           properties: {
             path: {
               type: "string",
-              description: "Relative note path (with or without .md extension)"
+              description: "Note path (.md optional)"
             },
             limit: {
               type: "number",
-              description: "Maximum number of related notes to return (default 100; pass 0 for unbounded)"
+              description: "Maximum number of related notes to return (default 100; 0 = unbounded)"
             },
             offset: {
               type: "number",
-              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows to skip, for pagination (default 0)."
             }
           },
           required: ["path"]
@@ -405,7 +410,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             path: {
               type: "string",
-              description: "Relative note path (with or without .md extension)"
+              description: "Note path (.md optional)"
             }
           },
           required: ["path"]
@@ -427,38 +432,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_properties",
-        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties. Returns { results, returned, skipped, omitted, truncated }: results is the property rows; there is no limit (truncated is always false), but offset can page through the full set.",
+        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties. No limit: the full set is returned (offset still pages; truncated is always false).",
         inputSchema: {
           type: "object",
           properties: {
             include_tags: { type: "boolean", description: "Include the tags key (default: true)" },
-            offset: { type: "number", description: "Rows to skip before the window, for pagination (default 0). Reported as skipped." }
+            offset: { type: "number", description: "Rows to skip, for pagination (default 0)." }
           }
         }
       },
       {
         name: "list_property_values",
-        description: "List the distinct values of one frontmatter property with the number of notes each appears in, most frequent first. Array-valued properties count each element. A faceted index for a single key. Returns { key, results, returned, omitted, truncated }: results is the value/count rows, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped rows (omitted > 0).",
+        description: "List the distinct values of one frontmatter property as { value, count } rows, most frequent first. Array-valued properties count each element. A faceted index for a single key.",
         inputSchema: {
           type: "object",
           properties: {
             key: { type: "string", description: "The frontmatter property key to facet" },
-            limit: { type: "number", description: "Maximum number of distinct values to return (default 100; pass 0 for unbounded)" },
-            offset: { type: "number", description: "Rows to skip before the window, for pagination (default 0). Reported as skipped." }
+            limit: { type: "number", description: "Maximum number of distinct values to return (default 100; 0 = unbounded)" },
+            offset: { type: "number", description: "Rows to skip, for pagination (default 0)." }
           },
           required: ["key"]
         }
       },
       {
         name: "query_notes",
-        description: "Find notes whose frontmatter satisfies a set of conditions. Each condition is a bare scalar (equality / array-membership) or an operator object { eq, ne, gt, gte, lt, lte, exists, contains }. Comparisons are type-aware (numbers, ISO dates, strings). match: all (default) or any. Returns { results, returned, omitted, truncated }: results is note headers, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
+        description: "Find notes whose frontmatter satisfies a set of conditions, as note headers. Each condition is a bare scalar (equality / array-membership) or an operator object { eq, ne, gt, gte, lt, lte, exists, contains }. Comparisons are type-aware (numbers, ISO dates, strings). match: all (default) or any.",
         inputSchema: {
           type: "object",
           properties: {
             where: { type: "object", description: "Map of property key to condition (scalar or { eq/ne/gt/gte/lt/lte/exists/contains })" },
             match: { type: "string", enum: ["all", "any"], description: "Require all (default) or any of the conditions" },
-            limit: { type: "number", description: "Maximum number of notes to return (default 100; pass 0 for unbounded)" },
-            offset: { type: "number", description: "Rows to skip before the window, for pagination (default 0). Reported as skipped." }
+            limit: { type: "number", description: "Maximum number of notes to return (default 100; 0 = unbounded)" },
+            offset: { type: "number", description: "Rows to skip, for pagination (default 0)." }
           },
           required: ["where"]
         }
@@ -469,7 +474,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             key: { type: "string", description: "The frontmatter property key to read" }
           },
           required: ["path", "key"]
@@ -485,7 +490,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_vault_issues",
-        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links); kind:'broken_anchors' returns, grouped by source note, the [[note#heading]] anchors that resolve to a note but not to any heading in it. Index-backed. Returns { results, returned, omitted, truncated }: results is orphan note headers or { source, targets } groups depending on kind, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped rows (omitted > 0). For unresolved_links and broken_anchors, the cap counts groups (source notes), not individual targets.",
+        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links); kind:'broken_anchors' returns, grouped by source note, the [[note#heading]] anchors that resolve to a note but not to any heading in it. Index-backed. For the grouped kinds, limit/offset count groups (source notes), not individual targets.",
         inputSchema: {
           type: "object",
           properties: {
@@ -496,11 +501,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of rows/groups to return (default 100; pass 0 for unbounded). For unresolved_links, this counts groups (source notes), not individual targets."
+              description: "Maximum number of rows/groups to return (default 100; 0 = unbounded). For unresolved_links, this counts groups (source notes), not individual targets."
             },
             offset: {
               type: "number",
-              description: "Rows/groups to skip before the window, for pagination (default 0). Reported as skipped."
+              description: "Rows/groups to skip, for pagination (default 0)."
             }
           },
           required: ["kind"]
@@ -512,7 +517,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             content: { type: "string", description: "Note content. May include a leading frontmatter block (validated), or pass frontmatter via the frontmatter param and give body-only content here." },
             overwrite: { type: "boolean", description: "Allow replacing an existing note (default: false)" },
             frontmatter: { type: "object", description: "Optional frontmatter fields, validated and serialized canonically. When given, content is the body only. Do not also put a frontmatter block in content." }
@@ -526,7 +531,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             content: { type: "string", description: "Text to append. When this call creates the note (create:true, note missing), a leading frontmatter block is validated." },
             create: { type: "boolean", description: "Create the note if it does not exist (default: false)" }
           },
@@ -539,7 +544,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             content: { type: "string", description: "Text to prepend. When this call creates the note (create:true, note missing), a leading frontmatter block is validated; otherwise it is inserted after any existing frontmatter." },
             create: { type: "boolean", description: "Create the note if it does not exist (default: false)" }
           },
@@ -552,7 +557,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             permanent: { type: "boolean", description: "Permanently delete instead of moving to .trash (default: false)" }
           },
           required: ["path"]
@@ -564,8 +569,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            from: { type: "string", description: "Current relative note path (with or without .md)" },
-            to: { type: "string", description: "New relative note path (with or without .md)" },
+            from: { type: "string", description: "Current note path (.md optional)" },
+            to: { type: "string", description: "New note path (.md optional)" },
             overwrite: { type: "boolean", description: "Allow replacing an existing note at the destination (default: false)" },
             update_links: { type: "boolean", description: "Rewrite wikilinks in other notes that point to this note (default: true)" }
           },
@@ -578,7 +583,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             from: { type: "string", description: "Existing heading — a bare heading or a \" > \"-joined heading-path" },
             to: { type: "string", description: "New heading text" },
             update_anchors: { type: "boolean", description: "Rewrite inbound [[note#heading]] anchors elsewhere in the vault (default: true)" }
@@ -605,7 +610,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             find: { type: "string", description: "Exact literal text to find" },
             replace: { type: "string", description: "Replacement text" },
             all: { type: "boolean", description: "Replace every occurrence instead of only the first (default: false)" }
@@ -619,7 +624,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             tags: { type: "array", items: { type: "string" }, description: "Tags to add (with or without leading #)" }
           },
           required: ["path", "tags"]
@@ -631,7 +636,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             tags: { type: "array", items: { type: "string" }, description: "Tags to remove (with or without leading #)" }
           },
           required: ["path", "tags"]
@@ -643,7 +648,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             set: { type: "object", description: "Frontmatter fields to set, e.g. { \"status\": \"done\" }" },
             unset: { type: "array", items: { type: "string" }, description: "Frontmatter keys to remove" }
           },
@@ -656,7 +661,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             key: { type: "string", description: "The array-valued property key" },
             values: { type: "array", description: "Values to add" }
           },
@@ -669,7 +674,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             key: { type: "string", description: "The array-valued property key" },
             values: { type: "array", description: "Values to remove" }
           },
@@ -682,7 +687,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             from: { type: "string", description: "Current property key" },
             to: { type: "string", description: "New property key" }
           },
@@ -695,7 +700,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             heading: { type: "string", description: "Heading text (without the leading #)" },
             content: { type: "string", description: "Body text for the new section" },
             level: { type: "number", description: "Heading level 1-6 (default: 2)" },
@@ -710,7 +715,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             heading: { type: "string", description: "Heading text of the section to append to" },
             content: { type: "string", description: "Text to append under the heading" },
             create: { type: "boolean", description: "Create the section if it does not exist (default: false)" }
@@ -724,7 +729,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative note path (with or without .md)" },
+            path: { type: "string", description: "Note path (.md optional)" },
             heading: { type: "string", description: "Heading text of the section to replace" },
             content: { type: "string", description: "New body text for the section" }
           },
@@ -741,7 +746,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "object",
               description: "Note selection. Provide either `paths` OR a filter (`where`/`tags`), not both.",
               properties: {
-                paths: { type: "array", items: { type: "string" }, description: "Explicit relative note paths (with or without .md)" },
+                paths: { type: "array", items: { type: "string" }, description: "Explicit note paths (.md optional)" },
                 where: { type: "object", description: "Frontmatter conditions (same syntax as query_notes)" },
                 tags: { type: "array", items: { type: "string" }, description: "Tags to match (with or without leading #)" },
                 match: { type: "string", enum: ["all", "any"], description: "How where/tags combine (default: all)" },
