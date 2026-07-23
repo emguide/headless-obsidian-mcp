@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Wrap every list-style tool's return value in a self-describing `ListResponse<T>` envelope (`{ results, returned, omitted, truncated }`) so an agent can tell a complete result from a truncated one.
+**Goal:** Wrap every list-style tool's return value in a self-describing `ListResponse<T>` envelope (`{ results, returned, omitted, truncated }`) so an agent can tell a complete result from a truncated one, and apply a uniform limit policy (default 100, `limit: 0` = unbounded) across all of them.
 
 **Architecture:** Add a generic `ListResponse<T>` type and a single `toListResponse(fullRows, limit)` helper. Each of eleven tools captures its full filtered set before slicing, then returns the helper's output instead of a bare array. The MCP layer (`src/index.ts`) and query CLI (`src/query-cli.ts`) already `JSON.stringify` the tool's return value verbatim, so they need no edits. `search_notes` keeps its own richer shape and is untouched.
 
@@ -16,8 +16,28 @@
 - `omitted = total - returned`, always `>= 0`. `truncated = omitted > 0`. `returned = results.length`.
 - No-limit tools (`list_tags`, `list_properties`) call the same helper with `limit` undefined, yielding `omitted: 0, truncated: false`.
 - `search_notes` (`src/tools/search.ts`) is OUT OF SCOPE — do not touch it or its tests.
-- Every `limit`-validation `throw` in each tool stays exactly as it is today; it runs before slicing.
 - Existing tests that assert bare-array shape (`result.length`, `result[0]`) migrate to `result.results` in the same task that changes the tool.
+
+### Uniform limit policy (adopted 2026-07-23 — supersedes each task's "slice" step)
+
+Every **limit-accepting** tool in this plan (Tasks 3–9, 11 — i.e. `find_by_tag`, `query_notes`, `list_recent_notes`, `get_related_notes`, `list_files`, `list_vault_issues`, `get_property_values`, `search_notes_ranked`) MUST implement this policy. `list_notes` (already done in commit `eb45e47`) is the reference implementation — copy its shape.
+
+- **`const DEFAULT_LIMIT = 100;`** at the top of each tool module. When `params.limit` is `undefined`, use `DEFAULT_LIMIT`.
+- **`limit: 0` means unbounded.** Resolve an effective limit, then pass `undefined` to `toListResponse` when it is 0:
+  ```ts
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return toListResponse(rows, effectiveLimit === 0 ? undefined : effectiveLimit);
+  ```
+- **Validation** accepts `0` and rejects negatives / non-integers, message unchanged:
+  ```ts
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+    throw new Error("limit must be a positive integer");
+  }
+  ```
+  For tools whose current default is baked into destructuring (e.g. `listRecentNotes` uses `const { limit = 20 } = params`), REMOVE the `= 20` default from destructuring and apply `DEFAULT_LIMIT` via `effectiveLimit` instead, so `limit: 0` is not overwritten. This **overrides** the pre-existing defaults: `list_recent_notes` (was 20), `search_notes_ranked` (was 10), `get_related_notes` (was 10) all become 100.
+- This supersedes each task's Step-5 "remove the slice / pass `limit`" wording where they differ: always resolve `effectiveLimit` as above rather than passing the raw `limit`.
+- Each task adds a test that `limit: 0` returns everything with `truncated: false` (this replaces the plan's "unlimited call" phrasing, which previously meant "omit limit" — now an omitted limit caps at 100).
+- Reviewers verify: `DEFAULT_LIMIT` present, `limit: 0` unbounded, validation accepts 0, message reads "must be a positive integer".
 
 ---
 
@@ -995,6 +1015,12 @@ For `get_property_values` specifically, note the shape is `{ key, results, retur
 For `list_tags` / `list_properties`, note they always report `truncated: false` (no limit).
 
 Add a short shared note near the top of the Tools section (or under `search_notes`) that the envelope is the vault-wide convention, distinct from `search_notes`' richer file/match shape.
+
+Also document the uniform limit policy in each limit-accepting tool's `limit` input line: "default 100; `limit: 0` = unbounded". Update the existing default numbers that changed — `list_recent_notes` (was "default: 20"), `search_notes_ranked` (was "default: 10"), `get_related_notes` (was "default: 10") — all now read "default 100, `0` = unbounded". Note in the shared convention blurb that omitting `limit` caps at 100 across list-style tools.
+
+- [ ] **Step 1b: Update the MCP tool-schema descriptions in `src/index.ts`**
+
+The `list_notes` schema already documents its default (commit `eb45e47`). For each other limit-accepting tool, update its `limit` property description in the `inputSchema` (in `src/index.ts`) to state "default 100; 0 = unbounded". Grep for each tool's schema block and adjust the `limit` description string. `git diff src/index.ts` should show only description-string changes, no logic.
 
 - [ ] **Step 2: Mirror every one of those edits in `README.md`**
 
