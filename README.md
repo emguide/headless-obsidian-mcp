@@ -109,6 +109,7 @@ npm run query -- search "alpha" --where '{"status":"active"}'
 # BM25-ranked full-text search (most relevant notes first)
 npm run query -- search-ranked "kubernetes networking"
 npm run query -- search-ranked "kubernetes networking" --limit 5
+npm run query -- search-ranked "kubernetes" --limit 100 --offset 100  # hits 101-200 (page past the cap)
 
 # BM25-ranked search scoped to a folder, tags, or frontmatter condition
 npm run query -- search-ranked "kubernetes" --folder work --tag active --match all
@@ -118,9 +119,10 @@ npm run query -- search-ranked "kubernetes" --where '{"status":"active"}'
 npm run query -- read "daily-notes/2024-01-15"
 npm run query -- read "note1" "folder/note2"
 
-# List notes as lightweight headers (optionally scoped/limited)
+# List notes as lightweight headers (optionally scoped/limited/paged)
 npm run query -- list
 npm run query -- list --folder projects --limit 20
+npm run query -- list --limit 20 --offset 20        # second page (skipped: 20)
 
 # Show outbound links, unresolved links, and backlinks for a note
 npm run query -- links "projects/alpha"
@@ -228,6 +230,8 @@ The query tool calls the MCP server tools directly and returns the raw JSON resp
 
 ## Tools
 
+**Pagination (`offset`).** Every envelope-returning tool (all the list-style tools plus `search_notes` and `search_notes_ranked`) accepts an optional `offset` (default `0`). The returned rows are a window `[offset, offset + limit)` over the full result set. The envelope reports both edges of what was dropped: `skipped` (rows before the window, from `offset`) and `omitted` (rows after it, from `limit`), so `total = skipped + returned + omitted` and `truncated` (`omitted > 0`) still answers "is there a next page?". An `offset` past the end is not an error (empty `results`, `skipped = total`); `offset` must be a non-negative integer. `search_notes` uses the parallel field names `files_skipped` / `files_omitted` over files. `search_notes_ranked` keeps its 100-row cap on a single `limit`, but `offset` pages past it — `offset: 100, limit: 100` returns ranked hits 101–200 without re-fetching everything via `limit: 0`.
+
 ### search_notes
 
 Search through markdown files in your vault using ripgrep patterns.
@@ -240,6 +244,7 @@ Search through markdown files in your vault using ripgrep patterns.
 - `context_lines` (number, optional): Number of context lines to show (default: 5, max: 100)
 - `limit` (number, optional): Maximum number of files to return (default: 20, 0 = unlimited — no hard maximum)
 - `max_matches_per_file` (number, optional): Maximum matches to return per file (default: 20, 0 = unlimited)
+- `offset` (number, optional): Matching files to skip before the window, for pagination (default 0; reported as `files_skipped`)
 - `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
 - `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
 - `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
@@ -247,9 +252,10 @@ Search through markdown files in your vault using ripgrep patterns.
 
 **Returns:** An object bounding the result set:
 - `results`: Array of search results, each with `path` (relative, without .md) and `matches` (line numbers + context)
-- `truncated`: `true` if any cap dropped results
+- `truncated`: `true` if any cap dropped results (skipping forward via `offset` does not set it)
 - `files_returned`: number of files in `results`
-- `files_omitted`: matching files seen beyond `limit` and not returned
+- `files_skipped`: matching files skipped before the window by `offset`
+- `files_omitted`: matching files seen beyond the window (`limit`) and not returned
 - `matches_capped_in`: paths of files whose matches were capped
 
 When `folder`/`tags`/`where` are given, the candidate notes are resolved from the shared index first and ripgrep runs only over those files (chunked for large vaults); a filter matching zero notes returns empty without invoking ripgrep.
@@ -261,12 +267,13 @@ Full-text search ranked by BM25 relevance — the most relevant notes first, rat
 **Parameters:**
 - `query` (string, required): Free-text query (max 1000 chars)
 - `limit` (number, optional): Maximum number of results (default 100; `limit: 0` = unbounded; a positive limit is capped at 100)
+- `offset` (number, optional): Ranked hits to skip before the window, for pagination (default 0). With the 100-row cap, `offset: 100` reaches hits 101–200 without `limit: 0`.
 - `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
 - `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
 - `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
 - `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
 
-**Returns:** `{ results, returned, omitted, truncated }` — `results` is an array of note headers (same shape as `list_notes`) extended with:
+**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is an array of note headers (same shape as `list_notes`) extended with:
 - `score`: BM25 relevance score (higher = more relevant)
 - `snippet`: A short matched excerpt
 
@@ -300,8 +307,9 @@ List notes in the vault as lightweight headers, without full contents. Use it to
 **Parameters:**
 - `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
 - `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
-**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
+**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_links
 
@@ -344,9 +352,10 @@ A bare heading resolves when unique; an ambiguous bare heading errors loudly, li
 
 Aggregate every tag across the vault, unifying inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`.
 
-**Parameters:** none
+**Parameters:**
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0)
 
-**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of `{ tag, count }` sorted by frequency. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
+**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ tag, count }` sorted by frequency. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
 
 ### find_by_tag
 
@@ -356,8 +365,9 @@ Find notes matching one or more tags.
 - `tags` (array, required): Tags to match (with or without leading `#`)
 - `match` (string, optional): `"any"` (default) or `"all"`
 - `limit` (number, optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
-**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
+**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### list_recent_notes
 
@@ -365,11 +375,12 @@ List notes ordered by recency, newest first.
 
 **Parameters:**
 - `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 - `since` (string, optional): Only include notes on or after this ISO date
 - `date_field` (string, optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
 - `where` (object, optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`)
 
-**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
+**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_related_notes
 
@@ -378,8 +389,9 @@ Find the notes most related to a given note and rank them — associative recall
 **Parameters:**
 - `path` (string, required): Relative note path (with or without `.md`)
 - `limit` (number, optional): Maximum number of related notes to return (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
-**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (notes with at least one connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
+**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (notes with at least one connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_frontmatter
 
@@ -405,8 +417,9 @@ Vault-hygiene findings the index already knows about but that `get_vault_stats` 
 **Parameters:**
 - `kind` (string, required): `"orphans"` or `"unresolved_links"`
 - `limit` (number, optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
-**Returns:** `{ results, returned, omitted, truncated }`. `results`' shape depends on `kind`:
+**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results`' shape depends on `kind`:
 - `"orphans"`: Array of note headers (same shape as `list_notes`) — notes with no inbound and no outbound resolved links (the same predicate behind `get_vault_stats`'s `orphan_notes`)
 - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
 
@@ -420,8 +433,9 @@ List non-markdown files in the vault (attachments, images, PDFs) — the counter
 - `folder` (string, optional): Restrict to files under this folder (relative to the vault root)
 - `extension` (string, optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`)
 - `limit` (number, optional): Maximum number of files to return (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
-**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of file entries (`path`, `size`, `modified`, `extension`) — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`. Markdown files are never returned; does not touch the vault index.
+**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of file entries (`path`, `size`, `modified`, `extension`) — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`. Markdown files are never returned; does not touch the vault index.
 
 ### list_folders
 
@@ -431,8 +445,9 @@ Enumerate the vault's folders so an agent can see the shape of the vault before 
 - `folder` (string, optional): Restrict to folders under this folder (relative to the vault root)
 - `depth` (number, optional): Relative depth cap — `1` = immediate children of the scope (top-level folders when no `folder` is given)
 - `limit` (number, optional): Maximum number of folders to return (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
-**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of `{ path, notes, total_notes, subfolders }` sorted by `path` — `notes` counts notes directly in the folder, `total_notes` counts notes recursively under it, `subfolders` counts direct child folders — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of folders dropped by the limit, and `truncated` is `true` when `omitted > 0`. Notes-only: a folder containing only attachments does not appear (use `list_files`). Root-level notes contribute no folder row. Index-backed.
+**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of `{ path, notes, total_notes, subfolders }` sorted by `path` — `notes` counts notes directly in the folder, `total_notes` counts notes recursively under it, `subfolders` counts direct child folders — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of folders dropped by the limit, and `truncated` is `true` when `omitted > 0`. Notes-only: a folder containing only attachments does not appear (use `list_files`). Root-level notes contribute no folder row. Index-backed.
 
 ### list_properties
 
@@ -440,8 +455,9 @@ The vault's frontmatter schema — every property key in use, with how many note
 
 **Parameters:**
 - `include_tags` (boolean, optional): Include the `tags` key (default: true; set false since it's already covered by `list_tags`)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0)
 
-**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
+**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
 
 ### get_property_values
 
@@ -450,8 +466,9 @@ Distinct values of one frontmatter property, with per-note counts — a faceted 
 **Parameters:**
 - `key` (string, required): The property key
 - `limit` (number, optional): Maximum number of values to return (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
-**Returns:** `{ key, results, returned, omitted, truncated }`. `results` is `[{ value, count }]`, sorted by `count` descending, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of values dropped by the limit, and `truncated` is `true` when `omitted > 0`. Array-valued properties count each element once per note.
+**Returns:** `{ key, results, returned, skipped, omitted, truncated }`. `results` is `[{ value, count }]`, sorted by `count` descending, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of values dropped by the limit, and `truncated` is `true` when `omitted > 0`. Array-valued properties count each element once per note.
 
 ### query_notes
 
@@ -461,10 +478,11 @@ Find notes by frontmatter condition — generalizes the `where` filter in `list_
 - `where` (object, required): `key -> condition` map. A condition is a bare scalar (equality / array-membership) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`
 - `match` (string, optional): `"all"` (default) or `"any"`
 - `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
 
 Comparisons are type-aware: numeric when both sides parse as numbers, chronological when both parse as dates, otherwise case-insensitive string compare.
 
-**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
+**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_property
 
