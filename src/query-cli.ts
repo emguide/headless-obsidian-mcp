@@ -171,6 +171,15 @@ program
   .action(async (pattern: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const context = parseInt(options.context, 10);
+    let where: unknown;
+    if (options.where !== undefined) {
+      try {
+        where = JSON.parse(options.where);
+      } catch (e) {
+        console.error("Error:", "Invalid --where JSON: " + (e instanceof Error ? e.message : String(e)));
+        process.exit(1);
+      }
+    }
     const args = {
       pattern,
       ...(options.caseSensitive && { case_sensitive: true }),
@@ -182,7 +191,7 @@ program
       ...(options.folder && { folder: options.folder }),
       ...(options.tag && { tags: options.tag }),           // commander collects repeated --tag into an array
       ...(options.match && { match: options.match }),
-      ...(options.where && { where: JSON.parse(options.where) }),
+      ...(where !== undefined && { where }),
     };
     await queryTool("search_notes", args, verbose);
   });
