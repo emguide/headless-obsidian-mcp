@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { before, after } from "node:test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { NoteDocument } from "../src/tools/note-document.js";
 import { validateOperations, applyOperations, resolveSelection } from "../src/tools/bulk.js";
 import { makeVault, sampleNotes, type Fixture } from "./fixtures.js";
@@ -79,7 +81,10 @@ test("resolveSelection rejects an empty select", async () => {
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bulkEdit } from "../src/tools/bulk.js";
+import { GIT_AUTOCOMMIT_ENV } from "../src/tools/git-guard.js";
 const readNote = (v: string, name: string) => readFile(join(v, name), "utf-8");
+const execFileAsync = promisify(execFile);
+const git = (cwd: string, args: string[]) => execFileAsync("git", ["-C", cwd, ...args]);
 
 test("bulkEdit dry_run returns matches and writes nothing", async () => {
   const local = await makeVault(sampleNotes());
@@ -148,5 +153,31 @@ test("bulkEdit reports changed:false for an idempotent no-op", async () => {
   const r = res.results!.find((x) => x.path === "index");
   assert.equal(r!.ok, true);
   assert.equal(r!.changed, false);
+  await local.cleanup();
+});
+
+test("bulkEdit takes exactly one snapshot for a multi-note batch", async () => {
+  const local = await makeVault(sampleNotes());
+  await git(local.vaultPath, ["init"]);
+  await git(local.vaultPath, ["config", "user.email", "t@t.t"]);
+  await git(local.vaultPath, ["config", "user.name", "t"]);
+  await git(local.vaultPath, ["add", "-A"]);
+  await git(local.vaultPath, ["commit", "--no-verify", "-m", "init"]);
+  const before = (await git(local.vaultPath, ["rev-list", "--count", "HEAD"])).stdout.trim();
+
+  process.env[GIT_AUTOCOMMIT_ENV] = "1";
+  try {
+    const res = await bulkEdit(local.vaultPath, {
+      select: { tags: ["productivity"] }, // matches >=2 notes
+      operations: [{ op: "add_tag", tags: ["snapshot-check"] }],
+    });
+    assert.ok(res.applied_count! >= 2);
+  } finally {
+    delete process.env[GIT_AUTOCOMMIT_ENV];
+  }
+
+  const after = (await git(local.vaultPath, ["rev-list", "--count", "HEAD"])).stdout.trim();
+  // Exactly one snapshot commit was added (the batch writes stay uncommitted).
+  assert.equal(Number(after) - Number(before), 1);
   await local.cleanup();
 });
