@@ -20,13 +20,13 @@ test("listProperties reports keys, counts, and types", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const props = await listProperties(vaultPath);
-    const status = props.find((p) => p.key === "status");
+    const status = props.results.find((p) => p.key === "status");
     assert.equal(status?.count, 3);
     assert.deepEqual(status?.types, ["string"]);
-    const priority = props.find((p) => p.key === "priority");
+    const priority = props.results.find((p) => p.key === "priority");
     assert.equal(priority?.count, 2);
     assert.deepEqual(priority?.types, ["number"]);
-    const nullField = props.find((p) => p.key === "null_field");
+    const nullField = props.results.find((p) => p.key === "null_field");
     assert.deepEqual(nullField?.types, ["null"]);
   } finally {
     await cleanup();
@@ -37,7 +37,19 @@ test("listProperties omits tags when include_tags is false", async () => {
   const { vaultPath, cleanup } = await vault();
   try {
     const props = await listProperties(vaultPath, { include_tags: false });
-    assert.equal(props.some((p) => p.key === "tags"), false);
+    assert.equal(props.results.some((p) => p.key === "tags"), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("listProperties reports the full envelope with no truncation", async () => {
+  const { vaultPath, cleanup } = await vault();
+  try {
+    const props = await listProperties(vaultPath);
+    assert.equal(props.truncated, false);
+    assert.equal(props.omitted, 0);
+    assert.ok(props.results.some((p) => p.key === "status"));
   } finally {
     await cleanup();
   }

@@ -329,7 +329,7 @@ Aggregate every tag across the vault, unifying inline `#tags` (including nested 
 
 **Parameters:** none
 
-**Returns:** Array of `{ tag, count }` sorted by frequency.
+**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of `{ tag, count }` sorted by frequency. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
 
 ### find_by_tag
 
@@ -413,7 +413,7 @@ The vault's frontmatter schema — every property key in use, with how many note
 **Parameters:**
 - `include_tags` (boolean, optional): Include the `tags` key (default: true; set false since it's already covered by `list_tags`)
 
-**Returns:** Array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`.
+**Returns:** `{ results, returned, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
 
 ### get_property_values
 

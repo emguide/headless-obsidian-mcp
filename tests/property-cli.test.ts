@@ -16,7 +16,7 @@ test("CLI: properties lists the schema", async () => {
       env: { ...process.env, OBSIDIAN_VAULT_PATH: vaultPath },
     });
     const parsed = JSON.parse(stdout);
-    assert.equal(parsed.some((p: any) => p.key === "status"), true);
+    assert.equal(parsed.results.some((p: any) => p.key === "status"), true);
   } finally {
     await cleanup();
   }

@@ -11,7 +11,7 @@ after(() => fx.cleanup());
 
 test("aggregates counts and unifies frontmatter + inline tags", async () => {
   const tags = await listTags(fx.vaultPath);
-  const map = Object.fromEntries(tags.map((t) => [t.tag, t.count]));
+  const map = Object.fromEntries(tags.results.map((t) => [t.tag, t.count]));
   assert.equal(map["productivity"], 2); // inline in alpha and Beta Note
   assert.equal(map["home"], 1); // frontmatter-only tag
   assert.equal(map["project/active"], 1); // nested frontmatter tag
@@ -19,8 +19,16 @@ test("aggregates counts and unifies frontmatter + inline tags", async () => {
 
 test("sorts by count descending", async () => {
   const tags = await listTags(fx.vaultPath);
-  assert.equal(tags[0].tag, "productivity");
-  assert.equal(tags[0].count, 2);
+  assert.equal(tags.results[0].tag, "productivity");
+  assert.equal(tags.results[0].count, 2);
+});
+
+test("listTags reports the full envelope with no truncation", async () => {
+  const tags = await listTags(fx.vaultPath);
+  assert.equal(tags.truncated, false);
+  assert.equal(tags.omitted, 0);
+  assert.equal(tags.returned, tags.results.length);
+  assert.ok(tags.results.some((t) => t.tag === "productivity"));
 });
 
 test("find_by_tag any returns every note with the tag", async () => {

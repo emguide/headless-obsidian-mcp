@@ -39,7 +39,7 @@ function typeOf(value: unknown): string {
 export async function listProperties(
   vaultPath: string,
   params: ListPropertiesParams = {}
-): Promise<PropertySchemaEntry[]> {
+): Promise<ListResponse<PropertySchemaEntry>> {
   assertVaultPath(vaultPath);
   const includeTags = params.include_tags !== false;
   const index = await getIndex(vaultPath);
@@ -56,13 +56,14 @@ export async function listProperties(
     }
   }
 
-  return [...counts.entries()]
+  const props = [...counts.entries()]
     .map(([key, count]) => ({
       key,
       count,
       types: [...(types.get(key) ?? [])].sort(),
     }))
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  return toListResponse(props);
 }
 
 /**

@@ -11,7 +11,7 @@ test("re-reads a file after its mtime changes", async () => {
   const fx = await makeVault(sampleNotes());
   try {
     const before = await listTags(fx.vaultPath);
-    assert.ok(!before.some((t) => t.tag === "brandnew"));
+    assert.ok(!before.results.some((t) => t.tag === "brandnew"));
 
     // Rewrite a note with a new tag and a newer mtime.
     const target = join(fx.vaultPath, "daily/2026-07-22.md");
@@ -19,7 +19,7 @@ test("re-reads a file after its mtime changes", async () => {
     await utimes(target, new Date("2026-07-23T10:00:00Z"), new Date("2026-07-23T10:00:00Z"));
 
     const after = await listTags(fx.vaultPath);
-    assert.ok(after.some((t) => t.tag === "brandnew"));
+    assert.ok(after.results.some((t) => t.tag === "brandnew"));
   } finally {
     await fx.cleanup();
   }

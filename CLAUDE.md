@@ -84,7 +84,7 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 ### list_tags
 - **Purpose**: Show the vault's topic index. Returns every tag with the number of notes using it, sorted by frequency.
 - **Input**: none
-- **Output**: Array of `{ tag, count }`. Unifies inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of `{ tag, count }`, unifying inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`.
 
 ### find_by_tag
 - **Purpose**: High-precision retrieval by human curation.
@@ -142,7 +142,7 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 ### list_properties
 - **Purpose**: The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
 - **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`)
-- **Output**: Array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. Index-backed.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so the full set is always returned: `truncated` is always `false` and `omitted` is always `0`. Index-backed.
 
 ### get_property_values
 - **Purpose**: Distinct values of one frontmatter property with per-note counts — a faceted breakdown, e.g. to see every `status` value in use.
