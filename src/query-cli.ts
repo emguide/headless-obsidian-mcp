@@ -535,9 +535,25 @@ program
   .option("--expected-count <n>", "Abort if the match count differs", (v) => parseInt(v, 10))
   .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
+    let select: any;
+    try {
+      select = JSON.parse(options.select);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("Error:", "Invalid --select JSON: " + message);
+      process.exit(1);
+    }
+    let operations: any;
+    try {
+      operations = JSON.parse(options.operations);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("Error:", "Invalid --operations JSON: " + message);
+      process.exit(1);
+    }
     const args = {
-      select: JSON.parse(options.select),
-      operations: JSON.parse(options.operations),
+      select,
+      operations,
       ...(options.dryRun && { dry_run: true }),
       ...(options.expectedCount !== undefined && { expected_count: options.expectedCount }),
     };
