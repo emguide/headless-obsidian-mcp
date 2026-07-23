@@ -165,6 +165,25 @@ test("insertTemplate into a section", async () => {
   }
 });
 
+test("insertTemplate rejects an invalid position with a clear error", async () => {
+  const fx = await vaultWithTemplates();
+  try {
+    await applyTemplate(fx.vaultPath, { template: "Daily", path: "notes/log3" });
+    await assert.rejects(
+      () =>
+        insertTemplate(fx.vaultPath, {
+          template: "Daily",
+          path: "notes/log3",
+          // deliberately invalid
+          position: "sideways" as unknown as "append",
+        }),
+      /position/i
+    );
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test("insertTemplate section=missing without create_section fails loud", async () => {
   const fx = await vaultWithTemplates();
   try {

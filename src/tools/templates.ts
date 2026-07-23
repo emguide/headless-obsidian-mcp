@@ -214,6 +214,15 @@ export async function insertTemplate(
     create_section?: boolean;
   }
 ): Promise<{ path: string; position: string } & LinkHealth> {
+  if (
+    position !== "append" &&
+    position !== "prepend" &&
+    position !== "section"
+  ) {
+    throw new Error(
+      `insert_template position must be "append", "prepend", or "section" (got ${JSON.stringify(position)}).`
+    );
+  }
   if (position === "section" && (!section || !section.length)) {
     throw new Error(
       'insert_template position "section" requires a section heading.'
