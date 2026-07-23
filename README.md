@@ -493,8 +493,9 @@ Create a note, or overwrite an existing one.
 
 **Parameters:**
 - `path` (string, required): Relative note path (with or without .md extension)
-- `content` (string, required): Full note body (may include frontmatter)
+- `content` (string, required): Note content. May include a leading frontmatter block (validated), or pass frontmatter via the `frontmatter` param and give body-only content here.
 - `overwrite` (boolean, optional): Allow replacing an existing note (default: false — refuses to clobber)
+- `frontmatter` (object, optional): Structured frontmatter fields, validated and serialized canonically. When given, `content` is the body only. Supplying frontmatter both here and inline in `content` is an error.
 
 **Returns:** `{ path, created }`
 
@@ -504,7 +505,7 @@ Append text to the end of a note.
 
 **Parameters:**
 - `path` (string, required): Relative note path
-- `content` (string, required): Text to append
+- `content` (string, required): Text to append. When this call creates the note (`create:true` on a missing note), a leading frontmatter block is validated; appending to an existing note treats a leading `---` as body text.
 - `create` (boolean, optional): Create the note if it does not exist (default: false)
 
 **Returns:** `{ path, created }`
@@ -515,7 +516,7 @@ Prepend text to the start of a note's body. Any frontmatter block is preserved a
 
 **Parameters:**
 - `path` (string, required): Relative note path
-- `content` (string, required): Text to prepend
+- `content` (string, required): Text to prepend. When this call creates the note (`create:true` on a missing note), a leading frontmatter block is validated; when prepending to an existing note the text is inserted after any frontmatter, so it is never treated as frontmatter.
 - `create` (boolean, optional): Create the note if it does not exist (default: false)
 
 **Returns:** `{ path, created }`
@@ -662,7 +663,7 @@ Apply one or more frontmatter mutations to many notes in a single call, under a 
 
 > **Body vs. frontmatter fidelity:** section edits preserve the frontmatter block byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML in canonical form (block-style lists) but leave the body untouched. Headings inside fenced code blocks are ignored. All writes are path-traversal protected.
 
-> **Validation:** every frontmatter write rejects nested objects/maps, arrays containing non-scalar elements, and markdown syntax in string values (bare URLs are allowed). Validation runs only on the keys a given write actually touches, so a pre-existing violation on an untouched key never blocks an unrelated edit.
+> **Validation:** every frontmatter write rejects nested objects/maps, arrays containing non-scalar elements, and markdown syntax in string values (bare URLs are allowed). Validation runs only on the keys a given write actually touches, so a pre-existing violation on an untouched key never blocks an unrelated edit. The content-writing tools (`write_note`, and the create path of `append_note`/`prepend_note`) validate any hand-written leading frontmatter block on these same rules — so creating a note by hand cannot bypass frontmatter integrity, and malformed YAML is rejected loudly rather than landing in the vault.
 
 ## Example Usage
 
