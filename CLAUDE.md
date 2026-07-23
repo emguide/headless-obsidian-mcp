@@ -41,6 +41,9 @@ be a non-negative integer. `search_notes` uses the parallel field names
 `files_skipped` / `files_omitted` over files. `search_notes_ranked` keeps its
 100-row cap on a single `limit`, but `offset` pages past it — `offset: 100,
 limit: 100` returns ranked hits 101–200 without re-fetching via `limit: 0`.
+To keep the agent-facing tool list small, this convention is stated once in the
+server's MCP `instructions` (sent to clients at initialize, `src/index.ts`);
+individual tool descriptions state only their deviations from it.
 
 ### search_notes
 - **Purpose**: Search through markdown files in the vault using ripgrep
