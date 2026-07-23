@@ -21,6 +21,7 @@ import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
 import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
+import { listFiles } from "./tools/files.js";
 import {
   listProperties,
   getPropertyValues,
@@ -71,6 +72,7 @@ import {
   GetPropertyParams,
   ReadSectionParams,
   ListVaultIssuesParams,
+  ListFilesParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -180,6 +182,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Maximum number of notes to return"
             }
+          }
+        }
+      },
+      {
+        name: "list_files",
+        description: "List non-markdown files in the vault (attachments, images, PDFs) so an agent can find a file to move. Returns { path, size, modified, extension } per file. Optional folder/extension/limit filters. Does not include notes (use list_notes) and never touches the index.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            folder: { type: "string", description: "Restrict to files under this folder (relative to the vault root)." },
+            extension: { type: "string", description: "Filter by extension; leading dot optional, case-insensitive (e.g. 'png')." },
+            limit: { type: "number", description: "Maximum number of files to return." }
           }
         }
       },
@@ -675,6 +689,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{ type: "text", text: JSON.stringify(results) }]
         };
+      }
+
+      case "list_files": {
+        const result = await listFiles(VAULT_PATH, (args ?? {}) as ListFilesParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "get_links": {

@@ -268,3 +268,25 @@ export interface SectionResult {
   /** Heading line + body slice, verbatim. Frontmatter excluded. */
   content: string;
 }
+
+/** Parameters for list_files (non-markdown file discovery). */
+export interface ListFilesParams {
+  /** Restrict to files under this folder (relative to the vault root). */
+  folder?: string;
+  /** Filter by extension; leading dot optional, case-insensitive (e.g. "png"). */
+  extension?: string;
+  /** Maximum number of files to return. */
+  limit?: number;
+}
+
+/** A non-markdown vault file with lightweight filesystem metadata. */
+export interface VaultFileEntry {
+  /** Vault-relative path, forward-slash, extension preserved. */
+  path: string;
+  /** File size in bytes. */
+  size: number;
+  /** Last modified time (ISO 8601). */
+  modified: string;
+  /** Lowercased extension without the dot (e.g. "png"). */
+  extension: string;
+}
