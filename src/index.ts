@@ -24,6 +24,7 @@ import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
 import { listFolders } from "./tools/folders.js";
+import { listTemplates, applyTemplate, insertTemplate } from "./tools/templates.js";
 import {
   listProperties,
   getPropertyValues,
@@ -262,6 +263,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Rows to skip, for pagination (default 0)."
             }
+          }
+        }
+      },
+      {
+        name: "list_templates",
+        description: "Enumerate the vault's core Templates-plugin template folder as { path, name, size, modified } headers. Folder resolved from .obsidian/templates.json (or the OBSIDIAN_TEMPLATE_FOLDER override); errors if neither is configured. Read-only. Core Templates only — Templater scripting is not supported.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "Maximum number of templates to return (default 100; 0 = unbounded)" },
+            offset: { type: "number", description: "Rows to skip, for pagination (default 0)." }
           }
         }
       },
@@ -608,6 +620,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "apply_template",
+        description: "Create a new note from a core Templates-plugin template, expanding {{title}} (= the new note's basename), {{date}}, {{time}}, and {{date:FORMAT}}/{{time:FORMAT}} (Moment-format tokens). Unknown {{...}} tokens pass through literally. Refuses to clobber an existing note unless overwrite:true. Returns { path, created } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            template: { type: "string", description: "Template name (basename, .md optional) or template-folder-relative path" },
+            path: { type: "string", description: "Destination note path for the new note (.md optional)" },
+            overwrite: { type: "boolean", description: "Overwrite an existing note at the destination (default: false)" }
+          },
+          required: ["template", "path"]
+        }
+      },
+      {
+        name: "insert_template",
+        description: "Expand a core Templates-plugin template into an EXISTING note at position 'append', 'prepend', or 'section'. {{title}} resolves to the existing note's basename. Section addressing and fail-loud ambiguity match append_to_section. Returns { path, position } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            template: { type: "string", description: "Template name (basename, .md optional) or template-folder-relative path" },
+            path: { type: "string", description: "Existing note to insert into (.md optional)" },
+            position: { type: "string", enum: ["append", "prepend", "section"], description: "Where to insert the expanded template" },
+            section: { type: "string", description: "Heading — a bare heading or a \" > \"-joined heading-path — when position is 'section'" },
+            create_section: { type: "boolean", description: "Create the section if missing (position 'section' only; default: false)" }
+          },
+          required: ["template", "path", "position"]
+        }
+      },
+      {
         name: "move_file",
         description: "Move or rename an arbitrary file in the vault (attachments, images, or notes referenced by literal path). Treats the path literally: no .md is appended and no wikilinks are rewritten. Refuses to overwrite an existing destination unless overwrite:true.",
         inputSchema: {
@@ -874,6 +914,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = await listFolders(VAULT_PATH, (args ?? {}) as ListFoldersParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
+      case "list_templates": {
+        const result = await listTemplates(VAULT_PATH, (args ?? {}) as { limit?: number; offset?: number });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
 
       case "get_links": {
         const { path } = args as unknown as { path: string };
@@ -1019,6 +1063,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "rename_section": {
         const result = await renameSectionInVault(VAULT_PATH, (args ?? {}) as unknown as RenameSectionParams);
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      }
+      case "apply_template": {
+        const result = await applyTemplate(VAULT_PATH, (args ?? {}) as { template: string; path: string; overwrite?: boolean });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+      case "insert_template": {
+        const result = await insertTemplate(VAULT_PATH, (args ?? {}) as { template: string; path: string; position: "append" | "prepend" | "section"; section?: string; create_section?: boolean });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "move_file": {

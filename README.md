@@ -20,6 +20,7 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 - **Frontmatter validation**: Writes reject nested objects, arrays of non-scalars, and markdown syntax in string values, keeping properties queryable and flat
 - **Move & rename**: Move notes (rewriting the wikilinks that point to them) or arbitrary attachment files
 - **Link-graph safety on writes**: Every content write reports the resulting note's `unresolved_links` and `broken_anchors`, so a typo'd `[[wikilink]]` surfaces immediately instead of silently rotting the graph (report-only, like delete's `dangled_backlinks`)
+- **Templates** (opt-in): Apply the vault's existing core Templates-plugin templates — discover them (`list_templates`), create a note from one (`apply_template`), or insert one into an existing note (`insert_template`), with faithful `{{title}}`/`{{date}}`/`{{time}}` and `{{date:FORMAT}}` substitution (Templater scripting is not supported)
 - **Trash-safe delete**: Deletes move to the vault's `.trash` by default, so they're recoverable
 - **Git safety net**: Optionally snapshot the vault into a commit before every write (`OBSIDIAN_GIT_AUTOCOMMIT`)
 - **Cross-platform**: Works on Windows, macOS, and Linux
@@ -809,11 +810,12 @@ expose them:
 export OBSIDIAN_ALLOW_WRITES=1
 ```
 
-When disabled, the eighteen write tools (`write_note`, `append_note`,
+When disabled, the twenty write tools (`write_note`, `append_note`,
 `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`,
 `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`,
 `remove_property_values`, `rename_property`, `add_section`,
-`append_to_section`, `replace_section`, `rename_section`, `bulk_edit`) are
+`append_to_section`, `replace_section`, `rename_section`, `bulk_edit`,
+`apply_template`, `insert_template`) are
 hidden from the tool list and any call to one is rejected, so an agent only
 ever sees the read tools. The flag gates the MCP server; the query CLI is the
 operator's own tool and is not affected by it.

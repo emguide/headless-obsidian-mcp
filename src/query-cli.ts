@@ -19,6 +19,7 @@ import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
 import { listFolders } from "./tools/folders.js";
+import { listTemplates, applyTemplate, insertTemplate } from "./tools/templates.js";
 import {
   writeNote,
   appendNote,
@@ -142,6 +143,12 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await renameNoteProperty(VAULT_PATH!, args);
     } else if (toolName === "bulk_edit") {
       result = await bulkEdit(VAULT_PATH!, args);
+    } else if (toolName === "list_templates") {
+      result = await listTemplates(VAULT_PATH!, args);
+    } else if (toolName === "apply_template") {
+      result = await applyTemplate(VAULT_PATH!, args);
+    } else if (toolName === "insert_template") {
+      result = await insertTemplate(VAULT_PATH!, args);
     } else {
       throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -301,6 +308,52 @@ program
       ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
     };
     await queryTool("list_folders", args, verbose);
+  });
+
+program
+  .command("templates")
+  .description("List the vault's core Templates-plugin templates")
+  .option("-l, --limit <n>", "Maximum number of templates to return")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
+  .action(async (options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      ...(options.limit && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
+    };
+    await queryTool("list_templates", args, verbose);
+  });
+
+program
+  .command("template-apply")
+  .description("Create a new note from a template (expands {{title}}/{{date}}/{{time}})")
+  .argument("<template>", "Template name (basename) or template-folder-relative path")
+  .argument("<path>", "Destination note path for the new note")
+  .option("-o, --overwrite", "Overwrite an existing note at the destination")
+  .action(async (template: string, path: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = { template, path, ...(options.overwrite && { overwrite: true }) };
+    await queryTool("apply_template", args, verbose);
+  });
+
+program
+  .command("template-insert")
+  .description("Expand a template into an existing note (append/prepend/section)")
+  .argument("<template>", "Template name (basename) or template-folder-relative path")
+  .argument("<path>", "Existing note to insert into")
+  .requiredOption("--position <pos>", "Where to insert: append | prepend | section")
+  .option("--section <heading>", "Heading (or ' > '-joined path) when position is 'section'")
+  .option("--create-section", "Create the section if missing (position 'section' only)")
+  .action(async (template: string, path: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      template,
+      path,
+      position: options.position,
+      ...(options.section && { section: options.section }),
+      ...(options.createSection && { create_section: true }),
+    };
+    await queryTool("insert_template", args, verbose);
   });
 
 program
