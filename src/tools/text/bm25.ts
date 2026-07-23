@@ -52,9 +52,9 @@ export class BM25 {
     return this.docs.size;
   }
 
-  search(queryTokens: string[], limit: number): BM25Hit[] {
+  search(queryTokens: string[], limit: number): { hits: BM25Hit[]; total: number } {
     if (!this.finalized) this.finalize();
-    if (queryTokens.length === 0 || this.docs.size === 0) return [];
+    if (queryTokens.length === 0 || this.docs.size === 0) return { hits: [], total: 0 };
 
     const N = this.docs.size;
     const scores = new Map<string, number>();
@@ -74,9 +74,9 @@ export class BM25 {
       }
     }
 
-    return [...scores.entries()]
+    const ranked = [...scores.entries()]
       .map(([docId, score]) => ({ docId, score }))
-      .sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId))
-      .slice(0, limit);
+      .sort((a, b) => b.score - a.score || a.docId.localeCompare(b.docId));
+    return { hits: ranked.slice(0, limit), total: ranked.length };
   }
 }

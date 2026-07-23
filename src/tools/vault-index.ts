@@ -171,7 +171,7 @@ export class VaultIndex {
   async searchRanked(query: string, limit: number): Promise<RankedSearchResult[]> {
     const queryTokens = tokenize(query);
     if (queryTokens.length === 0) return [];
-    const hits = this.bm25.search(queryTokens, limit);
+    const { hits } = this.bm25.search(queryTokens, limit);
 
     // Raw (unstemmed) query words used only to locate a snippet line.
     const rawWords = query
