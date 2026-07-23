@@ -101,7 +101,9 @@ const server = new Server(
     // every tool description; tool descriptions carry only their deviations.
     instructions:
       "Headless MCP server for an Obsidian vault. All paths (notes, files, folders) are relative to the vault root; on notes the .md extension is optional.\n\n" +
-      "Pagination convention: every list-style tool (the list_* tools plus search_notes_ranked, find_by_tag, query_notes, and get_related_notes) returns { results, returned, skipped, omitted, truncated } — a window [offset, offset + limit) over the full result set. limit defaults to 100 (0 = unbounded); offset defaults to 0, and skipping past the end returns an empty result, not an error. skipped counts rows dropped before the window by offset, omitted counts rows dropped after it by limit, so total = skipped + returned + omitted; truncated (omitted > 0) means a next page exists. search_notes paginates over matching files with the parallel names files_skipped / files_omitted. Deviations are noted on the tool itself.",
+      "Pagination convention: every list-style tool (the list_* tools plus search_notes_ranked, find_by_tag, query_notes, and get_related_notes) returns { results, returned, skipped, omitted, truncated } — a window [offset, offset + limit) over the full result set. limit defaults to 100 (0 = unbounded); offset defaults to 0, and skipping past the end returns an empty result, not an error. skipped counts rows dropped before the window by offset, omitted counts rows dropped after it by limit, so total = skipped + returned + omitted; truncated (omitted > 0) means a next page exists. search_notes paginates over matching files with the parallel names files_skipped / files_omitted. Deviations are noted on the tool itself.\n\n" +
+      "Filter convention: every note-selecting tool accepts the same optional candidate filters — folder (path prefix), tags (with match: 'any' default | 'all'), and where (frontmatter conditions, same syntax as query_notes). search_notes, search_notes_ranked, list_notes, list_recent_notes, find_by_tag, query_notes, and get_related_notes all share this vocabulary, so a scoped question ('active notes in projects/ tagged #work') needs no client-side join. On a tool whose primary filter is tags (find_by_tag) or where (query_notes), match governs that primary filter and the secondary filter applies with its default (tags: any, where: all).\n\n" +
+      "Link-integrity convention: every content-writing tool (write_note, append_note, prepend_note, patch_note, add_section, append_to_section, replace_section) returns, alongside its normal fields, unresolved_links (wikilink targets in the resulting note that resolve to no vault note) and broken_anchors ([[note#heading]] links whose note resolves but whose heading anchor matches nothing, as { target, anchor }). Both are report-only — the write is never blocked or modified, exactly like delete_note's dangled_backlinks — so an agent learns immediately when a write introduces a broken [[wikilink]] instead of discovering it later via list_vault_issues. Empty arrays mean the write left the graph intact.",
   }
 );
 
@@ -197,7 +199,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_notes",
-        description: "List notes in the vault as lightweight headers (path, title, tags, first heading, size, modified time) without full contents. Use it to discover what exists and orient before searching or reading.",
+        description: "List notes in the vault as lightweight headers (path, title, tags, first heading, size, modified time) without full contents. Use it to discover what exists and orient before searching or reading. Scope with folder/tags/where/match (match governs tags; where conditions all apply).",
         inputSchema: {
           type: "object",
           properties: {
@@ -205,6 +207,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Restrict to notes under this folder."
             },
+            tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
+            match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
+            where: { type: "object", description: "Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax)." },
             limit: {
               type: "number",
               description: "Maximum number of notes to return (default 100; 0 = unbounded)"
@@ -325,7 +330,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "find_by_tag",
-        description: "Find notes matching one or more tags, as note headers. High-precision retrieval based on human curation.",
+        description: "Find notes matching one or more tags, as note headers. High-precision retrieval based on human curation. Narrow further with folder and a frontmatter where filter (all conditions apply); match governs the tag set only.",
         inputSchema: {
           type: "object",
           properties: {
@@ -337,8 +342,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             match: {
               type: "string",
               enum: ["any", "all"],
-              description: 'Require "any" (default) or "all" of the tags'
+              description: 'Require "any" (default) or "all" of the tags (governs the tag set only)'
             },
+            folder: { type: "string", description: "Restrict to notes under this folder." },
+            where: { type: "object", description: "Additional frontmatter conditions (query_notes syntax); all must hold." },
             limit: {
               type: "number",
               description: "Maximum number of notes to return (default 100; 0 = unbounded)"
@@ -353,7 +360,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_recent_notes",
-        description: "List notes ordered by recency (newest first), as lightweight headers. Sort by filesystem mtime or a frontmatter date field, with optional since cutoff and frontmatter equality filters. Use it to find current material.",
+        description: "List notes ordered by recency (newest first), as lightweight headers. Sort by filesystem mtime or a frontmatter date field, with an optional since cutoff. Scope with folder/tags/where/match (match governs tags; where conditions all apply). Use it to find current material.",
         inputSchema: {
           type: "object",
           properties: {
@@ -369,9 +376,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Frontmatter field to sort by instead of filesystem mtime (e.g. 'updated')"
             },
+            folder: { type: "string", description: "Restrict to notes under this folder." },
+            tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
+            match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
             where: {
               type: "object",
-              description: "Frontmatter equality filters, e.g. { \"status\": \"active\" }"
+              description: "Frontmatter conditions (query_notes syntax), e.g. { \"status\": \"active\" } or { \"priority\": { \"gt\": 3 } }."
             },
             offset: {
               type: "number",
@@ -382,7 +392,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_related_notes",
-        description: "Find the notes most related to a given note, ranked, without embeddings: a transparent blend of shared tags, direct links, shared out-links (co-reference), and shared backlinks (co-citation). Results are note headers with score and the reasons each surfaced. Use it for associative recall - 'I'm looking at X, what else is relevant?'",
+        description: "Find the notes most related to a given note, ranked, without embeddings: a transparent blend of shared tags, direct links, shared out-links (co-reference), and shared backlinks (co-citation). Results are note headers with score and the reasons each surfaced. Use it for associative recall - 'I'm looking at X, what else is relevant?'. Narrow the scored candidate pool with folder/tags/where/match (match governs tags; where conditions all apply); the source note is never itself a candidate.",
         inputSchema: {
           type: "object",
           properties: {
@@ -390,6 +400,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Note path (.md optional)"
             },
+            folder: { type: "string", description: "Restrict candidates to notes under this folder." },
+            tags: { type: "array", items: { type: "string" }, description: "Restrict candidates to notes carrying these tags (leading '#' optional)." },
+            match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
+            where: { type: "object", description: "Restrict candidates to notes whose frontmatter satisfies these conditions (query_notes syntax)." },
             limit: {
               type: "number",
               description: "Maximum number of related notes to return (default 100; 0 = unbounded)"
@@ -456,12 +470,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "query_notes",
-        description: "Find notes whose frontmatter satisfies a set of conditions, as note headers. Each condition is a bare scalar (equality / array-membership) or an operator object { eq, ne, gt, gte, lt, lte, exists, contains }. Comparisons are type-aware (numbers, ISO dates, strings). match: all (default) or any.",
+        description: "Find notes whose frontmatter satisfies a set of conditions, as note headers. Each condition is a bare scalar (equality / array-membership) or an operator object { eq, ne, gt, gte, lt, lte, exists, contains }. Comparisons are type-aware (numbers, ISO dates, strings). match: all (default) or any (governs the where conditions only). Narrow further with folder and tags (any of them).",
         inputSchema: {
           type: "object",
           properties: {
             where: { type: "object", description: "Map of property key to condition (scalar or { eq/ne/gt/gte/lt/lte/exists/contains })" },
-            match: { type: "string", enum: ["all", "any"], description: "Require all (default) or any of the conditions" },
+            match: { type: "string", enum: ["all", "any"], description: "Require all (default) or any of the where conditions (governs the where conditions only)" },
+            folder: { type: "string", description: "Restrict to notes under this folder." },
+            tags: { type: "array", items: { type: "string" }, description: "Additionally restrict to notes carrying these tags (leading '#' optional); any of them." },
             limit: { type: "number", description: "Maximum number of notes to return (default 100; 0 = unbounded)" },
             offset: { type: "number", description: "Rows to skip, for pagination (default 0)." }
           },
@@ -513,7 +529,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "write_note",
-        description: "Create a note, or overwrite an existing one. Refuses to overwrite unless overwrite:true is passed. Pass structured frontmatter via the frontmatter param (validated, serialized canonically) or inline in content (also validated) — not both. Use the structure-aware tools (add_section, set_frontmatter, add_tag) for surgical edits instead of rewriting a whole note.",
+        description: "Create a note, or overwrite an existing one. Refuses to overwrite unless overwrite:true is passed. Pass structured frontmatter via the frontmatter param (validated, serialized canonically) or inline in content (also validated) — not both. Use the structure-aware tools (add_section, set_frontmatter, add_tag) for surgical edits instead of rewriting a whole note. Returns { path, created } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
           type: "object",
           properties: {
@@ -527,7 +543,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "append_note",
-        description: "Append text to the end of an existing note. Set create:true to create the note if it is missing.",
+        description: "Append text to the end of an existing note. Set create:true to create the note if it is missing. Returns { path, created } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
           type: "object",
           properties: {
@@ -540,7 +556,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "prepend_note",
-        description: "Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it. Set create:true to create the note if it is missing.",
+        description: "Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it. Set create:true to create the note if it is missing. Returns { path, created } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
           type: "object",
           properties: {
@@ -606,7 +622,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "patch_note",
-        description: "Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex). Replaces the first occurrence by default, or every occurrence with all:true. Errors if the text to find is not present.",
+        description: "Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex). Replaces the first occurrence by default, or every occurrence with all:true. Errors if the text to find is not present. Returns { path, replacements } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
           type: "object",
           properties: {
@@ -696,7 +712,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "add_section",
-        description: "Insert a new heading + content into a note without touching the rest. Appends at the end by default, or immediately after the section named by `after`. Errors if a section with the same heading and level already exists.",
+        description: "Insert a new heading + content into a note without touching the rest. Appends at the end by default, or immediately after the section named by `after`. Errors if a section with the same heading and level already exists. Returns { path, heading } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
           type: "object",
           properties: {
@@ -711,7 +727,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "append_to_section",
-        description: "Append text to the body of an existing section (before the next heading), leaving the rest of the note untouched. Set create:true to create the section if it is missing.",
+        description: "Append text to the body of an existing section (before the next heading), leaving the rest of the note untouched. Set create:true to create the section if it is missing. Returns { path, heading } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
           type: "object",
           properties: {
@@ -725,7 +741,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "replace_section",
-        description: "Replace the body under an existing heading (the heading line is kept), leaving the rest of the note untouched. Errors if the section is missing.",
+        description: "Replace the body under an existing heading (the heading line is kept), leaving the rest of the note untouched. Errors if the section is missing. Returns { path, heading } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
           type: "object",
           properties: {

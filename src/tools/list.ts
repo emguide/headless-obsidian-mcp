@@ -2,6 +2,7 @@ import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { ListNotesParams, ListResponse, NoteHeader } from "../types.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
+import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 
 /** Default cap on `list_notes` so the first orientation call is bounded. */
 const DEFAULT_LIMIT = 100;
@@ -15,6 +16,11 @@ const DEFAULT_LIMIT = 100;
  * returned. Pass `limit: 0` for an unbounded list (matching `search_notes`).
  * The result is a `ListResponse` envelope reporting `returned`/`omitted`/
  * `truncated` so a capped list is never mistaken for a complete one.
+ *
+ * Beyond `folder`, notes can be scoped by `tags`/`match`/`where` — the same
+ * candidate-filter vocabulary as `search_notes`, so a client never has to
+ * fetch-wide-then-filter. `match` governs the `tags` set ("any" default);
+ * `where` conditions all apply.
  */
 export async function listNotes(
   vaultPath: string,
@@ -22,7 +28,7 @@ export async function listNotes(
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
-  const { folder, limit, offset } = params;
+  const { folder, tags, match, where, limit, offset } = params;
 
   // `limit: 0` is the sentinel for "unbounded"; any other non-positive or
   // non-integer value is rejected. Omitting `limit` applies DEFAULT_LIMIT.
@@ -30,16 +36,16 @@ export async function listNotes(
     throw new Error("limit must be a positive integer");
   }
   assertNonNegativeInt(offset, "offset");
+  validateCandidateFilter({ tags, where, match });
 
   const index = await getIndex(vaultPath);
-  let entries = index.getEntries();
-
-  if (folder && typeof folder === "string" && folder.trim()) {
-    // Normalize the folder prefix to forward slashes with a trailing slash so
-    // "projects" matches "projects/foo" but not "projects-archive/foo".
-    const prefix = folder.replace(/[\\/]+$/, "").replace(/\\/g, "/") + "/";
-    entries = entries.filter((e) => (e.path + "/").startsWith(prefix));
-  }
+  const entries = resolveCandidates(index, {
+    folder,
+    tags,
+    where,
+    tagMatch: match ?? "any",
+    whereMatch: "all",
+  });
 
   // Resolve the effective cap: explicit 0 => unbounded; omitted => default.
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;

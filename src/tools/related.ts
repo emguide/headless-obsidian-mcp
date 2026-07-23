@@ -2,6 +2,7 @@ import { resolveNotePath, assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader, VaultIndex, IndexEntry } from "./vault-index.js";
 import { RelatedNotesParams, RelatedNote, ListResponse } from "../types.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
+import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 
 /** Default cap on `get_related_notes` so an unbounded call can't be issued by accident. */
 const DEFAULT_LIMIT = 100;
@@ -46,6 +47,12 @@ function intersect(a: string[], b: string[]): string[] {
  * are returned. Pass `limit: 0` for an unbounded list. The result is a
  * `ListResponse` envelope where `total` (returned + omitted) is the number of
  * notes with at least one connecting signal, before any limit is applied.
+ *
+ * The candidate pool scored against the source can be narrowed with the shared
+ * candidate-filter vocabulary — `folder`, `tags`/`match` (default "any"), and
+ * frontmatter `where` (all conditions apply) — so "what work notes are related
+ * to X?" is expressible without a client-side join. The source note is always
+ * addressed by `path` and is never itself a candidate.
  */
 export async function getRelatedNotes(
   vaultPath: string,
@@ -53,7 +60,7 @@ export async function getRelatedNotes(
 ): Promise<ListResponse<RelatedNote>> {
   assertVaultPath(vaultPath);
 
-  const { path, limit, offset } = params;
+  const { path, folder, tags, match, where, limit, offset } = params;
   if (!path || typeof path !== "string") {
     throw new Error("A note path is required for get_related_notes");
   }
@@ -61,6 +68,7 @@ export async function getRelatedNotes(
     throw new Error("limit must be a positive integer");
   }
   assertNonNegativeInt(offset, "offset");
+  validateCandidateFilter({ tags, where, match });
 
   // Validate the path (guards against traversal escapes) before touching the index.
   resolveNotePath(vaultPath, path);
@@ -79,8 +87,18 @@ export async function getRelatedNotes(
   // that link to the source.
   const directlyLinked = new Set<string>([...sourceOut, ...sourceBack]);
 
+  // Scope the candidate pool by the shared filter (an absent filter imposes no
+  // constraint, so this is the full vault by default).
+  const candidates = resolveCandidates(index, {
+    folder,
+    tags,
+    where,
+    tagMatch: match ?? "any",
+    whereMatch: "all",
+  });
+
   const related: RelatedNote[] = [];
-  for (const entry of index.getEntries()) {
+  for (const entry of candidates) {
     if (entry.path === self) continue;
 
     const scored = score(entry, {

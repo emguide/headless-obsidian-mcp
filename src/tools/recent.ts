@@ -1,8 +1,8 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader, IndexEntry } from "./vault-index.js";
 import { RecentNotesParams, NoteHeader, ListResponse } from "../types.js";
-import { matchesWhere } from "./property-match.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
+import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 
 /** Default cap on `list_recent_notes` so an unbounded call can't be issued by accident. */
 const DEFAULT_LIMIT = 100;
@@ -18,8 +18,10 @@ function toEpoch(value: unknown): number | null {
 /**
  * List notes ordered by recency, newest first. By default recency is the
  * filesystem mtime; set `date_field` to sort by a frontmatter date instead
- * (e.g. "updated"). Supports a `since` cutoff and frontmatter `where` filters,
- * so an agent can pull, say, only active notes touched this week.
+ * (e.g. "updated"). Supports a `since` cutoff plus the shared candidate-filter
+ * vocabulary — `folder`, `tags`/`match` (default "any"), and frontmatter
+ * `where` (all conditions apply) — so an agent can pull, say, only active
+ * notes in projects/ touched this week without a client-side join.
  *
  * Bounded by default: with no `limit`, at most `DEFAULT_LIMIT` notes are
  * returned. Pass `limit: 0` for an unbounded list. The result is a
@@ -32,11 +34,12 @@ export async function listRecentNotes(
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
-  const { limit, since, date_field, where, offset } = params;
+  const { limit, since, date_field, folder, tags, match, where, offset } = params;
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
   assertNonNegativeInt(offset, "offset");
+  validateCandidateFilter({ tags, where, match });
 
   let sinceEpoch: number | null = null;
   if (since !== undefined) {
@@ -51,10 +54,13 @@ export async function listRecentNotes(
   const sortDateOf = (e: IndexEntry): number =>
     (date_field ? toEpoch(e.frontmatter[date_field]) : null) ?? e.mtimeMs;
 
-  let selected = index.getEntries();
-  if (where) {
-    selected = selected.filter((e) => matchesWhere(e.frontmatter, where));
-  }
+  let selected = resolveCandidates(index, {
+    folder,
+    tags,
+    where,
+    tagMatch: match ?? "any",
+    whereMatch: "all",
+  });
   if (sinceEpoch !== null) {
     selected = selected.filter((e) => sortDateOf(e) >= sinceEpoch!);
   }

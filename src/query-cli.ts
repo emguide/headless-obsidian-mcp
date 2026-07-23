@@ -155,6 +155,18 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
   }
 }
 
+/** Parse a --where JSON string into an object, exiting cleanly on bad JSON. */
+function parseWhere(json: string | undefined): unknown {
+  if (json === undefined) return undefined;
+  try {
+    return JSON.parse(json);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Error:", "Invalid --where JSON: " + message);
+    process.exit(1);
+  }
+}
+
 const program = new Command();
 
 program
@@ -252,14 +264,21 @@ program
 
 program
   .command("list")
-  .description("List notes as lightweight headers")
+  .description("List notes as lightweight headers, optionally scoped by folder/tags/where")
   .option("-f, --folder <folder>", "Restrict to notes under this folder")
+  .option("--tag <tag...>", "Restrict to notes with these tags (repeatable)")
+  .option("--match <mode>", "tags match mode: any (default) or all")
+  .option("--where <json>", "Frontmatter filter as JSON")
   .option("-l, --limit <n>", "Maximum number of notes to return")
   .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
+    const where = parseWhere(options.where);
     const args = {
       ...(options.folder && { folder: options.folder }),
+      ...(options.tag && { tags: options.tag }),
+      ...(options.match && { match: options.match }),
+      ...(where !== undefined && { where }),
       ...(options.limit && { limit: parseInt(options.limit, 10) }),
       ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) })
     };
@@ -328,16 +347,21 @@ program
 
 program
   .command("find-by-tag")
-  .description("Find notes matching one or more tags")
+  .description("Find notes matching one or more tags, optionally scoped by folder/where")
   .argument("<tags...>", "Tags to match (with or without leading #)")
   .option("-a, --all", "Require all tags (default: any)")
+  .option("-f, --folder <folder>", "Restrict to notes under this folder")
+  .option("--where <json>", "Additional frontmatter filter as JSON (all conditions apply)")
   .option("-l, --limit <n>", "Maximum number of notes to return")
   .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (tags: string[], options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
+    const where = parseWhere(options.where);
     const args = {
       tags,
       ...(options.all && { match: "all" }),
+      ...(options.folder && { folder: options.folder }),
+      ...(where !== undefined && { where }),
       ...(options.limit && { limit: parseInt(options.limit, 10) }),
       ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) })
     };
@@ -346,17 +370,26 @@ program
 
 program
   .command("recent")
-  .description("List notes ordered by recency (newest first)")
+  .description("List notes ordered by recency (newest first), optionally scoped by folder/tags/where")
   .option("-l, --limit <n>", "Maximum number of notes to return (default: 20)")
   .option("-s, --since <date>", "Only include notes on or after this ISO date")
   .option("-d, --date-field <field>", "Frontmatter date field to sort by")
+  .option("-f, --folder <folder>", "Restrict to notes under this folder")
+  .option("--tag <tag...>", "Restrict to notes with these tags (repeatable)")
+  .option("--match <mode>", "tags match mode: any (default) or all")
+  .option("--where <json>", "Frontmatter filter as JSON")
   .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
+    const where = parseWhere(options.where);
     const args = {
       ...(options.limit && { limit: parseInt(options.limit, 10) }),
       ...(options.since && { since: options.since }),
       ...(options.dateField && { date_field: options.dateField }),
+      ...(options.folder && { folder: options.folder }),
+      ...(options.tag && { tags: options.tag }),
+      ...(options.match && { match: options.match }),
+      ...(where !== undefined && { where }),
       ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) })
     };
     await queryTool("list_recent_notes", args, verbose);
@@ -364,14 +397,23 @@ program
 
 program
   .command("related")
-  .description("Find the notes most related to a given note, ranked with reasons")
+  .description("Find the notes most related to a given note, ranked with reasons; scope the candidate pool by folder/tags/where")
   .argument("<path>", "Relative note path")
+  .option("-f, --folder <folder>", "Restrict candidates to notes under this folder")
+  .option("--tag <tag...>", "Restrict candidates to notes with these tags (repeatable)")
+  .option("--match <mode>", "tags match mode: any (default) or all")
+  .option("--where <json>", "Restrict candidates by frontmatter filter as JSON")
   .option("-l, --limit <n>", "Maximum number of related notes to return (default 100; 0 = unbounded)")
   .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
   .action(async (path: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
+    const where = parseWhere(options.where);
     const args = {
       path,
+      ...(options.folder && { folder: options.folder }),
+      ...(options.tag && { tags: options.tag }),
+      ...(options.match && { match: options.match }),
+      ...(where !== undefined && { where }),
       ...(options.limit && { limit: parseInt(options.limit, 10) }),
       ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
     };
@@ -711,23 +753,25 @@ program
 
 program
   .command("query")
-  .description("Find notes by frontmatter condition (JSON where object)")
+  .description("Find notes by frontmatter condition (JSON where object), optionally scoped by folder/tags")
   .requiredOption("--where <json>", "Conditions as a JSON object")
-  .option("--match <mode>", "all (default) or any", "all")
+  .option("--match <mode>", "all (default) or any (governs the where conditions)", "all")
+  .option("-f, --folder <folder>", "Restrict to notes under this folder")
+  .option("--tag <tag...>", "Additionally restrict to notes with these tags (repeatable; any of them)")
   .option("-l, --limit <n>", "Maximum number of notes", (v) => parseInt(v, 10))
   .option("-o, --offset <n>", "Rows to skip before the window (pagination)", (v) => parseInt(v, 10))
   .action(async (options: any, command: Command) => {
-    let where: any;
-    try {
-      where = JSON.parse(options.where);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error("Error:", "Invalid --where JSON: " + message);
-      process.exit(1);
-    }
+    const where = parseWhere(options.where);
     await queryTool(
       "query_notes",
-      { where, match: options.match, limit: options.limit, ...(options.offset !== undefined && { offset: options.offset }) },
+      {
+        where,
+        match: options.match,
+        ...(options.folder && { folder: options.folder }),
+        ...(options.tag && { tags: options.tag }),
+        limit: options.limit,
+        ...(options.offset !== undefined && { offset: options.offset }),
+      },
       command.parent?.opts().verbose
     );
   });

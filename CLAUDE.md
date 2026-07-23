@@ -29,6 +29,40 @@ Tool names follow a fixed verb taxonomy. A new tool reuses an existing verb; it 
 
 **Extending the surface.** A new note-selecting tool reuses the `folder` / `tags` / `where` / `match` filter vocabulary rather than inventing its own. A new vault-hygiene finding becomes a `kind` of `list_vault_issues`, not a new tool.
 
+**Filter vocabulary (shared).** Every note-selecting tool — `search_notes`,
+`search_notes_ranked`, `list_notes`, `list_recent_notes`, `find_by_tag`,
+`query_notes`, `get_related_notes`, and `bulk_edit.select` — accepts the same
+optional candidate filters, resolved from the shared index by
+`resolveCandidates` (`src/tools/candidate-filter.ts`): `folder` (path prefix),
+`tags` (with `match` `"any"` default / `"all"`), and `where` (frontmatter
+conditions, `query_notes` syntax). An absent filter imposes no constraint, so
+adding them is additive. On a tool whose *primary* filter is already tags
+(`find_by_tag`) or where (`query_notes`), `match` governs that primary filter
+and the added secondary filter applies with its own default (tags: `any`,
+where: `all`) — mirroring `search_notes`. This keeps a scoped question ("active
+notes in `projects/` tagged `#work`") a single call instead of a
+fetch-wide-then-filter-in-context join. Each tool preserves its distinct core
+(unified tag set, ordering, frontmatter conditions, relatedness scoring); they
+differ only in intent, not in what they can be scoped by. To keep the tool list
+small, this convention is stated once in the server's MCP `instructions`
+(`src/index.ts`); tool descriptions note only their deviations.
+
+**Link-integrity on writes (shared).** Every content-writing tool —
+`write_note`, `append_note`, `prepend_note`, `patch_note`, `add_section`,
+`append_to_section`, `replace_section` — returns, alongside its normal fields,
+`unresolved_links` (wikilink targets in the *resulting* note that resolve to no
+vault note) and `broken_anchors` (`[[note#heading]]` links whose note resolves
+but whose heading anchor matches nothing, as `{ target, anchor }`). Both are
+computed from the exact content just written via `linkHealthOf`
+(`src/tools/link-health.ts`), reusing the same predicates as
+`list_vault_issues`' `unresolved_links` / `broken_anchors` kinds. **Report-only**
+(same philosophy as `delete_note`'s `dangled_backlinks`): the write is never
+blocked or modified — the agent simply learns immediately when it introduces a
+broken `[[wikilink]]` instead of discovering it later via `list_vault_issues`.
+The report covers the whole resulting note (not just the changed span), and
+empty arrays mean the write left the graph intact. Stated once in the server's
+MCP `instructions`; write-tool descriptions carry only a short pointer.
+
 **Pagination (`offset`).** Every envelope-returning tool (all the list-style
 tools plus `search_notes` and `search_notes_ranked`) accepts an optional
 `offset` (default `0`): the rows are a window `[offset, offset + limit)` over the
@@ -94,6 +128,9 @@ individual tool descriptions state only their deviations from it.
 - **Purpose**: Discover what exists in the vault. Returns lightweight note headers (no full contents), so an agent can orient itself before searching or reading.
 - **Input**:
   - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `tags` (optional): Restrict to notes carrying these tags (leading `#` optional)
+  - `match` (optional): Semantics of `tags` — `"any"` (default) or `"all"`
+  - `where` (optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`; all conditions apply)
   - `limit` (optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
   - `offset` (optional): Rows to skip before the window, for pagination (default `0`; skipping past the end returns an empty result, not an error)
 - **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`); `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0` — so a capped first-orientation call isn't mistaken for a complete one.
@@ -132,7 +169,9 @@ individual tool descriptions state only their deviations from it.
 - **Purpose**: High-precision retrieval by human curation.
 - **Input**:
   - `tags` (required): Array of tags to match (with or without leading `#`)
-  - `match` (optional): `"any"` (default) or `"all"`
+  - `match` (optional): `"any"` (default) or `"all"` — governs the tag set only
+  - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `where` (optional): Additional frontmatter conditions (same syntax as `query_notes`); all must hold
   - `limit` (optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
   - `offset` (optional): Rows to skip before the window, for pagination (default `0`; skipping past the end returns an empty result, not an error)
 - **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
@@ -144,6 +183,9 @@ individual tool descriptions state only their deviations from it.
   - `offset` (optional): Rows to skip before the window, for pagination (default `0`; skipping past the end returns an empty result, not an error)
   - `since` (optional): Only include notes on or after this ISO date
   - `date_field` (optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
+  - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `tags` (optional): Restrict to notes carrying these tags (leading `#` optional)
+  - `match` (optional): Semantics of `tags` — `"any"` (default) or `"all"`
   - `where` (optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`; matches array members too)
 - **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
@@ -151,9 +193,13 @@ individual tool descriptions state only their deviations from it.
 - **Purpose**: Associative recall. Rank the notes most related to a given note, so an agent can ask "I'm looking at X — what else is relevant?" No embeddings or model: a transparent weighted blend of signals already held in the shared index.
 - **Input**:
   - `path` (required): Relative note path (with or without `.md`)
+  - `folder` (optional): Restrict the scored candidate pool to notes under this folder
+  - `tags` (optional): Restrict candidates to notes carrying these tags (leading `#` optional)
+  - `match` (optional): Semantics of `tags` — `"any"` (default) or `"all"`
+  - `where` (optional): Restrict candidates to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
   - `limit` (optional): Maximum number of related notes to return (default 100; `limit: 0` = unbounded)
   - `offset` (optional): Rows to skip before the window, for pagination (default `0`; skipping past the end returns an empty result, not an error)
-- **Scoring**: direct link either direction (weight 4), each shared tag (3), each shared out-link / co-reference (2), each shared backlink / co-citation (2). Notes with no connecting signal are omitted; ties break by path.
+- **Scoring**: direct link either direction (weight 4), each shared tag (3), each shared out-link / co-reference (2), each shared backlink / co-citation (2). Notes with no connecting signal are omitted; ties break by path. The `folder`/`tags`/`where`/`match` filters scope the candidate pool that gets scored (the source note is never itself a candidate), so "what work notes relate to X?" is one call.
 - **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons`, `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (those with a connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
@@ -209,7 +255,9 @@ individual tool descriptions state only their deviations from it.
 - **Purpose**: Find notes by frontmatter condition — generalizes the `where` filter in `list_recent_notes` into its own tool.
 - **Input**:
   - `where` (required): Object of `key -> condition`. A condition is either a bare scalar (equality, or array-membership when the note's value is an array) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`.
-  - `match` (optional): `"all"` (default — every condition must hold) or `"any"` (at least one)
+  - `match` (optional): `"all"` (default — every condition must hold) or `"any"` (at least one) — governs the `where` conditions only
+  - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `tags` (optional): Additionally restrict to notes carrying these tags (leading `#` optional); any of them
   - `limit` (optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
   - `offset` (optional): Rows to skip before the window, for pagination (default `0`; skipping past the end returns an empty result, not an error)
 - **Comparisons**: Type-aware — numeric when both sides parse as numbers, chronological when both parse as dates, else case-insensitive string compare.
@@ -250,17 +298,17 @@ change a tag or a section without reading and rewriting the whole note.
 ### write_note
 - **Purpose**: Create a note, or overwrite an existing one.
 - **Input**: `path` (required), `content` (required), `overwrite` (optional, default `false` — refuses to clobber an existing note), `frontmatter` (optional object — structured frontmatter, validated and serialized canonically; when given, `content` is the body only). Frontmatter may be supplied via the `frontmatter` param **or** inline in `content` (both are validated on the same rules as every other frontmatter write) — supplying both is an error.
-- **Output**: `{ path, created }`
+- **Output**: `{ path, created, unresolved_links, broken_anchors }` — the two link-health fields report the resulting note's graph integrity (see the shared link-integrity convention above); report-only.
 
 ### append_note
 - **Purpose**: Append text to the end of a note (with a separating newline). When the call creates the note (`create:true` on a missing note), a leading frontmatter block in `content` is validated on the same rules as every other frontmatter write; appending to an existing note treats a leading `---` as body text.
 - **Input**: `path` (required), `content` (required), `create` (optional — create the note if missing)
-- **Output**: `{ path, created }`
+- **Output**: `{ path, created, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only.
 
 ### prepend_note
 - **Purpose**: Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it (never before the YAML fence). When the call creates the note (`create:true` on a missing note), a leading frontmatter block in `content` is validated; when prepending to an existing note the text is inserted after the frontmatter, so it is never treated as frontmatter.
 - **Input**: `path` (required), `content` (required), `create` (optional — create the note if missing)
-- **Output**: `{ path, created }`
+- **Output**: `{ path, created, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only.
 
 ### delete_note
 - **Purpose**: Delete a note. **Trash-safe by default**: the note is moved to the vault's `.trash` folder (Obsidian's convention, ignored by the index) so the deletion is recoverable. Repeated trashings of the same name are disambiguated with a numeric suffix. Errors if the note does not exist.
@@ -282,7 +330,7 @@ change a tag or a section without reading and rewriting the whole note.
 ### patch_note
 - **Purpose**: Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex — no injection or catastrophic-backtracking risk). Errors if the text to find is absent, so a stale patch fails loudly.
 - **Input**: `path` (required), `find` (required), `replace` (required), `all` (optional — replace every occurrence instead of only the first)
-- **Output**: `{ path, replacements }`
+- **Output**: `{ path, replacements, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only. A patch that swaps a wikilink target for a typo surfaces it here immediately.
 - **Ambiguity**: With `all` false, a `find` that occurs more than once errors (reporting the count) rather than silently patching the first — set `all: true` to replace every occurrence, or narrow `find` until it is unique.
 
 ### add_tag / remove_tag
@@ -308,18 +356,18 @@ change a tag or a section without reading and rewriting the whole note.
 ### add_section
 - **Purpose**: Insert a new heading + content. Appends at the end by default, or immediately after the section named by `after`. Errors on a duplicate heading at the same level.
 - **Input**: `path` (required), `heading` (required), `content` (required), `level` (optional 1–6, default 2), `after` (optional — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`/`replace_section`)
-- **Output**: `{ path, heading }`
+- **Output**: `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only.
 
 ### append_to_section
 - **Purpose**: Append text under an existing heading (before the next heading), leaving the rest of the note untouched. `create: true` creates the section if missing.
 - **Input**: `path` (required), `heading` (required — a bare heading or a `" > "`-joined heading-path), `content` (required), `create` (optional)
-- **Output**: `{ path, heading }`
+- **Output**: `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only.
 - **Addressing**: Same fail-loud scheme as `read_section` — an ambiguous bare `heading` (repeated in the note) errors, listing the candidate full heading-paths so you can retry with the exact one (`Projects > Log`) and edit the right section. `create` only recovers a *missing* section; an ambiguous one is never silently created.
 
 ### replace_section
 - **Purpose**: Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
 - **Input**: `path` (required), `heading` (required — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`), `content` (required)
-- **Output**: `{ path, heading }`
+- **Output**: `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only.
 
 ### rename_section
 - **Purpose**: Rename a heading in a note and rewrite every inbound `[[note#heading]]` anchor across the vault to the new heading — the heading-level analogue of `move_note`, closing the last structural edit that could silently break the link graph.
@@ -435,14 +483,18 @@ npm run query -- --verbose search "pattern"            # Verbose mode
 # Knowledge-base examples
 npm run query -- list                                   # List all notes (headers)
 npm run query -- list --folder projects --limit 20     # Scope to a folder
+npm run query -- list --tag work --match all --where '{"status":"active"}'  # Scope by tags/frontmatter
 npm run query -- list --limit 20 --offset 20            # Second page (skipped: 20)
 npm run query -- links "projects/alpha"                # Outbound links + backlinks
 npm run query -- tags                                   # All tags with counts
 npm run query -- find-by-tag productivity project --all # Notes with all tags
+npm run query -- find-by-tag work --folder projects --where '{"status":"active"}'  # Narrow a tag query
 npm run query -- recent --limit 10                     # Most recently modified
 npm run query -- recent --date-field updated --since 2026-07-01
+npm run query -- recent --folder work --tag active --where '{"status":"active"}'  # Scoped recency
 npm run query -- related "projects/alpha"              # Notes related to alpha
 npm run query -- related "projects/alpha" --limit 5    # Top 5 related notes
+npm run query -- related "projects/alpha" --folder work --tag active  # Scope the candidate pool
 npm run query -- frontmatter "projects/alpha"          # Just the frontmatter
 npm run query -- resolve "Alpha Project"                # title/alias/basename -> path
 npm run query -- stats                                  # Whole-vault statistics
@@ -455,6 +507,7 @@ npm run query -- folders --folder projects --depth 1     # Immediate subfolders 
 npm run query -- properties                             # Frontmatter schema
 npm run query -- property-values status                 # Distinct values of a key
 npm run query -- query --where '{"status":"active","priority":{"gt":3}}'
+npm run query -- query --where '{"status":"active"}' --folder projects --tag work  # Scope a frontmatter query
 npm run query -- get-property "projects/alpha" status
 npm run query -- outline "projects/alpha"                # Heading outline
 npm run query -- read-section "projects/alpha" "Log"     # One section

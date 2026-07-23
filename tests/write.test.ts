@@ -34,7 +34,7 @@ after(() => fx.cleanup());
 
 test("writeNote creates a new note", async () => {
   const result = await writeNote(fx.vaultPath, { path: "fresh", content: "# Fresh\n" });
-  assert.deepEqual(result, { path: "fresh", created: true });
+  assert.deepEqual(result, { path: "fresh", created: true, unresolved_links: [], broken_anchors: [] });
   assert.equal(await read(fx.vaultPath, "fresh.md"), "# Fresh\n");
 });
 
