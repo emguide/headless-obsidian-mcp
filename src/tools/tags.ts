@@ -1,6 +1,10 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
-import { TagCount, FindByTagParams, NoteHeader } from "../types.js";
+import { TagCount, FindByTagParams, NoteHeader, ListResponse } from "../types.js";
+import { toListResponse } from "./list-response.js";
+
+/** Default cap on `find_by_tag` so an unbounded call is still bounded. */
+const DEFAULT_LIMIT = 100;
 
 /**
  * Aggregate every tag used across the vault with the number of notes that use
@@ -27,11 +31,16 @@ export async function listTags(vaultPath: string): Promise<TagCount[]> {
  * Find notes matching one or more tags. With match="all" a note must carry
  * every requested tag; with "any" (default) at least one. Returns lightweight
  * headers, giving high-precision retrieval based on human curation.
+ *
+ * Bounded by default: with no `limit`, at most `DEFAULT_LIMIT` notes are
+ * returned. Pass `limit: 0` for an unbounded list. The result is a
+ * `ListResponse` envelope reporting `returned`/`omitted`/`truncated` so a
+ * capped list is never mistaken for a complete one.
  */
 export async function findByTag(
   vaultPath: string,
   params: FindByTagParams
-): Promise<NoteHeader[]> {
+): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
   const { tags, match = "any", limit } = params;
@@ -41,7 +50,7 @@ export async function findByTag(
   if (match !== "any" && match !== "all") {
     throw new Error('match must be "any" or "all"');
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
 
@@ -56,6 +65,9 @@ export async function findByTag(
       : wanted.some((w) => noteSet.has(w));
   });
 
-  const limited = limit !== undefined ? matched.slice(0, limit) : matched;
-  return limited.map(entryToHeader);
+  const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
+  return toListResponse(
+    matched.map(entryToHeader),
+    effectiveLimit === 0 ? undefined : effectiveLimit
+  );
 }

@@ -26,7 +26,7 @@ test("sorts by count descending", async () => {
 test("find_by_tag any returns every note with the tag", async () => {
   const notes = await findByTag(fx.vaultPath, { tags: ["productivity"] });
   assert.deepEqual(
-    notes.map((n) => n.path).sort(),
+    notes.results.map((n) => n.path).sort(),
     ["Beta Note", "projects/alpha"]
   );
 });
@@ -37,20 +37,20 @@ test("find_by_tag all requires every tag", async () => {
     match: "all",
   });
   assert.deepEqual(
-    notes.map((n) => n.path),
+    notes.results.map((n) => n.path),
     ["projects/alpha"]
   );
 });
 
 test("find_by_tag ignores a leading # and is case-insensitive", async () => {
   const notes = await findByTag(fx.vaultPath, { tags: ["#PRODUCTIVITY"] });
-  assert.equal(notes.length, 2);
+  assert.equal(notes.results.length, 2);
 });
 
 test("find_by_tag matches nested tags", async () => {
   const notes = await findByTag(fx.vaultPath, { tags: ["project/active"] });
   assert.deepEqual(
-    notes.map((n) => n.path),
+    notes.results.map((n) => n.path),
     ["projects/alpha"]
   );
 });
@@ -60,4 +60,26 @@ test("find_by_tag rejects an empty tag list", async () => {
     () => findByTag(fx.vaultPath, { tags: [] }),
     /non-empty array/
   );
+});
+
+test("find_by_tag applies the default limit envelope with truncation", async () => {
+  const notes = await findByTag(fx.vaultPath, {
+    tags: ["productivity"],
+    limit: 1,
+  });
+  assert.equal(notes.results.length, 1);
+  assert.equal(notes.returned, 1);
+  assert.equal(notes.omitted, 1);
+  assert.equal(notes.truncated, true);
+});
+
+test("find_by_tag limit: 0 returns all matches unbounded", async () => {
+  const notes = await findByTag(fx.vaultPath, {
+    tags: ["productivity"],
+    limit: 0,
+  });
+  assert.equal(notes.results.length, 2);
+  assert.equal(notes.returned, 2);
+  assert.equal(notes.omitted, 0);
+  assert.equal(notes.truncated, false);
 });
