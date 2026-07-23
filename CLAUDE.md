@@ -216,6 +216,7 @@ change a tag or a section without reading and rewriting the whole note.
 - **Purpose**: Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex — no injection or catastrophic-backtracking risk). Errors if the text to find is absent, so a stale patch fails loudly.
 - **Input**: `path` (required), `find` (required), `replace` (required), `all` (optional — replace every occurrence instead of only the first)
 - **Output**: `{ path, replacements }`
+- **Ambiguity**: With `all` false, a `find` that occurs more than once errors (reporting the count) rather than silently patching the first — set `all: true` to replace every occurrence, or narrow `find` until it is unique.
 
 ### add_tag / remove_tag
 - **Purpose**: Add or remove tags in a note's frontmatter without rewriting it. Adds are idempotent; storage is normalized to a `tags:` array.
@@ -239,17 +240,18 @@ change a tag or a section without reading and rewriting the whole note.
 
 ### add_section
 - **Purpose**: Insert a new heading + content. Appends at the end by default, or immediately after the section named by `after`. Errors on a duplicate heading at the same level.
-- **Input**: `path` (required), `heading` (required), `content` (required), `level` (optional 1–6, default 2), `after` (optional)
+- **Input**: `path` (required), `heading` (required), `content` (required), `level` (optional 1–6, default 2), `after` (optional — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`/`replace_section`)
 - **Output**: `{ path, heading }`
 
 ### append_to_section
 - **Purpose**: Append text under an existing heading (before the next heading), leaving the rest of the note untouched. `create: true` creates the section if missing.
-- **Input**: `path` (required), `heading` (required), `content` (required), `create` (optional)
+- **Input**: `path` (required), `heading` (required — a bare heading or a `" > "`-joined heading-path), `content` (required), `create` (optional)
 - **Output**: `{ path, heading }`
+- **Addressing**: Same fail-loud scheme as `read_section` — an ambiguous bare `heading` (repeated in the note) errors, listing the candidate full heading-paths so you can retry with the exact one (`Projects > Log`) and edit the right section. `create` only recovers a *missing* section; an ambiguous one is never silently created.
 
 ### replace_section
 - **Purpose**: Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
-- **Input**: `path` (required), `heading` (required), `content` (required)
+- **Input**: `path` (required), `heading` (required — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`), `content` (required)
 - **Output**: `{ path, heading }`
 
 ### bulk_edit

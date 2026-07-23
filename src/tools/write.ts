@@ -425,21 +425,22 @@ export async function patchNote(
     throw new Error("replace must be a string");
   }
   const raw = await readRaw(vaultPath, path);
-  if (!raw.includes(find)) {
+  const parts = raw.split(find);
+  const occurrences = parts.length - 1;
+  if (occurrences === 0) {
     throw new Error(`Text to patch was not found in ${canonicalName(path)}`);
   }
-
-  let next: string;
-  let replacements: number;
-  if (all) {
-    const parts = raw.split(find);
-    replacements = parts.length - 1;
-    next = parts.join(replace);
-  } else {
-    replacements = 1;
-    const idx = raw.indexOf(find);
-    next = raw.slice(0, idx) + replace + raw.slice(idx + find.length);
+  // Fail loud on a non-unique match rather than silently patching the first: an
+  // ambiguous find is the write most likely to hit the wrong text.
+  if (!all && occurrences > 1) {
+    throw new Error(
+      `Text to patch occurs ${occurrences} times in ${canonicalName(path)}; ` +
+        `set all:true to replace all, or make find unique`
+    );
   }
+
+  const replacements = all ? occurrences : 1;
+  const next = parts.join(replace);
   await commitWrite(vaultPath, path, next);
   return { path: canonicalName(path), replacements };
 }

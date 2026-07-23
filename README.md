@@ -522,6 +522,8 @@ Apply a literal find/replace patch to a note's raw text. The match is an exact s
 - `replace` (string, required): Replacement text
 - `all` (boolean, optional): Replace every occurrence instead of only the first (default: false)
 
+With `all` false, a `find` that occurs more than once errors (reporting the count) rather than silently patching the first — set `all: true` to replace every occurrence, or narrow `find` until it is unique.
+
 **Returns:** `{ path, replacements }`
 
 ### add_tag / remove_tag
@@ -576,7 +578,7 @@ Insert a new heading + content. Appends at the end by default, or immediately af
 - `heading` (string, required): Heading text (without leading `#`)
 - `content` (string, required): Body text for the new section
 - `level` (number, optional): Heading level 1–6 (default: 2)
-- `after` (string, optional): Insert after the section with this heading
+- `after` (string, optional): Insert after this section — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`
 
 **Returns:** `{ path, heading }`
 
@@ -586,9 +588,11 @@ Append text under an existing heading (before the next heading), leaving the res
 
 **Parameters:**
 - `path` (string, required): Relative note path
-- `heading` (string, required): Heading of the section to append to
+- `heading` (string, required): Section to append to — a bare heading or a `" > "`-joined heading-path (e.g. `Projects > Log`)
 - `content` (string, required): Text to append
 - `create` (boolean, optional): Create the section if missing (default: false)
+
+Addressing mirrors `read_section`'s fail-loud scheme: an ambiguous bare `heading` (one that repeats in the note) errors, listing the candidate full heading-paths so you can retry with the exact one and edit the right section. `create` only recovers a *missing* section; an ambiguous one is never silently created.
 
 **Returns:** `{ path, heading }`
 
@@ -598,7 +602,7 @@ Replace the body under an existing heading (the heading line is kept). Errors if
 
 **Parameters:**
 - `path` (string, required): Relative note path
-- `heading` (string, required): Heading of the section to replace
+- `heading` (string, required): Section to replace — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`
 - `content` (string, required): New body text
 
 **Returns:** `{ path, heading }`

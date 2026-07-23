@@ -1,5 +1,5 @@
 import matter from "gray-matter";
-import { parseHeadings } from "./vault.js";
+import { parseHeadings, headingPaths } from "./vault.js";
 
 /**
  * An in-memory, editable view of a single note: its parsed frontmatter plus its
@@ -320,22 +320,22 @@ function findHeadings(lines: string[]): Heading[] {
   }));
 }
 
-/** Locate a section by heading text (exact, trimmed). Optional level filter. */
-function locateSection(
-  lines: string[],
-  heading: string,
-  level?: number
-): { heading: Heading; bodyStart: number; bodyEnd: number } | null {
-  const headings = findHeadings(lines);
-  const wanted = heading.trim();
-  const idx = headings.findIndex(
-    (h) => h.text === wanted && (level == null || h.level === level)
-  );
-  if (idx === -1) return null;
+interface LocatedSection {
+  heading: Heading;
+  bodyStart: number;
+  bodyEnd: number;
+}
+
+/** Section boundaries for the heading at index `idx`: its body runs to the next
+ * heading of the same or higher level. */
+function sectionBounds(
+  headings: Heading[],
+  idx: number,
+  lineCount: number
+): LocatedSection {
   const h = headings[idx];
   const bodyStart = h.line + 1;
-  // The section ends at the next heading of the same or higher level.
-  let bodyEnd = lines.length;
+  let bodyEnd = lineCount;
   for (let j = idx + 1; j < headings.length; j++) {
     if (headings[j].level <= h.level) {
       bodyEnd = headings[j].line;
@@ -343,6 +343,59 @@ function locateSection(
     }
   }
   return { heading: h, bodyStart, bodyEnd };
+}
+
+/**
+ * Existence check for a heading at a given level — the level-scoped locator used
+ * by {@link addSection}'s duplicate guard. Returns the first same-level match (or
+ * null); multiplicity is not an error here, since finding one is enough to reject
+ * a duplicate. This is deliberately NOT the addressing resolver — use
+ * {@link resolveSection} to target a section for an edit.
+ */
+function locateSectionAtLevel(
+  lines: string[],
+  heading: string,
+  level: number
+): LocatedSection | null {
+  const headings = findHeadings(lines);
+  const wanted = heading.trim();
+  const idx = headings.findIndex((h) => h.text === wanted && h.level === level);
+  if (idx === -1) return null;
+  return sectionBounds(headings, idx, lines.length);
+}
+
+/**
+ * Resolve a section to edit, mirroring `read_section` exactly: `section` is a
+ * bare heading (`Log`) or a `" > "`-joined heading-path (`Projects > Log`),
+ * detected by the presence of `>`. A bare heading that matches more than one
+ * heading throws an ambiguity error listing the candidate full paths, so a
+ * wrong-section write fails loudly rather than silently editing the first match.
+ * A heading-path matches the fully-qualified path exactly. Throws if not found.
+ */
+function resolveSection(lines: string[], section: string): LocatedSection {
+  const headings = findHeadings(lines);
+  const paths = headingPaths(headings);
+  const wanted = section.trim();
+  const isPath = wanted.includes(">");
+  const norm = (p: string): string =>
+    p
+      .split(">")
+      .map((s) => s.trim())
+      .join(" > ");
+  const target = isPath ? norm(wanted) : wanted;
+
+  const matches = headings
+    .map((h, i) => ({ h, i, path: paths[i] }))
+    .filter((m) => (isPath ? m.path === target : m.h.text === wanted));
+
+  if (matches.length === 0) {
+    throw new Error(`Section "${section}" not found`);
+  }
+  if (matches.length > 1) {
+    const candidates = matches.map((m) => m.path).join(", ");
+    throw new Error(`Ambiguous section "${section}"; candidates: ${candidates}`);
+  }
+  return sectionBounds(headings, matches[0].i, lines.length);
 }
 
 function splitBody(body: string): { lines: string[]; trailingNewline: boolean } {
@@ -377,7 +430,7 @@ export function addSection(
 ): void {
   if (level < 1 || level > 6) throw new Error("Heading level must be 1-6");
   const { lines, trailingNewline } = splitBody(doc.body);
-  if (locateSection(lines, heading, level)) {
+  if (locateSectionAtLevel(lines, heading, level)) {
     throw new Error(
       `A level-${level} section "${heading}" already exists; ` +
         `use append_to_section or replace_section instead`
@@ -389,8 +442,7 @@ export function addSection(
   let head: string[];
   let tail: string[];
   if (after) {
-    const target = locateSection(lines, after);
-    if (!target) throw new Error(`Section "${after}" not found`);
+    const target = resolveSection(lines, after);
     head = lines.slice(0, trimTrailingBlanks(lines, target.bodyEnd, target.bodyStart));
     tail = lines.slice(target.bodyEnd);
   } else {
@@ -418,13 +470,17 @@ export function appendToSection(
   create = false
 ): void {
   const { lines, trailingNewline } = splitBody(doc.body);
-  const target = locateSection(lines, heading);
-  if (!target) {
-    if (create) {
+  let target: LocatedSection;
+  try {
+    target = resolveSection(lines, heading);
+  } catch (err) {
+    // A missing section is recoverable when `create` is set; an ambiguous one is
+    // never silently created — re-throw so the caller disambiguates.
+    if (create && err instanceof Error && /not found/.test(err.message)) {
       addSection(doc, heading, content);
       return;
     }
-    throw new Error(`Section "${heading}" not found`);
+    throw err;
   }
 
   const head = lines.slice(0, trimTrailingBlanks(lines, target.bodyEnd, target.bodyStart));
@@ -445,8 +501,7 @@ export function replaceSection(
   content: string
 ): void {
   const { lines, trailingNewline } = splitBody(doc.body);
-  const target = locateSection(lines, heading);
-  if (!target) throw new Error(`Section "${heading}" not found`);
+  const target = resolveSection(lines, heading);
 
   const before = lines.slice(0, target.bodyStart);
   const rest = lines.slice(target.bodyEnd);

@@ -40,11 +40,30 @@ test("prependNote errors on a missing note unless create is set", async () => {
 
 /* --------------------------------------------------------------- patch -- */
 
-test("patchNote replaces the first occurrence by default", async () => {
-  const local = await makeVault([{ path: "p.md", content: "one two one\n" }]);
+test("patchNote replaces a unique occurrence with all:false", async () => {
+  const local = await makeVault([{ path: "p.md", content: "one two three\n" }]);
   const result = await patchNote(local.vaultPath, { path: "p", find: "one", replace: "X" });
   assert.deepEqual(result, { path: "p", replacements: 1 });
-  assert.equal(await read(local.vaultPath, "p.md"), "X two one\n");
+  assert.equal(await read(local.vaultPath, "p.md"), "X two three\n");
+  await local.cleanup();
+});
+
+test("patchNote errors on a non-unique find unless all is set", async () => {
+  const local = await makeVault([{ path: "p.md", content: "one two one\n" }]);
+  await assert.rejects(
+    () => patchNote(local.vaultPath, { path: "p", find: "one", replace: "X" }),
+    /occurs 2 times.*all:true/s
+  );
+  // The note is untouched — the write never happened.
+  assert.equal(await read(local.vaultPath, "p.md"), "one two one\n");
+  await local.cleanup();
+});
+
+test("patchNote with all:true replaces every occurrence of a non-unique find", async () => {
+  const local = await makeVault([{ path: "p.md", content: "one two one\n" }]);
+  const result = await patchNote(local.vaultPath, { path: "p", find: "one", replace: "X", all: true });
+  assert.equal(result.replacements, 2);
+  assert.equal(await read(local.vaultPath, "p.md"), "X two X\n");
   await local.cleanup();
 });
 

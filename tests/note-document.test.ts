@@ -78,6 +78,77 @@ test("addSection rejects a duplicate heading at the same level", () => {
   assert.throws(() => addSection(doc, "Tasks", "x", 2), /already exists/);
 });
 
+/* -------------------------------- fail-loud ambiguous section addressing -- */
+
+// Two distinct "Log" sections under different parents.
+const DUP = [
+  "# Alpha",
+  "alpha body",
+  "## Log",
+  "alpha log",
+  "# Projects",
+  "projects body",
+  "## Log",
+  "projects log",
+].join("\n");
+
+test("appendToSection errors on an ambiguous bare heading, listing candidates", () => {
+  const doc = NoteDocument.parse(DUP);
+  assert.throws(
+    () => appendToSection(doc, "Log", "x"),
+    /Ambiguous section "Log".*Alpha > Log.*Projects > Log/s
+  );
+});
+
+test("appendToSection resolves a heading-path to the exact (non-first) section", () => {
+  const doc = NoteDocument.parse(DUP);
+  appendToSection(doc, "Projects > Log", "new line");
+  const out = doc.serialize();
+  // The new line lands under Projects > Log, not the first Alpha > Log.
+  assert.match(out, /projects log\n\nnew line/);
+  assert.doesNotMatch(out, /alpha log\n\nnew line/);
+});
+
+test("replaceSection errors on an ambiguous bare heading", () => {
+  const doc = NoteDocument.parse(DUP);
+  assert.throws(() => replaceSection(doc, "Log", "x"), /Ambiguous section "Log"/);
+});
+
+test("replaceSection resolves a heading-path to the exact section", () => {
+  const doc = NoteDocument.parse(DUP);
+  replaceSection(doc, "Alpha > Log", "replaced");
+  const out = doc.serialize();
+  assert.match(out, /## Log\nreplaced\n\n# Projects/);
+  assert.match(out, /projects log/); // Projects > Log untouched
+});
+
+test("addSection after an ambiguous bare heading errors", () => {
+  const doc = NoteDocument.parse(DUP);
+  assert.throws(() => addSection(doc, "New", "x", 3, "Log"), /Ambiguous section "Log"/);
+});
+
+test("addSection after a heading-path inserts under the exact section", () => {
+  const doc = NoteDocument.parse(DUP);
+  addSection(doc, "Sub", "sub body", 3, "Projects > Log");
+  const out = doc.serialize();
+  assert.match(out, /projects log\n\n### Sub\nsub body/);
+});
+
+test("addSection still rejects a same-level duplicate even when the heading repeats", () => {
+  // "Log" appears twice at level 2; adding a third level-2 "Log" must still be
+  // rejected as a duplicate (existence check, not ambiguity error).
+  const doc = NoteDocument.parse(DUP);
+  assert.throws(() => addSection(doc, "Log", "x", 2), /already exists/);
+});
+
+test("unique bare heading still resolves for section writes", () => {
+  const doc = NoteDocument.parse(DUP);
+  // "Projects" is unique; its section runs to end of note. Append lands there.
+  appendToSection(doc, "Projects", "added");
+  const out = doc.serialize();
+  assert.match(out, /projects log\n\nadded/);
+});
+
 test("headings inside fenced code blocks are ignored", () => {
   const raw = ["# Real", "", "```", "# not a heading", "```", "", "tail", ""].join("\n");
   const doc = NoteDocument.parse(raw);
