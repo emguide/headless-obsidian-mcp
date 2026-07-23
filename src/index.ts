@@ -22,6 +22,7 @@ import { getFrontmatter } from "./tools/frontmatter.js";
 import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
+import { listFolders } from "./tools/folders.js";
 import {
   listProperties,
   getPropertyValues,
@@ -74,6 +75,7 @@ import {
   ReadSectionParams,
   ListVaultIssuesParams,
   ListFilesParams,
+  ListFoldersParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -205,6 +207,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of files to return (default 100; pass 0 for unbounded)"
+            }
+          }
+        }
+      },
+      {
+        name: "list_folders",
+        description: "Enumerate the vault's folders as a flat, bounded list so an agent can see the shape of the vault before searching or reading — the folder-level counterpart to list_notes. Returns { results, returned, omitted, truncated }: results is an array of { path, notes (direct), total_notes (recursive), subfolders }, sorted by path and capped at 100 by default (pass limit: 0 for all folders). Notes-only (attachment-only folders do not appear; use list_files for those). Root-level notes contribute no folder.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            folder: {
+              type: "string",
+              description: "Restrict to folders under this folder (relative to the vault root)"
+            },
+            depth: {
+              type: "number",
+              description: "Relative depth cap: 1 = immediate children of the scope (or top-level folders when no folder is given)"
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of folders to return (default 100; pass 0 for unbounded)"
             }
           }
         }
@@ -747,6 +770,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "list_files": {
         const result = await listFiles(VAULT_PATH, (args ?? {}) as ListFilesParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "list_folders": {
+        const result = await listFolders(VAULT_PATH, (args ?? {}) as ListFoldersParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
