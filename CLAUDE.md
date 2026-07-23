@@ -91,8 +91,8 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Input**:
   - `tags` (required): Array of tags to match (with or without leading `#`)
   - `match` (optional): `"any"` (default) or `"all"`
-  - `limit` (optional): Maximum number of notes to return
-- **Output**: Array of note headers (same shape as `list_notes`)
+  - `limit` (optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### list_recent_notes
 - **Purpose**: Find current material. Returns notes ordered by recency (newest first).
