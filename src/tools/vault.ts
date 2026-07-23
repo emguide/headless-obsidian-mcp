@@ -210,6 +210,53 @@ export function rewriteWikilinks(
   return { content: next, changed };
 }
 
+/** A wikilink's note target plus its heading/block anchor, if any. */
+export interface LinkRef {
+  /** Note target (alias + anchor stripped, trimmed). Empty for a `[[#anchor]]` self-link. */
+  target: string;
+  /** Raw anchor text after `#` (trimmed), or null when the link has no anchor. */
+  anchor: string | null;
+  /** True when the anchor was a block ref (`#^id`) rather than a heading. */
+  isBlockRef: boolean;
+}
+
+/**
+ * Extract every wikilink/embed as a {@link LinkRef}, preserving the heading or
+ * block anchor that {@link extractLinkTargets} discards. Order matches document
+ * order. A `[[#heading]]` self-link yields an empty `target`.
+ */
+export function extractLinkRefs(content: string): LinkRef[] {
+  const refs: LinkRef[] = [];
+  let match: RegExpExecArray | null;
+  WIKILINK_RE.lastIndex = 0;
+  while ((match = WIKILINK_RE.exec(content)) !== null) {
+    const inner = match[1];
+    const left = inner.split("|")[0];
+    const hash = left.indexOf("#");
+    const target = (hash === -1 ? left : left.slice(0, hash)).trim();
+    let anchor: string | null = null;
+    let isBlockRef = false;
+    if (hash !== -1) {
+      let raw = left.slice(hash + 1).trim();
+      if (raw.startsWith("^")) {
+        isBlockRef = true;
+        raw = raw.slice(1).trim();
+      }
+      anchor = raw;
+    }
+    refs.push({ target, anchor, isBlockRef });
+  }
+  return refs;
+}
+
+/**
+ * Whether a heading's text matches a link anchor. Literal case-insensitive,
+ * trimmed equality — deliberately NOT Obsidian's slug normalization.
+ */
+export function headingMatchesAnchor(headingText: string, anchor: string): boolean {
+  return headingText.trim().toLowerCase() === anchor.trim().toLowerCase();
+}
+
 /**
  * All ATX headings (`#`..`######`) in document order, skipping fenced code
  * blocks. This is the single shared heading parser used by the index, the
