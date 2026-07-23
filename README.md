@@ -242,9 +242,9 @@ Read and parse one or more notes from your vault.
 - `paths` (array, required): Array of relative note paths (with or without .md extension, max 50)
 
 **Returns:** Array of note objects with:
-- `name`: Note name (relative path without .md extension)
+- `path`: Relative path without .md extension (same identity field as the header tools)
 - `contents`: Markdown body verbatim (frontmatter removed; inline `#tags` in the body are preserved)
-- `metadata`: Parsed frontmatter as JSON object
+- `frontmatter`: Parsed frontmatter as JSON object (same field name as `get_frontmatter`)
 - `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags`
 
 ### list_notes

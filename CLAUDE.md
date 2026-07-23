@@ -37,9 +37,9 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Purpose**: Read and parse one or more notes
 - **Input**: `paths` - Array of relative note paths (with or without .md extension, max 50 notes)
 - **Output**: Array of note objects with:
-  - `name`: Relative path without .md suffix
+  - `path`: Relative path without .md suffix (same identity field as the header tools)
   - `contents`: Markdown body verbatim (frontmatter block removed, but body text — including inline `#tags` — is returned unmodified so `patch_note` can match against it)
-  - `metadata`: Parsed frontmatter as JSON object
+  - `frontmatter`: Parsed frontmatter as JSON object (same field name as `get_frontmatter`)
   - `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags` (same extraction as `list_tags`/`find_by_tag`)
 - **Security**: Protected against path traversal attacks, with file size limits (10MB per note)
 
