@@ -52,9 +52,10 @@ export class BM25 {
     return this.docs.size;
   }
 
-  search(queryTokens: string[], limit: number): BM25Hit[] {
+  search(queryTokens: string[], limit: number, allowedIds?: Set<string>): BM25Hit[] {
     if (!this.finalized) this.finalize();
     if (queryTokens.length === 0 || this.docs.size === 0) return [];
+    if (allowedIds && allowedIds.size === 0) return [];
 
     const N = this.docs.size;
     const scores = new Map<string, number>();
@@ -66,6 +67,7 @@ export class BM25 {
       if (!df) continue; // term not in corpus
       const idf = Math.log(1 + (N - df + 0.5) / (df + 0.5));
       for (const docId of this.postings.get(term)!) {
+        if (allowedIds && !allowedIds.has(docId)) continue;
         const doc = this.docs.get(docId)!;
         const tf = doc.tf.get(term)!;
         const denom = tf + K1 * (1 - B + (B * doc.length) / (this.avgdl || 1));
