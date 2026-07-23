@@ -143,7 +143,7 @@ individual tool descriptions state only their deviations from it.
   - `outbound_links`: Resolved `[[wikilinks]]` (each with the raw `target` and resolved `path`)
   - `unresolved_links`: Wikilink targets that do not resolve to any note
   - `backlinks`: Notes elsewhere in the vault that link to this one
-- **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default).
+- **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default). When a bare `[[basename]]` matches several notes, it resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — matching Obsidian's shortest-path rule, so a bare link points to the same note vault-wide regardless of where it appears.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
 ### get_outline

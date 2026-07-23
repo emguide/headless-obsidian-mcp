@@ -126,9 +126,17 @@ export class VaultIndex {
       if (e.title) addName(e.title, e.path, "title");
       for (const alias of e.aliases) addName(alias, e.path, "alias");
     }
-    // Deterministic basename resolution: prefer the alphabetically-first path.
+    // Basename resolution order, matching Obsidian's default: among notes
+    // sharing a basename, a bare [[name]] resolves to the one closest to the
+    // vault root (fewest path segments), ties broken alphabetically. Obsidian
+    // makes [[name]] point to the same note vault-wide, independent of where
+    // the link lives, so this ordering needs no source-note context.
     for (const list of this.byBasename.values()) {
-      list.sort((a, b) => a.localeCompare(b));
+      list.sort((a, b) => {
+        const da = a.split("/").length;
+        const db = b.split("/").length;
+        return da !== db ? da - db : a.localeCompare(b);
+      });
     }
 
     for (const e of this.entries.values()) {
@@ -162,7 +170,10 @@ export class VaultIndex {
   /**
    * Resolve a wikilink target to a real note path. A link may be a full
    * relative path ("folder/note") or just a basename ("note"); both are
-   * indexed, matching Obsidian's default shortest-path resolution.
+   * indexed. A full-path target wins as an exact match; a bare basename that
+   * matches several notes resolves to the one closest to the vault root, ties
+   * broken alphabetically (the byBasename ordering established during refresh),
+   * matching Obsidian's default shortest-path resolution.
    */
   resolve(target: string): string | null {
     const key = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();

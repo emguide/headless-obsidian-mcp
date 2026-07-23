@@ -355,7 +355,7 @@ Resolve the Obsidian link graph for a note.
 - `unresolved_links`: Wikilink targets that resolve to no note
 - `backlinks`: Notes elsewhere in the vault that link to this one
 
-Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`; links resolve by full relative path or basename.
+Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`; links resolve by full relative path or basename. A bare `[[basename]]` that matches several notes resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — Obsidian's shortest-path rule, so the same bare link points to the same note vault-wide.
 
 ### get_outline
 
