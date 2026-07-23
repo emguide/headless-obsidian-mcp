@@ -282,7 +282,7 @@ individual tool descriptions state only their deviations from it.
 
 **The write tools are off by default.** The server is read-only unless
 `OBSIDIAN_ALLOW_WRITES` is set to a truthy value (`1`, `true`, `yes`, `on`).
-When disabled, the eighteen write tools are hidden from `list_tools` and any call
+When disabled, the twenty write tools are hidden from `list_tools` and any call
 to one is rejected — so an agent only ever sees the read tools. When enabled, all
 tools are exposed. The flag gates the MCP server (the agent-facing surface); the
 query CLI is the operator's own tool and is not gated. Flag helpers live in
@@ -403,6 +403,70 @@ block on these same rules, so an agent creating a note by hand cannot bypass
 frontmatter integrity; malformed YAML in that block is rejected loudly rather
 than landing in the vault.
 
+## Templates
+
+Interop with the vault's existing **core Templates plugin** — the built-in one,
+not Templater. The server reproduces the plugin's insert-time substitution
+faithfully; it never invents a template format. Supported placeholders:
+`{{title}}`, `{{date}}`, `{{time}}`, and the inline format overrides
+`{{date:FORMAT}}` / `{{time:FORMAT}}`. Format tokens are Moment.js-compatible
+(via `dayjs` + `advancedFormat` / `customParseFormat`), so `{{date:Do MMMM
+YYYY}}` renders exactly as it does in Obsidian. Any unrecognized `{{...}}` token
+(e.g. Templater's `{{tp...}}`) **passes through literally** — never silently
+dropped. Templater's `<% %>` scripting, `tp.*` API, prompts, and system commands
+are explicitly **out of scope** (they have no faithful headless equivalent).
+
+**Folder resolution (config-first).** The template folder is read from the
+plugin's own config (`.obsidian/templates.json`, `folder` key), and its default
+date/time formats from that file's `dateFormat` / `timeFormat` (falling back to
+Obsidian's built-in `YYYY-MM-DD` / `HH:mm`). `OBSIDIAN_TEMPLATE_FOLDER`
+overrides the folder for headless setups. If neither is configured, the template
+tools fail loud rather than returning an empty result. Helpers live in
+`src/tools/templates.ts`; the pure substitution engine is
+`src/tools/template-expand.ts` (unit-testable with an injected `now`).
+
+`{{title}}` resolves to the **target note's basename** in both write tools
+(the new note for `apply_template`, the existing note for `insert_template`) —
+exact Obsidian parity.
+
+### list_templates
+- **Purpose**: Enumerate the configured template folder — the discovery entry
+  point for the two template write tools. Read-only, never gated.
+- **Input**: `limit` (optional, default `100`; `0` = unbounded), `offset`
+  (optional, default `0`).
+- **Output**: `{ results, returned, skipped, omitted, truncated }` — `results`
+  is `[{ path, name, size, modified }]` (`name` = basename without `.md`,
+  `path` = vault-relative with `.md`, `modified` = ISO), sorted by `name`.
+- **Errors**: Fails loud if no template folder is configured (setup problem, not
+  "zero templates").
+
+### apply_template
+- **Purpose**: Create a new note from a template — the template-driven
+  counterpart of `write_note`. Gated by `OBSIDIAN_ALLOW_WRITES`; routed through
+  the git guard.
+- **Input**: `template` (required — name or template-folder-relative path),
+  `path` (required — destination note), `overwrite` (optional, default `false`
+  — refuses to clobber, like `write_note`).
+- **Output**: `{ path, created, unresolved_links, broken_anchors }` — same shape
+  and link-integrity convention as `write_note` (report-only). Inherits
+  `write_note`'s path-guard, frontmatter validation of any leading block in the
+  expanded text, and overwrite refusal by delegation.
+
+### insert_template
+- **Purpose**: Expand a template into an **existing** note — the "add a standard
+  block to a note I already have" case. Gated + git-guarded.
+- **Input**: `template` (required), `path` (required — existing note),
+  `position` (required — `"append"` | `"prepend"` | `"section"`), `section`
+  (required iff `position` is `"section"` — bare heading or `" > "`-joined
+  heading-path), `create_section` (optional, default `false` — create the
+  section if missing; an ambiguous section is never silently created).
+- **Output**: `{ path, position, unresolved_links, broken_anchors }` — link
+  health for the resulting note (report-only). Section addressing and fail-loud
+  ambiguity match `append_to_section`. Frontmatter in the expanded template is
+  treated as body text (the existing note's own frontmatter block is never
+  touched). The note must already exist — a missing note surfaces the
+  underlying "Note not found" error (creating notes is `apply_template`'s job).
+
 ### Git guard (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
 Set `OBSIDIAN_GIT_AUTOCOMMIT` to a truthy value (`1`, `true`, `yes`, `on`) to
@@ -423,6 +487,7 @@ refused rather than proceeding without the safety net. Implemented in
 - @modelcontextprotocol/sdk
 - gray-matter (frontmatter parsing)
 - commander (query CLI argument parsing)
+- dayjs (Moment-compatible date formatting for template placeholders)
 - Node's built-in `node:path`, `node:fs/promises`, and `node:child_process`
 
 ## Development
@@ -504,6 +569,7 @@ npm run query -- vault-issues broken_anchors --limit 50    # Resolved-note, dead
 npm run query -- files --folder assets --extension png  # Non-markdown files (attachments)
 npm run query -- folders                                 # Folder tree with note counts
 npm run query -- folders --folder projects --depth 1     # Immediate subfolders of projects/
+npm run query -- templates                               # List the vault's core-Templates templates
 npm run query -- properties                             # Frontmatter schema
 npm run query -- property-values status                 # Distinct values of a key
 npm run query -- query --where '{"status":"active","priority":{"gt":3}}'
@@ -531,6 +597,8 @@ npm run query -- rename-section "projects/alpha" "Old Heading" "New Heading"
 npm run query -- rename-section "projects/alpha" "Old" "New" --no-update-anchors
 npm run query -- move "projects/alpha" "archive/alpha"  # Rename + rewrite links
 npm run query -- move-file "assets/old.png" "assets/new.png"
+npm run query -- template-apply "Daily" "journal/2026-07-23"   # New note from a template
+npm run query -- template-insert "Meeting" "journal/2026-07-23" --position section --section Notes --create-section
 npm run query -- patch "projects/alpha" "old text" "new text" --all
 npm run query -- delete "inbox/idea"                    # Trash-safe (recoverable)
 npm run query -- delete "inbox/idea" --permanent        # Unlink outright
