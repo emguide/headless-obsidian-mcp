@@ -2,6 +2,7 @@ import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { TagCount, FindByTagParams, NoteHeader, ListResponse } from "../types.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
+import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 
 /** Default cap on `find_by_tag` so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
@@ -34,8 +35,12 @@ export async function listTags(
 
 /**
  * Find notes matching one or more tags. With match="all" a note must carry
- * every requested tag; with "any" (default) at least one. Returns lightweight
- * headers, giving high-precision retrieval based on human curation.
+ * every requested tag; with "any" (default) at least one. `match` governs the
+ * tag set only. Optionally narrow further with `folder` and frontmatter
+ * `where` (all conditions apply) — the shared candidate-filter vocabulary — so
+ * "notes tagged #work in projects/ with status active" needs no client-side
+ * join. Returns lightweight headers, giving high-precision retrieval based on
+ * human curation.
  *
  * Bounded by default: with no `limit`, at most `DEFAULT_LIMIT` notes are
  * returned. Pass `limit: 0` for an unbounded list. The result is a
@@ -48,7 +53,7 @@ export async function findByTag(
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
-  const { tags, match = "any", limit, offset } = params;
+  const { tags, match = "any", folder, where, limit, offset } = params;
   if (!Array.isArray(tags) || tags.length === 0) {
     throw new Error("tags must be a non-empty array");
   }
@@ -59,16 +64,17 @@ export async function findByTag(
     throw new Error("limit must be a positive integer");
   }
   assertNonNegativeInt(offset, "offset");
+  validateCandidateFilter({ where });
 
-  // Normalize requested tags: drop leading "#", lowercase for comparison.
-  const wanted = tags.map((t) => String(t).replace(/^#/, "").toLowerCase());
-
+  // `resolveCandidates` matches the same unified inline+frontmatter tag set
+  // (entry.tags) find_by_tag has always used; `match` maps to `tagMatch`.
   const index = await getIndex(vaultPath);
-  const matched = index.getEntries().filter((entry) => {
-    const noteSet = new Set(entry.tags.map((t) => t.toLowerCase()));
-    return match === "all"
-      ? wanted.every((w) => noteSet.has(w))
-      : wanted.some((w) => noteSet.has(w));
+  const matched = resolveCandidates(index, {
+    folder,
+    tags,
+    where,
+    tagMatch: match,
+    whereMatch: "all",
   });
 
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;

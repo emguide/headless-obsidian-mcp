@@ -114,6 +114,12 @@ export interface ParsedHeading {
 export interface ListNotesParams {
   /** Restrict to notes under this folder (relative to the vault root). */
   folder?: string;
+  /** Restrict to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
+  /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
+  where?: Record<string, Condition>;
   /** Maximum number of notes to return. */
   limit?: number;
   /** Rows to skip before the window, for pagination. Default 0. */
@@ -162,8 +168,12 @@ export interface TagCount {
 export interface FindByTagParams {
   /** Tags to match (with or without leading #). */
   tags: string[];
-  /** "all" requires every tag; "any" requires at least one. Default: "any". */
+  /** "all" requires every tag; "any" requires at least one. Default: "any". Governs the tag set only. */
   match?: "all" | "any";
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Additional frontmatter conditions (query_notes syntax); all must hold. */
+  where?: Record<string, Condition>;
   /** Maximum number of notes to return. */
   limit?: number;
   /** Rows to skip before the window, for pagination. Default 0. */
@@ -173,6 +183,14 @@ export interface FindByTagParams {
 export interface RelatedNotesParams {
   /** The note to find neighbours for (relative path, with or without .md). */
   path: string;
+  /** Restrict candidates to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Restrict candidates to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
+  /** Restrict candidates to notes whose frontmatter satisfies these conditions (query_notes syntax). */
+  where?: Record<string, Condition>;
   /** Maximum number of related notes to return. Default 100; 0 = unbounded. */
   limit?: number;
   /** Rows to skip before the window, for pagination. Default 0. */
@@ -256,6 +274,12 @@ export interface RecentNotesParams {
   since?: string;
   /** Frontmatter field to sort by instead of filesystem mtime (e.g. "updated"). */
   date_field?: string;
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Restrict to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
   /** Frontmatter conditions, e.g. { status: "active" } or { priority: { gt: 3 } }. */
   where?: Record<string, Condition>;
   /** Rows to skip before the window, for pagination. Default 0. */
@@ -338,7 +362,12 @@ export interface PropertyValueCount {
 
 export interface QueryNotesParams {
   where: Record<string, Condition>;
+  /** How the `where` conditions combine: "all" (default) or "any". Governs the where conditions only. */
   match?: "all" | "any";
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Additionally restrict to notes carrying these tags (leading '#' optional); any of them. */
+  tags?: string[];
   limit?: number;
   /** Rows to skip before the window, for pagination. Default 0. */
   offset?: number;

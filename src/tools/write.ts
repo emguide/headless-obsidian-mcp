@@ -4,6 +4,7 @@ import matter from "gray-matter";
 import { getIndex } from "./vault-index.js";
 import { resolveNotePath, resolveVaultFile, rewriteWikilinks, headingMatchesAnchor } from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
+import { linkHealthOf, LinkHealth } from "./link-health.js";
 import {
   NoteDocument,
   frontmatterTagList,
@@ -91,6 +92,28 @@ async function commitWrite(
   await writeResolved(vaultPath, notePath, content);
 }
 
+/**
+ * Compute the resulting note's link-graph health after a content write, so a
+ * write can never damage the graph silently (the report-only counterpart to
+ * `delete_note`'s `dangled_backlinks`). Refreshing the index picks up any
+ * newly-created target notes; the written `content` is passed straight through
+ * to {@link linkHealthOf} so the just-written note is scored from exactly what
+ * landed on disk rather than a possibly-stale index copy. Failures degrade to
+ * an empty (graph-intact) report rather than sinking the write that succeeded.
+ */
+async function linkHealthAfterWrite(
+  vaultPath: string,
+  notePath: string,
+  content: string
+): Promise<LinkHealth> {
+  try {
+    const index = await getIndex(vaultPath);
+    return linkHealthOf(index, canonicalName(notePath), content);
+  } catch {
+    return { unresolved_links: [], broken_anchors: [] };
+  }
+}
+
 /** Read an existing note's raw text, or throw a friendly not-found error. */
 async function readRaw(vaultPath: string, notePath: string): Promise<string> {
   const fullPath = resolveNotePath(vaultPath, notePath);
@@ -105,19 +128,22 @@ async function readRaw(vaultPath: string, notePath: string): Promise<string> {
  * Load an existing note, mutate it, and write it back through the guarded
  * funnel. The mutate callback may return `false` to signal "no change", in
  * which case the write (and its git snapshot) is skipped. Returning `void` or
- * `true` performs the write.
+ * `true` performs the write. Returns whether a write happened plus the note's
+ * final serialized content (the written text, or the unchanged original on a
+ * no-op) so callers can report the resulting note's link health.
  */
 async function editNote(
   vaultPath: string,
   notePath: string,
   mutate: (doc: NoteDocument) => boolean | void
-): Promise<boolean> {
+): Promise<{ changed: boolean; content: string }> {
   const raw = await readRaw(vaultPath, notePath);
   const doc = NoteDocument.parse(raw);
   const changed = mutate(doc);
-  if (changed === false) return false;
-  await commitWrite(vaultPath, notePath, doc.serialize());
-  return true;
+  if (changed === false) return { changed: false, content: raw };
+  const content = doc.serialize();
+  await commitWrite(vaultPath, notePath, content);
+  return { changed: true, content };
 }
 
 /**
@@ -160,7 +186,7 @@ export interface WriteNoteParams {
 export async function writeNote(
   vaultPath: string,
   { path, content, overwrite = false, frontmatter }: WriteNoteParams
-): Promise<{ path: string; created: boolean }> {
+): Promise<{ path: string; created: boolean } & LinkHealth> {
   if (typeof content !== "string") throw new Error("content must be a string");
 
   const hasFrontmatterParam =
@@ -190,7 +216,8 @@ export async function writeNote(
     );
   }
   await commitWrite(vaultPath, path, finalContent);
-  return { path: canonicalName(path), created: !existed };
+  const health = await linkHealthAfterWrite(vaultPath, path, finalContent);
+  return { path: canonicalName(path), created: !existed, ...health };
 }
 
 export interface AppendNoteParams {
@@ -203,21 +230,24 @@ export interface AppendNoteParams {
 export async function appendNote(
   vaultPath: string,
   { path, content, create = false }: AppendNoteParams
-): Promise<{ path: string; created: boolean }> {
+): Promise<{ path: string; created: boolean } & LinkHealth> {
   if (typeof content !== "string") throw new Error("content must be a string");
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (!existed) {
     if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
     validateContentFrontmatter(content);
-    await commitWrite(vaultPath, path, content.endsWith("\n") ? content : content + "\n");
-    return { path: canonicalName(path), created: true };
+    const created = content.endsWith("\n") ? content : content + "\n";
+    await commitWrite(vaultPath, path, created);
+    const health = await linkHealthAfterWrite(vaultPath, path, created);
+    return { path: canonicalName(path), created: true, ...health };
   }
   const raw = await readRaw(vaultPath, path);
   const separator = raw.length === 0 || raw.endsWith("\n") ? "" : "\n";
   const next = raw + separator + content + (content.endsWith("\n") ? "" : "\n");
   await commitWrite(vaultPath, path, next);
-  return { path: canonicalName(path), created: false };
+  const health = await linkHealthAfterWrite(vaultPath, path, next);
+  return { path: canonicalName(path), created: false, ...health };
 }
 
 export interface PrependNoteParams {
@@ -235,22 +265,26 @@ export interface PrependNoteParams {
 export async function prependNote(
   vaultPath: string,
   { path, content, create = false }: PrependNoteParams
-): Promise<{ path: string; created: boolean }> {
+): Promise<{ path: string; created: boolean } & LinkHealth> {
   if (typeof content !== "string") throw new Error("content must be a string");
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (!existed) {
     if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
     validateContentFrontmatter(content);
-    await commitWrite(vaultPath, path, content.endsWith("\n") ? content : content + "\n");
-    return { path: canonicalName(path), created: true };
+    const created = content.endsWith("\n") ? content : content + "\n";
+    await commitWrite(vaultPath, path, created);
+    const health = await linkHealthAfterWrite(vaultPath, path, created);
+    return { path: canonicalName(path), created: true, ...health };
   }
   const raw = await readRaw(vaultPath, path);
   const doc = NoteDocument.parse(raw);
   const insert = content.endsWith("\n") ? content : content + "\n";
   doc.body = insert + doc.body;
-  await commitWrite(vaultPath, path, doc.serialize());
-  return { path: canonicalName(path), created: false };
+  const next = doc.serialize();
+  await commitWrite(vaultPath, path, next);
+  const health = await linkHealthAfterWrite(vaultPath, path, next);
+  return { path: canonicalName(path), created: false, ...health };
 }
 
 export interface DeleteNoteOptions {
@@ -471,7 +505,7 @@ export interface PatchNoteParams {
 export async function patchNote(
   vaultPath: string,
   { path, find, replace, all = false }: PatchNoteParams
-): Promise<{ path: string; replacements: number }> {
+): Promise<{ path: string; replacements: number } & LinkHealth> {
   if (typeof find !== "string" || find.length === 0) {
     throw new Error("find must be a non-empty string");
   }
@@ -496,7 +530,8 @@ export async function patchNote(
   const replacements = all ? occurrences : 1;
   const next = parts.join(replace);
   await commitWrite(vaultPath, path, next);
-  return { path: canonicalName(path), replacements };
+  const health = await linkHealthAfterWrite(vaultPath, path, next);
+  return { path: canonicalName(path), replacements, ...health };
 }
 
 export interface RenameSectionParams {
@@ -672,7 +707,7 @@ export async function setNoteFrontmatter(
   { path, set, unset }: SetFrontmatterParams
 ): Promise<{ path: string; changed: boolean }> {
   if (!set && !unset) throw new Error("Provide `set` and/or `unset`");
-  const changed = await editNote(vaultPath, path, (doc) =>
+  const { changed } = await editNote(vaultPath, path, (doc) =>
     setFrontmatter(doc, set, unset)
   );
   return { path: canonicalName(path), changed };
@@ -751,11 +786,12 @@ export interface AddSectionParams {
 export async function addNoteSection(
   vaultPath: string,
   { path, heading, content, level, after }: AddSectionParams
-): Promise<{ path: string; heading: string }> {
-  await editNote(vaultPath, path, (doc) =>
+): Promise<{ path: string; heading: string } & LinkHealth> {
+  const { content: written } = await editNote(vaultPath, path, (doc) =>
     addSection(doc, heading, content ?? "", level ?? 2, after)
   );
-  return { path: canonicalName(path), heading };
+  const health = await linkHealthAfterWrite(vaultPath, path, written);
+  return { path: canonicalName(path), heading, ...health };
 }
 
 export interface SectionEditParams {
@@ -768,19 +804,21 @@ export interface SectionEditParams {
 export async function appendNoteSection(
   vaultPath: string,
   { path, heading, content, create }: SectionEditParams
-): Promise<{ path: string; heading: string }> {
-  await editNote(vaultPath, path, (doc) =>
+): Promise<{ path: string; heading: string } & LinkHealth> {
+  const { content: written } = await editNote(vaultPath, path, (doc) =>
     appendToSection(doc, heading, content ?? "", create ?? false)
   );
-  return { path: canonicalName(path), heading };
+  const health = await linkHealthAfterWrite(vaultPath, path, written);
+  return { path: canonicalName(path), heading, ...health };
 }
 
 export async function replaceNoteSection(
   vaultPath: string,
   { path, heading, content }: SectionEditParams
-): Promise<{ path: string; heading: string }> {
-  await editNote(vaultPath, path, (doc) =>
+): Promise<{ path: string; heading: string } & LinkHealth> {
+  const { content: written } = await editNote(vaultPath, path, (doc) =>
     replaceSection(doc, heading, content ?? "")
   );
-  return { path: canonicalName(path), heading };
+  const health = await linkHealthAfterWrite(vaultPath, path, written);
+  return { path: canonicalName(path), heading, ...health };
 }

@@ -20,7 +20,7 @@ after(() => fx.cleanup());
 
 test("prependNote inserts after the frontmatter, preserving it byte-for-byte", async () => {
   const result = await prependNote(fx.vaultPath, { path: "note", content: "> callout" });
-  assert.deepEqual(result, { path: "note", created: false });
+  assert.deepEqual(result, { path: "note", created: false, unresolved_links: [], broken_anchors: [] });
   const out = await read(fx.vaultPath, "note.md");
   assert.equal(out, "---\ntitle: Note\ntags: [a]\n---\n> callout\n# Note\n\nbody line\n");
 });
@@ -43,7 +43,7 @@ test("prependNote errors on a missing note unless create is set", async () => {
 test("patchNote replaces a unique occurrence with all:false", async () => {
   const local = await makeVault([{ path: "p.md", content: "one two three\n" }]);
   const result = await patchNote(local.vaultPath, { path: "p", find: "one", replace: "X" });
-  assert.deepEqual(result, { path: "p", replacements: 1 });
+  assert.deepEqual(result, { path: "p", replacements: 1, unresolved_links: [], broken_anchors: [] });
   assert.equal(await read(local.vaultPath, "p.md"), "X two three\n");
   await local.cleanup();
 });

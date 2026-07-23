@@ -1,7 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
-import { matchesWhere } from "./property-match.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
+import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 import {
   ListPropertiesParams,
   PropertySchemaEntry,
@@ -108,15 +108,19 @@ export async function getPropertyValues(
 }
 
 /**
- * Find notes whose frontmatter satisfies a set of conditions. Returns
- * lightweight headers so results compose with the other knowledge-base tools.
+ * Find notes whose frontmatter satisfies a set of conditions. `match` governs
+ * how the `where` conditions combine ("all" default). Optionally narrow further
+ * with `folder` and `tags` (any of them) — the shared candidate-filter
+ * vocabulary — so a frontmatter query can be scoped to a folder or tag set
+ * without a client-side join. Returns lightweight headers so results compose
+ * with the other knowledge-base tools.
  */
 export async function queryNotes(
   vaultPath: string,
   params: QueryNotesParams
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
-  const { where, match = "all", limit, offset } = params;
+  const { where, match = "all", folder, tags, limit, offset } = params;
   if (!where || typeof where !== "object" || Array.isArray(where)) {
     throw new Error("where must be an object of property conditions");
   }
@@ -127,10 +131,17 @@ export async function queryNotes(
     throw new Error("limit must be a positive integer");
   }
   assertNonNegativeInt(offset, "offset");
+  validateCandidateFilter({ tags });
   const index = await getIndex(vaultPath);
-  const matched = index
-    .getEntries()
-    .filter((e) => matchesWhere(e.frontmatter, where, match));
+  // `match` governs the `where` conditions (query_notes' primary filter); the
+  // optional `tags` narrowing is an independent "any" membership constraint.
+  const matched = resolveCandidates(index, {
+    folder,
+    tags,
+    where,
+    tagMatch: "any",
+    whereMatch: match,
+  });
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
   return toListResponse(matched.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }
