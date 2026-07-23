@@ -616,7 +616,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: JSON.stringify(results, null, 2)
+              text: JSON.stringify(results)
             }
           ]
         };
@@ -629,7 +629,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const results = await searchNotesRanked(VAULT_PATH, params);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(results) }],
         };
       }
 
@@ -643,7 +643,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: JSON.stringify(notes, null, 2)
+              text: JSON.stringify(notes)
             }
           ]
         };
@@ -652,7 +652,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "list_notes": {
         const results = await listNotes(VAULT_PATH, (args ?? {}) as ListNotesParams);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
@@ -663,7 +663,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const results = await getLinks(VAULT_PATH, path);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
@@ -674,7 +674,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const results = await getOutline(VAULT_PATH, path);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
@@ -688,35 +688,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const results = await readSection(VAULT_PATH, params);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
       case "list_tags": {
         const results = await listTags(VAULT_PATH);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
       case "find_by_tag": {
         const results = await findByTag(VAULT_PATH, (args ?? {}) as unknown as FindByTagParams);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
       case "list_recent_notes": {
         const results = await listRecentNotes(VAULT_PATH, (args ?? {}) as RecentNotesParams);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
       case "get_related_notes": {
         const results = await getRelatedNotes(VAULT_PATH, (args ?? {}) as unknown as RelatedNotesParams);
         return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }]
+          content: [{ type: "text", text: JSON.stringify(results) }]
         };
       }
 
@@ -726,47 +726,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error("A note path is required for get_frontmatter");
         }
         const result = await getFrontmatter(VAULT_PATH, path);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "list_properties": {
         const result = await listProperties(VAULT_PATH, (args ?? {}) as ListPropertiesParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "get_property_values": {
         const result = await getPropertyValues(VAULT_PATH, (args ?? {}) as unknown as PropertyValuesParamsRead);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "query_notes": {
         const result = await queryNotes(VAULT_PATH, (args ?? {}) as unknown as QueryNotesParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "get_property": {
         const result = await getProperty(VAULT_PATH, (args ?? {}) as unknown as GetPropertyParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "get_vault_stats": {
         const result = await getVaultStats(VAULT_PATH);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "write_note": {
         const result = await writeNote(VAULT_PATH, (args ?? {}) as unknown as WriteNoteParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "append_note": {
         const result = await appendNote(VAULT_PATH, (args ?? {}) as unknown as AppendNoteParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "prepend_note": {
         const result = await prependNote(VAULT_PATH, (args ?? {}) as unknown as PrependNoteParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "delete_note": {
@@ -775,67 +775,67 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error("A note path is required for delete_note");
         }
         const result = await deleteNote(VAULT_PATH, path, { permanent });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "move_note": {
         const result = await moveNote(VAULT_PATH, (args ?? {}) as unknown as MoveNoteParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "move_file": {
         const result = await moveFile(VAULT_PATH, (args ?? {}) as unknown as MoveFileParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "patch_note": {
         const result = await patchNote(VAULT_PATH, (args ?? {}) as unknown as PatchNoteParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "add_tag": {
         const result = await addTag(VAULT_PATH, (args ?? {}) as unknown as TagParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "remove_tag": {
         const result = await removeTag(VAULT_PATH, (args ?? {}) as unknown as TagParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "set_frontmatter": {
         const result = await setNoteFrontmatter(VAULT_PATH, (args ?? {}) as unknown as SetFrontmatterParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "add_property_values": {
         const result = await addNotePropertyValues(VAULT_PATH, (args ?? {}) as unknown as PropertyValuesParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "remove_property_values": {
         const result = await removeNotePropertyValues(VAULT_PATH, (args ?? {}) as unknown as PropertyValuesParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "rename_property": {
         const result = await renameNoteProperty(VAULT_PATH, (args ?? {}) as unknown as RenamePropertyParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "add_section": {
         const result = await addNoteSection(VAULT_PATH, (args ?? {}) as unknown as AddSectionParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "append_to_section": {
         const result = await appendNoteSection(VAULT_PATH, (args ?? {}) as unknown as SectionEditParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "replace_section": {
         const result = await replaceNoteSection(VAULT_PATH, (args ?? {}) as unknown as SectionEditParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       default:
