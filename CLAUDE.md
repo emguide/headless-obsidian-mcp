@@ -107,9 +107,9 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Purpose**: Associative recall. Rank the notes most related to a given note, so an agent can ask "I'm looking at X — what else is relevant?" No embeddings or model: a transparent weighted blend of signals already held in the shared index.
 - **Input**:
   - `path` (required): Relative note path (with or without `.md`)
-  - `limit` (optional): Maximum number of related notes to return (default: 10)
+  - `limit` (optional): Maximum number of related notes to return (default 100; `limit: 0` = unbounded)
 - **Scoring**: direct link either direction (weight 4), each shared tag (3), each shared out-link / co-reference (2), each shared backlink / co-citation (2). Notes with no connecting signal are omitted; ties break by path.
-- **Output**: Array of note headers (same shape as `list_notes`) extended with `score`, `reasons`, `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons`, `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (those with a connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
 ### get_frontmatter

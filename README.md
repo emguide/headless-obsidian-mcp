@@ -358,9 +358,9 @@ Find the notes most related to a given note and rank them — associative recall
 
 **Parameters:**
 - `path` (string, required): Relative note path (with or without `.md`)
-- `limit` (number, optional): Maximum number of related notes to return (default: 10)
+- `limit` (number, optional): Maximum number of related notes to return (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`.
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (notes with at least one connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 
 ### get_frontmatter
 

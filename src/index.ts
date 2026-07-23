@@ -321,7 +321,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of related notes to return (default: 10)"
+              description: "Maximum number of related notes to return (default 100; pass 0 for unbounded)"
             }
           },
           required: ["path"]

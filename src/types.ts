@@ -137,7 +137,7 @@ export interface FindByTagParams {
 export interface RelatedNotesParams {
   /** The note to find neighbours for (relative path, with or without .md). */
   path: string;
-  /** Maximum number of related notes to return. Default: 10. */
+  /** Maximum number of related notes to return. Default 100; 0 = unbounded. */
   limit?: number;
 }
 
