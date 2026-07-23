@@ -21,7 +21,12 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
   - `context_lines` (optional): Number of context lines to show (default: 5, max: 100)
   - `limit` (optional): Max number of files to return (default: 20, `0` = unlimited — no hard maximum)
   - `max_matches_per_file` (optional): Max matches per file (default: 20, `0` = unlimited)
+  - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `tags` (optional): Restrict to notes carrying these tags (leading `#` optional)
+  - `match` (optional): Semantics of `tags` — `"any"` (default) or `"all"`
+  - `where` (optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
 - **Output**: `{ results, truncated, files_returned, files_omitted, matches_capped_in }` — `results` is the array of matches (file paths without .md, plus context lines), bounded by the caps above; the other fields report what was dropped so a truncated result isn't mistaken for a complete one.
+- **Filtering**: When `folder`/`tags`/`where` are given, the candidate note set is resolved from the shared index first, then ripgrep runs only over those files (chunked to stay under `ARG_MAX` on large vaults) instead of scanning the whole vault. A filter that matches zero notes short-circuits to an empty result without invoking ripgrep at all.
 - **Security**: Protected against flag injection and regex DoS attacks
 
 ### search_notes_ranked
@@ -36,12 +41,14 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 ### read_notes  
 - **Purpose**: Read and parse one or more notes
 - **Input**: `paths` - Array of relative note paths (with or without .md extension, max 50 notes)
-- **Output**: Array of note objects with:
-  - `path`: Relative path without .md suffix (same identity field as the header tools)
-  - `contents`: Markdown body verbatim (frontmatter block removed, but body text — including inline `#tags` — is returned unmodified so `patch_note` can match against it)
-  - `frontmatter`: Parsed frontmatter as JSON object (same field name as `get_frontmatter`)
-  - `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags` (same extraction as `list_tags`/`find_by_tag`)
-- **Security**: Protected against path traversal attacks, with file size limits (10MB per note)
+- **Output**: `{ notes, errors }`
+  - `notes`: Array of note objects for every path that was read successfully, each with:
+    - `path`: Relative path without .md suffix (same identity field as the header tools)
+    - `contents`: Markdown body verbatim (frontmatter block removed, but body text — including inline `#tags` — is returned unmodified so `patch_note` can match against it)
+    - `frontmatter`: Parsed frontmatter as JSON object (same field name as `get_frontmatter`)
+    - `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags` (same extraction as `list_tags`/`find_by_tag`)
+  - `errors`: `[{ path, error }]` — one entry per requested path that could not be read (missing or too large), so one bad path in a batch no longer fails the whole call
+- **Security**: Protected against path traversal attacks, with file size limits (10MB per note). A path-traversal attempt still errors the entire call (unlike a missing/oversized file, which is reported per-path in `errors`).
 
 ### list_notes
 - **Purpose**: Discover what exists in the vault. Returns lightweight note headers (no full contents), so an agent can orient itself before searching or reading.
@@ -116,6 +123,21 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Input**: none
 - **Output**: `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with no inbound and no outbound resolved links; the modification bounds are ISO timestamps (`null` for an empty vault).
 
+### list_vault_issues
+- **Purpose**: Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
+- **Input**: `kind` (required): `"orphans"` or `"unresolved_links"`. `limit` (optional): Cap on the number of returned rows/headers.
+- **Output**: Shape depends on `kind`:
+  - `"orphans"`: Array of note headers (same shape as `list_notes`) for notes with no inbound and no outbound resolved links — the exact predicate `get_vault_stats` uses for `orphan_notes`.
+  - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing.
+- **Count relationship**: `orphans` array length equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links` equals `get_vault_stats`'s `unresolved_links` count (both before any `limit` is applied).
+- **Notes**: Index-backed (no file read).
+
+### list_files
+- **Purpose**: List non-markdown files in the vault (attachments, images, PDFs) — the counterpart to `list_notes` for everything `list_notes` deliberately excludes.
+- **Input**: `folder` (optional): Restrict to files under this folder (relative to the vault root). `extension` (optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`). `limit` (optional): Maximum number of files to return.
+- **Output**: Array of `{ path, size, modified, extension }` — `path` is vault-relative with the extension preserved (unlike note paths, `.md` is never stripped here because these aren't notes), `modified` is an ISO timestamp, `extension` is lowercased without the dot.
+- **Notes**: Markdown files are never returned. Reuses the same directory walk and ignore rules as the vault index, but does not read from or write to the index itself.
+
 ### list_properties
 - **Purpose**: The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
 - **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`)
@@ -176,7 +198,7 @@ change a tag or a section without reading and rewriting the whole note.
 ### delete_note
 - **Purpose**: Delete a note. **Trash-safe by default**: the note is moved to the vault's `.trash` folder (Obsidian's convention, ignored by the index) so the deletion is recoverable. Repeated trashings of the same name are disambiguated with a numeric suffix. Errors if the note does not exist.
 - **Input**: `path` (required), `permanent` (optional — unlink outright instead of trashing)
-- **Output**: `{ path, deleted, trashed, trash_path? }`
+- **Output**: `{ path, deleted, trashed, trash_path?, dangled_backlinks }` — `dangled_backlinks` lists the paths of notes elsewhere in the vault that linked to the deleted note and now have a broken `[[wikilink]]`. Reported only; those notes are not modified.
 
 ### move_note
 - **Purpose**: Move or rename a note. By default every `[[wikilink]]` elsewhere in the vault that pointed to the old location is rewritten to the new one (full-path links become the new full path; bare-basename links become the new basename; aliases and `#anchors` are preserved), so the link graph is never broken.
@@ -275,7 +297,8 @@ refused rather than proceeding without the safety net. Implemented in
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
 `list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`,
-`query_notes`, `list_properties`, `get_property_values`, `get_outline`) share an
+`query_notes`, `list_properties`, `get_property_values`, `get_outline`,
+`list_vault_issues`) share an
 in-memory index (`src/tools/vault-index.ts`) that parses each note once
 (frontmatter, tags, wikilinks, headings) and caches the result. Each tool call
 refreshes the index by walking the vault and re-reading only files whose size
@@ -307,9 +330,11 @@ npm run query -- search "test" --whole-word             # Whole words only
 npm run query -- search "pattern" --context 10         # Custom context lines
 npm run query -- search-ranked "kubernetes networking" --limit 5   # BM25 ranked
 npm run query -- search "productivity" --limit 20 --max-matches 20   # Bounded literal search
+npm run query -- search "kubernetes" --tag work --match all   # Filtered to notes tagged #work
+npm run query -- search "alpha" --where '{"status":"active"}' # Filtered by frontmatter
 
 # Read examples
-npm run query -- read "note1" "folder/note2"           # Read multiple notes
+npm run query -- read "note1" "folder/note2"           # Read multiple notes ({ notes, errors })
 npm run query -- --verbose search "pattern"            # Verbose mode
 
 # Knowledge-base examples
@@ -324,6 +349,9 @@ npm run query -- related "projects/alpha"              # Notes related to alpha
 npm run query -- related "projects/alpha" --limit 5    # Top 5 related notes
 npm run query -- frontmatter "projects/alpha"          # Just the frontmatter
 npm run query -- stats                                  # Whole-vault statistics
+npm run query -- vault-issues orphans                    # Notes with no in/outbound links
+npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
+npm run query -- files --folder assets --extension png  # Non-markdown files (attachments)
 npm run query -- properties                             # Frontmatter schema
 npm run query -- property-values status                 # Distinct values of a key
 npm run query -- query --where '{"status":"active","priority":{"gt":3}}'

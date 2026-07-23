@@ -8,10 +8,12 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 - **Ranked Search**: BM25-ranked full-text search — most relevant notes first, with a matched snippet
 - **Read Notes**: Parse and extract content, metadata, and tags from notes
 - **List Notes**: Discover the vault as lightweight headers — a table of contents for agents
+- **List Files**: Discover non-markdown files (attachments, images, PDFs), filterable by folder and extension
 - **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
 - **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
 - **Related Notes**: Associative recall — rank the notes most related to a given one (shared tags + link graph), no embeddings required
 - **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter; read a note's frontmatter alone or get whole-vault stats
+- **Vault Hygiene**: Drill down from whole-vault stats into the actual orphaned notes and broken wikilinks
 - **Property Search**: Discover the vault's frontmatter schema, list a property's distinct values, and query notes by frontmatter condition (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `exists`, `contains`)
 - **Write & Edit** (opt-in): Create, overwrite, append, prepend, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
 - **Structure-aware edits**: Add/remove tags, set frontmatter, add/remove/rename frontmatter properties, add/append/replace sections, and literal find/replace patches without rewriting the whole note — saving agent tokens
@@ -100,11 +102,15 @@ npm run query -- search "pattern.*spans.*lines" --multiline
 # Search with custom context lines (default: 5)
 npm run query -- search "pattern" --context 10
 
+# Search scoped to a folder, tags, or frontmatter condition
+npm run query -- search "kubernetes" --tag work --match all
+npm run query -- search "alpha" --where '{"status":"active"}'
+
 # BM25-ranked full-text search (most relevant notes first)
 npm run query -- search-ranked "kubernetes networking"
 npm run query -- search-ranked "kubernetes networking" --limit 5
 
-# Read specific notes
+# Read specific notes (returns { notes, errors } — one bad path won't fail the batch)
 npm run query -- read "daily-notes/2024-01-15"
 npm run query -- read "note1" "folder/note2"
 
@@ -133,6 +139,13 @@ npm run query -- related "projects/alpha" --limit 5
 # Read just a note's frontmatter, or summarize the whole vault
 npm run query -- frontmatter "projects/alpha"
 npm run query -- stats
+
+# Vault hygiene: orphaned notes and broken wikilinks (drill-down from stats)
+npm run query -- vault-issues orphans
+npm run query -- vault-issues unresolved_links --limit 50
+
+# List non-markdown files (attachments/images), optionally scoped/filtered
+npm run query -- files --folder assets --extension png
 
 # Frontmatter schema, distinct values, and condition queries
 npm run query -- properties
@@ -212,6 +225,10 @@ Search through markdown files in your vault using ripgrep patterns.
 - `context_lines` (number, optional): Number of context lines to show (default: 5, max: 100)
 - `limit` (number, optional): Maximum number of files to return (default: 20, 0 = unlimited — no hard maximum)
 - `max_matches_per_file` (number, optional): Maximum matches to return per file (default: 20, 0 = unlimited)
+- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
+- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
+- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
+- `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
 
 **Returns:** An object bounding the result set:
 - `results`: Array of search results, each with `path` (relative, without .md) and `matches` (line numbers + context)
@@ -219,6 +236,8 @@ Search through markdown files in your vault using ripgrep patterns.
 - `files_returned`: number of files in `results`
 - `files_omitted`: matching files seen beyond `limit` and not returned
 - `matches_capped_in`: paths of files whose matches were capped
+
+When `folder`/`tags`/`where` are given, the candidate notes are resolved from the shared index first and ripgrep runs only over those files (chunked for large vaults); a filter matching zero notes returns empty without invoking ripgrep.
 
 ### search_notes_ranked
 
@@ -241,11 +260,15 @@ Read and parse one or more notes from your vault.
 **Parameters:**
 - `paths` (array, required): Array of relative note paths (with or without .md extension, max 50)
 
-**Returns:** Array of note objects with:
-- `path`: Relative path without .md extension (same identity field as the header tools)
-- `contents`: Markdown body verbatim (frontmatter removed; inline `#tags` in the body are preserved)
-- `frontmatter`: Parsed frontmatter as JSON object (same field name as `get_frontmatter`)
-- `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags`
+**Returns:** `{ notes, errors }`
+- `notes`: Array of note objects for every path read successfully, each with:
+  - `path`: Relative path without .md extension (same identity field as the header tools)
+  - `contents`: Markdown body verbatim (frontmatter removed; inline `#tags` in the body are preserved)
+  - `frontmatter`: Parsed frontmatter as JSON object (same field name as `get_frontmatter`)
+  - `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags`
+- `errors`: `[{ path, error }]` for paths that couldn't be read (missing or too large) — one bad path no longer fails the whole batch
+
+A path-traversal attempt still errors the entire call; only missing/oversized files are reported per-path in `errors`.
 
 ### list_notes
 
@@ -351,6 +374,31 @@ Summarize the whole vault in a single call, derived entirely from the shared ind
 **Parameters:** none
 
 **Returns:** `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with neither inbound nor outbound resolved links; the time bounds are ISO timestamps (`null` for an empty vault).
+
+### list_vault_issues
+
+Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
+
+**Parameters:**
+- `kind` (string, required): `"orphans"` or `"unresolved_links"`
+- `limit` (number, optional): Cap on the number of returned rows/headers
+
+**Returns:** Shape depends on `kind`:
+- `"orphans"`: Array of note headers (same shape as `list_notes`) — notes with no inbound and no outbound resolved links (the same predicate behind `get_vault_stats`'s `orphan_notes`)
+- `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing
+
+The `orphans` array length equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links` equals `get_vault_stats`'s `unresolved_links` count (both before `limit` is applied). Index-backed.
+
+### list_files
+
+List non-markdown files in the vault (attachments, images, PDFs) — the counterpart to `list_notes` for everything it deliberately excludes.
+
+**Parameters:**
+- `folder` (string, optional): Restrict to files under this folder (relative to the vault root)
+- `extension` (string, optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`)
+- `limit` (number, optional): Maximum number of files to return
+
+**Returns:** Array of `{ path, size, modified, extension }` — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot. Markdown files are never returned; does not touch the vault index.
 
 ### list_properties
 
@@ -676,7 +724,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`).
 
 ## Acknowledgments
 
