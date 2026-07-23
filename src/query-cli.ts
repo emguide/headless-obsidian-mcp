@@ -128,7 +128,7 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await replaceNoteSection(VAULT_PATH!, args);
     } else if (toolName === "list_properties") {
       result = await listProperties(VAULT_PATH!, args);
-    } else if (toolName === "get_property_values") {
+    } else if (toolName === "list_property_values") {
       result = await getPropertyValues(VAULT_PATH!, args);
     } else if (toolName === "query_notes") {
       result = await queryNotes(VAULT_PATH!, args);
@@ -703,7 +703,7 @@ program
   .option("-o, --offset <n>", "Rows to skip before the window (pagination)", (v) => parseInt(v, 10))
   .action(async (key: string, options: any, command: Command) => {
     await queryTool(
-      "get_property_values",
+      "list_property_values",
       { key, limit: options.limit, ...(options.offset !== undefined && { offset: options.offset }) },
       command.parent?.opts().verbose
     );

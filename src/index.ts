@@ -437,7 +437,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: "get_property_values",
+        name: "list_property_values",
         description: "List the distinct values of one frontmatter property with the number of notes each appears in, most frequent first. Array-valued properties count each element. A faceted index for a single key. Returns { key, results, returned, omitted, truncated }: results is the value/count rows, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped rows (omitted > 0).",
         inputSchema: {
           type: "object",
@@ -941,7 +941,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
-      case "get_property_values": {
+      case "list_property_values": {
         const result = await getPropertyValues(VAULT_PATH, (args ?? {}) as unknown as PropertyValuesParamsRead);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }

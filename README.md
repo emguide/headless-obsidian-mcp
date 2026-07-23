@@ -233,6 +233,18 @@ The query tool calls the MCP server tools directly and returns the raw JSON resp
 
 ## Tools
 
+### Naming conventions
+
+Tool names follow a fixed verb taxonomy — a new tool reuses an existing verb rather than coining a synonym, so the name predicts the tool's scope and addressing:
+
+- **`get_`** — one addressed thing: a note by path (`get_links`, `get_outline`, `get_frontmatter`, `get_property`, `get_related_notes`) or the vault as a single object (`get_vault_stats`).
+- **`list_`** — enumerate a vault-wide collection, optionally scoped or parameterized (`list_notes`, `list_files`, `list_folders`, `list_tags`, `list_properties`, `list_property_values`, `list_recent_notes`, `list_vault_issues`). A required argument does not demote it to `get_`.
+- **`search_`** text-queries content; **`read_`** returns body text; **`resolve_`** maps a human name to a path.
+- **`find_by_X`** retrieves by one named criterion (`find_by_tag`); **`query_`** retrieves by a condition object (`query_notes`), whose `where` is the single condition language reused by every note-filtering tool.
+- **Writes** name the mutation. `_property_values` is per-note under `add_`/`remove_` and vault-wide under `list_`; the verb, not the noun, carries the scope.
+
+`list_notes`, `find_by_tag`, `query_notes`, and `list_recent_notes` are deliberately separate: they match different data (unified tags vs. frontmatter-only) and carry different semantics (recency ordering), so they are not merged. A new note-selecting tool reuses the `folder` / `tags` / `where` / `match` filters; a new vault-hygiene check becomes a `kind` of `list_vault_issues`.
+
 **Pagination (`offset`).** Every envelope-returning tool (all the list-style tools plus `search_notes` and `search_notes_ranked`) accepts an optional `offset` (default `0`). The returned rows are a window `[offset, offset + limit)` over the full result set. The envelope reports both edges of what was dropped: `skipped` (rows before the window, from `offset`) and `omitted` (rows after it, from `limit`), so `total = skipped + returned + omitted` and `truncated` (`omitted > 0`) still answers "is there a next page?". An `offset` past the end is not an error (empty `results`, `skipped = total`); `offset` must be a non-negative integer. `search_notes` uses the parallel field names `files_skipped` / `files_omitted` over files. `search_notes_ranked` keeps its 100-row cap on a single `limit`, but `offset` pages past it — `offset: 100, limit: 100` returns ranked hits 101–200 without re-fetching everything via `limit: 0`.
 
 ### search_notes
@@ -463,7 +475,7 @@ The vault's frontmatter schema — every property key in use, with how many note
 
 **Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
 
-### get_property_values
+### list_property_values
 
 Distinct values of one frontmatter property, with per-note counts — a faceted breakdown of every value a key takes across the vault.
 
@@ -834,7 +846,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `get_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`).
 
 ## Acknowledgments
 

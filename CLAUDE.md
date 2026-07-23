@@ -15,6 +15,20 @@ Anything beyond trivial work (a single-line fix or a pure question) should be do
 
 ## Tools
 
+### Naming conventions
+
+Tool names follow a fixed verb taxonomy. A new tool reuses an existing verb; it does not coin a synonym. The verb encodes the tool's scope and addressing so an agent can predict behavior from the name alone.
+
+- **`get_`** — return one addressed thing: a note by path (`get_links`, `get_outline`, `get_frontmatter`, `get_property`, `get_related_notes`), or the vault as a single object (`get_vault_stats`). A collection-valued return is fine when it is *about* one addressed note (`get_related_notes`); it is not `get_` when it enumerates a vault-wide collection — that is `list_`.
+- **`list_`** — enumerate a vault-wide collection, optionally scoped or parameterized: `list_notes`, `list_files`, `list_folders`, `list_tags`, `list_properties`, `list_property_values`, `list_recent_notes`, `list_vault_issues`. A required argument does not demote it to `get_` (`list_property_values(key)`, `list_vault_issues(kind)`).
+- **`search_`** — text query over content (`search_notes`, `search_notes_ranked`). **`read_`** — return body text from disk (`read_notes`, `read_section`). **`resolve_`** — map a human name to a canonical path (`resolve_note`).
+- **`find_by_X`** — retrieval by one named criterion (`find_by_tag`). **`query_`** — retrieval by a condition object (`query_notes`); `where` is the single condition language, anchored by `query_notes`, and reused verbatim by every tool that filters notes.
+- **Writes** name the mutation: `write/append/prepend/delete/move`, `add/remove_tag`, `set_frontmatter`, `add/remove_property_values`, `rename_property`, `add/append_to/replace_section`, `patch_note`, `bulk_edit`. The `_property_values` noun is per-note when prefixed `add_`/`remove_` (writes) and vault-wide when prefixed `list_` (read) — the verb, not the noun, carries the scope.
+
+**No merges.** `list_notes` / `find_by_tag` / `query_notes` / `list_recent_notes` are distinct intents, not one query tool: `find_by_tag` matches the unified inline-plus-frontmatter tag set while `query_notes` sees frontmatter only, and `list_recent_notes` carries ordering semantics (`date_field`, mtime) that `query_notes` has no vocabulary for. The separation is structural.
+
+**Extending the surface.** A new note-selecting tool reuses the `folder` / `tags` / `where` / `match` filter vocabulary rather than inventing its own. A new vault-hygiene finding becomes a `kind` of `list_vault_issues`, not a new tool.
+
 **Pagination (`offset`).** Every envelope-returning tool (all the list-style
 tools plus `search_notes` and `search_notes_ranked`) accepts an optional
 `offset` (default `0`): the rows are a window `[offset, offset + limit)` over the
@@ -183,7 +197,7 @@ limit: 100` returns ranked hits 101–200 without re-fetching via `limit: 0`.
 - **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`). `offset` (optional): Rows to skip before the window, for pagination (default `0`).
 - **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set. Index-backed.
 
-### get_property_values
+### list_property_values
 - **Purpose**: Distinct values of one frontmatter property with per-note counts — a faceted breakdown, e.g. to see every `status` value in use.
 - **Input**: `key` (required), `limit` (optional, default 100; `limit: 0` = unbounded), `offset` (optional, default `0` — rows to skip before the window, for pagination)
 - **Output**: `{ key, results, returned, skipped, omitted, truncated }` — `results` is `[{ value, count }]`, sorted by `count` descending then value, bounded by `limit`. Array-valued properties count each element once per note. Index-backed.
@@ -371,7 +385,7 @@ refused rather than proceeding without the safety net. Implemented in
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
 `list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`,
-`query_notes`, `list_properties`, `get_property_values`, `get_outline`,
+`query_notes`, `list_properties`, `list_property_values`, `get_outline`,
 `list_vault_issues`, `resolve_note`) share an
 in-memory index (`src/tools/vault-index.ts`) that parses each note once
 (frontmatter, tags, wikilinks, headings, aliases) and caches the result. Each tool call
