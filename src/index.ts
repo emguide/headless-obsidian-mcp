@@ -57,6 +57,7 @@ import {
   PropertyValuesParams,
   RenamePropertyParams,
 } from "./tools/write.js";
+import { bulkEdit, BulkEditParams } from "./tools/bulk.js";
 import {
   SearchNotesParams,
   ListNotesParams,
@@ -584,6 +585,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["path", "heading", "content"]
         }
+      },
+      {
+        name: "bulk_edit",
+        description: "Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot. Select notes by an explicit `paths` array OR a filter (`where`/`tags`, optionally scoped by `folder`) — not both. Pass `dry_run:true` to preview the matched notes without writing. Pass `expected_count` to abort if the match count differs (guards a drifting filter). Operations are applied in order to each note; each note's result is reported independently (a per-note failure does not sink the batch). Only frontmatter ops are supported: add_tag, remove_tag, set_frontmatter, add_property_values, remove_property_values, rename_property.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            select: {
+              type: "object",
+              description: "Note selection. Provide either `paths` OR a filter (`where`/`tags`), not both.",
+              properties: {
+                paths: { type: "array", items: { type: "string" }, description: "Explicit relative note paths (with or without .md)" },
+                where: { type: "object", description: "Frontmatter conditions (same syntax as query_notes)" },
+                tags: { type: "array", items: { type: "string" }, description: "Tags to match (with or without leading #)" },
+                match: { type: "string", enum: ["all", "any"], description: "How where/tags combine (default: all)" },
+                folder: { type: "string", description: "Restrict a filter to notes under this folder" },
+                limit: { type: "number", description: "Maximum notes to match" }
+              }
+            },
+            operations: {
+              type: "array",
+              description: "Frontmatter mutations applied in order to each matched note.",
+              items: {
+                type: "object",
+                properties: {
+                  op: { type: "string", enum: ["add_tag", "remove_tag", "set_frontmatter", "add_property_values", "remove_property_values", "rename_property"] },
+                  tags: { type: "array", items: { type: "string" } },
+                  set: { type: "object" },
+                  unset: { type: "array", items: { type: "string" } },
+                  key: { type: "string" },
+                  values: { type: "array" },
+                  from: { type: "string" },
+                  to: { type: "string" }
+                },
+                required: ["op"]
+              }
+            },
+            dry_run: { type: "boolean", description: "Preview matched notes without writing (default: false)" },
+            expected_count: { type: "number", description: "Abort before writing if the match count differs" }
+          },
+          required: ["select", "operations"]
+        }
       }
     ];
 
@@ -835,6 +878,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "replace_section": {
         const result = await replaceNoteSection(VAULT_PATH, (args ?? {}) as unknown as SectionEditParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "bulk_edit": {
+        const result = await bulkEdit(VAULT_PATH, (args ?? {}) as unknown as BulkEditParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

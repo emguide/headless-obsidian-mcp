@@ -38,6 +38,7 @@ export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "add_section",
   "append_to_section",
   "replace_section",
+  "bulk_edit",
 ]);
 
 /** Whether a tool name mutates the vault. */
@@ -60,7 +61,7 @@ async function fileExists(fullPath: string): Promise<boolean> {
 }
 
 /** Resolve + path-guard a note path and write it, creating parent dirs. */
-async function writeResolved(
+export async function writeResolved(
   vaultPath: string,
   notePath: string,
   content: string
