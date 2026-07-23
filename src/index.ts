@@ -20,6 +20,8 @@ import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
 import { getVaultStats } from "./tools/stats.js";
+import { listVaultIssues } from "./tools/vault-issues.js";
+import { listFiles } from "./tools/files.js";
 import {
   listProperties,
   getPropertyValues,
@@ -70,6 +72,8 @@ import {
   QueryNotesParams,
   GetPropertyParams,
   ReadSectionParams,
+  ListVaultIssuesParams,
+  ListFilesParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -95,7 +99,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const tools = [
       {
         name: "search_notes",
-        description: "Search through Obsidian notes using ripgrep. Returns matching notes with context lines, bounded by file and per-file match caps to avoid flooding context. Returns { results, truncated, files_returned, files_omitted, matches_capped_in }.",
+        description: "Search notes with ripgrep, optionally scoped by folder, tags, or a frontmatter where filter (index-resolved candidates, then rg over just those notes). Returns { results, truncated, files_returned, files_omitted, matches_capped_in }.",
         inputSchema: {
           type: "object",
           properties: {
@@ -126,7 +130,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             max_matches_per_file: {
               type: "number",
               description: "Max matches to return per file (default: 20, 0 = unlimited)"
-            }
+            },
+            folder: { type: "string", description: "Restrict to notes under this folder (relative to the vault root)." },
+            tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
+            match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
+            where: { type: "object", description: "Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax)." }
           },
           required: ["pattern"]
         }
@@ -152,7 +160,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "read_notes",
-        description: "Read one or more Obsidian notes by their relative paths. Returns parsed note data: path, contents, frontmatter, and tags.",
+        description: "Read one or more Obsidian notes by their relative paths. Returns { notes, errors }: notes is the array of parsed notes (path, contents, frontmatter, tags); errors lists any paths that could not be read (missing/too large), so one bad path never fails the batch. Path traversal still errors the whole call.",
         inputSchema: {
           type: "object",
           properties: {
@@ -179,6 +187,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Maximum number of notes to return"
             }
+          }
+        }
+      },
+      {
+        name: "list_files",
+        description: "List non-markdown files in the vault (attachments, images, PDFs) so an agent can find a file to move. Returns { path, size, modified, extension } per file. Optional folder/extension/limit filters. Does not include notes (use list_notes) and never touches the index.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            folder: { type: "string", description: "Restrict to files under this folder (relative to the vault root)." },
+            extension: { type: "string", description: "Filter by extension; leading dot optional, case-insensitive (e.g. 'png')." },
+            limit: { type: "number", description: "Maximum number of files to return." }
           }
         }
       },
@@ -377,6 +397,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "list_vault_issues",
+        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links). Index-backed.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            kind: {
+              type: "string",
+              enum: ["orphans", "unresolved_links"],
+              description: "Which issue list to return."
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of rows/headers to return."
+            }
+          },
+          required: ["kind"]
+        }
+      },
+      {
         name: "write_note",
         description: "Create a note, or overwrite an existing one. Refuses to overwrite unless overwrite:true is passed. Use the structure-aware tools (add_section, set_frontmatter, add_tag) for surgical edits instead of rewriting a whole note.",
         inputSchema: {
@@ -417,7 +456,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "delete_note",
-        description: "Delete a note. Trash-safe by default: the note is moved to the vault's .trash folder so the deletion is recoverable. Pass permanent:true to unlink it outright. Errors if the note does not exist.",
+        description: "Delete a note. Trash-safe by default (moved to .trash, recoverable); pass permanent:true to unlink. Returns { path, deleted, trashed, trash_path?, dangled_backlinks } where dangled_backlinks lists the notes that linked to the deleted note and now have a broken [[wikilink]].",
         inputSchema: {
           type: "object",
           properties: {
@@ -681,12 +720,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!Array.isArray(paths) || paths.length === 0) {
           throw new Error("Paths array is required for read_notes");
         }
-        const notes = await readNotes(VAULT_PATH, paths);
+        const result = await readNotes(VAULT_PATH, paths);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(notes)
+              text: JSON.stringify(result)
             }
           ]
         };
@@ -697,6 +736,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{ type: "text", text: JSON.stringify(results) }]
         };
+      }
+
+      case "list_files": {
+        const result = await listFiles(VAULT_PATH, (args ?? {}) as ListFilesParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
       case "get_links": {
@@ -794,6 +838,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_vault_stats": {
         const result = await getVaultStats(VAULT_PATH);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "list_vault_issues": {
+        const result = await listVaultIssues(VAULT_PATH, (args ?? {}) as unknown as ListVaultIssuesParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

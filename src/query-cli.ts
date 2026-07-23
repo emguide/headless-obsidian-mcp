@@ -15,6 +15,8 @@ import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
 import { getVaultStats } from "./tools/stats.js";
+import { listVaultIssues } from "./tools/vault-issues.js";
+import { listFiles } from "./tools/files.js";
 import {
   writeNote,
   appendNote,
@@ -85,6 +87,10 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await getFrontmatter(VAULT_PATH!, args.path);
     } else if (toolName === "get_vault_stats") {
       result = await getVaultStats(VAULT_PATH!);
+    } else if (toolName === "list_vault_issues") {
+      result = await listVaultIssues(VAULT_PATH!, args);
+    } else if (toolName === "list_files") {
+      result = await listFiles(VAULT_PATH!, args);
     } else if (toolName === "write_note") {
       result = await writeNote(VAULT_PATH!, args);
     } else if (toolName === "append_note") {
@@ -158,6 +164,10 @@ program
   .option("-c, --context <lines>", "Number of context lines to show", "5")
   .option("-l, --limit <n>", "Max files to return (default: 20, 0 = unlimited)")
   .option("--max-matches <n>", "Max matches per file (default: 20, 0 = unlimited)")
+  .option("--folder <folder>", "Restrict to notes under this folder")
+  .option("--tag <tag...>", "Restrict to notes with these tags (repeatable)")
+  .option("--match <mode>", "tags match mode: any (default) or all")
+  .option("--where <json>", "Frontmatter filter as JSON")
   .action(async (pattern: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const context = parseInt(options.context, 10);
@@ -168,7 +178,11 @@ program
       ...(options.multiline && { multiline: true }),
       ...(context !== 5 && { context_lines: context }),
       ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
-      ...(options.maxMatches !== undefined && { max_matches_per_file: parseInt(options.maxMatches, 10) })
+      ...(options.maxMatches !== undefined && { max_matches_per_file: parseInt(options.maxMatches, 10) }),
+      ...(options.folder && { folder: options.folder }),
+      ...(options.tag && { tags: options.tag }),           // commander collects repeated --tag into an array
+      ...(options.match && { match: options.match }),
+      ...(options.where && { where: JSON.parse(options.where) }),
     };
     await queryTool("search_notes", args, verbose);
   });
@@ -312,6 +326,35 @@ program
   .action(async (_options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     await queryTool("get_vault_stats", {}, verbose);
+  });
+
+program
+  .command("vault-issues <kind>")
+  .description("List orphans or unresolved_links")
+  .option("-l, --limit <n>", "Maximum number of rows to return")
+  .action(async (kind: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      kind,
+      ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
+    };
+    await queryTool("list_vault_issues", args, verbose);
+  });
+
+program
+  .command("files")
+  .description("List non-markdown files (attachments)")
+  .option("-f, --folder <folder>", "Restrict to files under this folder")
+  .option("-e, --extension <ext>", "Filter by extension (dot optional)")
+  .option("-l, --limit <n>", "Maximum number of files to return")
+  .action(async (options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      ...(options.folder && { folder: options.folder }),
+      ...(options.extension && { extension: options.extension }),
+      ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
+    };
+    await queryTool("list_files", args, verbose);
   });
 
 function readContent(inline: string | undefined, file: string | undefined): string {

@@ -33,14 +33,6 @@ export function assertVaultPath(vaultPath: string): void {
   }
 }
 
-/** Normalize a filesystem path to a vault-relative, forward-slash, no-.md name. */
-function toVaultName(resolvedVault: string, fullPath: string): string {
-  return relative(resolvedVault, fullPath)
-    .split(sep)
-    .join("/")
-    .replace(/\.md$/, "");
-}
-
 /**
  * Resolve a user-supplied note path to an absolute path inside the vault,
  * guarding against path-traversal escapes. Mirrors the checks used by
@@ -84,7 +76,10 @@ export function resolveVaultFile(vaultPath: string, filePath: string): string {
  * and machinery directories. Filesystem metadata is collected but file
  * contents are not read. Results are sorted by path for deterministic output.
  */
-export async function walkVault(vaultPath: string): Promise<VaultFile[]> {
+export async function walkVault(
+  vaultPath: string,
+  keep: (name: string) => boolean = (name) => name.endsWith(".md")
+): Promise<VaultFile[]> {
   assertVaultPath(vaultPath);
   const resolvedVault = resolve(vaultPath);
   const results: VaultFile[] = [];
@@ -102,7 +97,7 @@ export async function walkVault(vaultPath: string): Promise<VaultFile[]> {
           continue;
         }
         await walk(join(dir, entry.name));
-      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      } else if (entry.isFile() && keep(entry.name)) {
         const full = join(dir, entry.name);
         let info;
         try {
@@ -110,12 +105,11 @@ export async function walkVault(vaultPath: string): Promise<VaultFile[]> {
         } catch {
           continue;
         }
-        results.push({
-          path: toVaultName(resolvedVault, full),
-          fullPath: full,
-          size: info.size,
-          mtime: info.mtime,
-        });
+        // Markdown callers want the .md stripped (existing behavior); other
+        // callers want the literal path. Strip only for .md files.
+        const rel = relative(resolvedVault, full).split(sep).join("/");
+        const path = entry.name.endsWith(".md") ? rel.replace(/\.md$/, "") : rel;
+        results.push({ path, fullPath: full, size: info.size, mtime: info.mtime });
       }
     }
   }

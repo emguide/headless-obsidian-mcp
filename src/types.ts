@@ -10,6 +10,14 @@ export interface SearchNotesParams {
   limit?: number;
   /** Max matches returned per file. Default 20; 0 = unlimited. */
   max_matches_per_file?: number;
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Restrict to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
+  /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
+  where?: Record<string, unknown>;
 }
 
 export interface NoteMetadata {
@@ -21,6 +29,13 @@ export interface Note {
   contents: string;
   frontmatter: NoteMetadata;
   tags: string[];
+}
+
+/** Result of a batch read: successful notes plus per-path failures. */
+export interface ReadNotesResult {
+  notes: Note[];
+  /** One entry per path that could not be read (missing, too large, wrong type). */
+  errors: Array<{ path: string; error: string }>;
 }
 
 export interface SearchResult {
@@ -157,6 +172,21 @@ export interface VaultStats {
   first_modified: string | null;
 }
 
+/** Parameters for list_vault_issues. */
+export interface ListVaultIssuesParams {
+  kind: "orphans" | "unresolved_links";
+  /** Cap on the number of returned rows/headers. */
+  limit?: number;
+}
+
+/** Unresolved outbound links from one source note. */
+export interface UnresolvedLinkGroup {
+  /** Path of the note containing the broken links. */
+  source: string;
+  /** Raw link targets that do not resolve to any note. */
+  targets: string[];
+}
+
 export interface RecentNotesParams {
   /** Maximum number of notes to return. Default: 20. */
   limit?: number;
@@ -245,4 +275,26 @@ export interface SectionResult {
   level: number;
   /** Heading line + body slice, verbatim. Frontmatter excluded. */
   content: string;
+}
+
+/** Parameters for list_files (non-markdown file discovery). */
+export interface ListFilesParams {
+  /** Restrict to files under this folder (relative to the vault root). */
+  folder?: string;
+  /** Filter by extension; leading dot optional, case-insensitive (e.g. "png"). */
+  extension?: string;
+  /** Maximum number of files to return. */
+  limit?: number;
+}
+
+/** A non-markdown vault file with lightweight filesystem metadata. */
+export interface VaultFileEntry {
+  /** Vault-relative path, forward-slash, extension preserved. */
+  path: string;
+  /** File size in bytes. */
+  size: number;
+  /** Last modified time (ISO 8601). */
+  modified: string;
+  /** Lowercased extension without the dot (e.g. "png"). */
+  extension: string;
 }
