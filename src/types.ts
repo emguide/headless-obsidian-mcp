@@ -211,7 +211,7 @@ export interface VaultStats {
 
 /** Parameters for list_vault_issues. */
 export interface ListVaultIssuesParams {
-  kind: "orphans" | "unresolved_links";
+  kind: "orphans" | "unresolved_links" | "broken_anchors";
   /** Cap on the number of returned rows/headers. */
   limit?: number;
 }
@@ -222,6 +222,12 @@ export interface UnresolvedLinkGroup {
   source: string;
   /** Raw link targets that do not resolve to any note. */
   targets: string[];
+}
+
+/** A source note and its `[[note#heading]]` anchors that match no heading. */
+export interface BrokenAnchorGroup {
+  source: string;
+  targets: { target: string; anchor: string }[];
 }
 
 export interface RecentNotesParams {
