@@ -228,12 +228,13 @@ export class VaultIndex {
   async searchRanked(
     query: string,
     limit: number | undefined,
-    allowedIds?: Set<string>
+    allowedIds?: Set<string>,
+    offset = 0
   ): Promise<ListResponse<RankedSearchResult>> {
     const queryTokens = tokenize(query);
-    if (queryTokens.length === 0) return { results: [], returned: 0, omitted: 0, truncated: false };
-    if (allowedIds && allowedIds.size === 0) return { results: [], returned: 0, omitted: 0, truncated: false };
-    const { hits, total } = this.bm25.search(queryTokens, limit ?? Number.MAX_SAFE_INTEGER, allowedIds);
+    if (queryTokens.length === 0) return { results: [], returned: 0, skipped: 0, omitted: 0, truncated: false };
+    if (allowedIds && allowedIds.size === 0) return { results: [], returned: 0, skipped: 0, omitted: 0, truncated: false };
+    const { hits, total } = this.bm25.search(queryTokens, limit ?? Number.MAX_SAFE_INTEGER, allowedIds, offset);
 
     // Raw (unstemmed) query words used only to locate a snippet line.
     const rawWords = query
@@ -248,11 +249,16 @@ export class VaultIndex {
       const snippet = await this.buildSnippet(entry.fullPath, rawWords);
       results.push({ ...entryToHeader(entry), score: hit.score, snippet });
     }
+    // `skipped` = ranked hits before the window; `omitted` = ranked hits after
+    // it. Both measured against the full match count `total`.
+    const skipped = Math.min(offset, total);
+    const omitted = total - skipped - results.length;
     return {
       results,
       returned: results.length,
-      omitted: total - results.length,
-      truncated: total > results.length,
+      skipped,
+      omitted,
+      truncated: omitted > 0,
     };
   }
 

@@ -1,7 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { ListVaultIssuesParams, UnresolvedLinkGroup, NoteHeader, ListResponse } from "../types.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 
 /** Default cap on `list_vault_issues` so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
@@ -25,13 +25,14 @@ export async function listVaultIssues(
   params: ListVaultIssuesParams
 ): Promise<ListResponse<NoteHeader> | ListResponse<UnresolvedLinkGroup>> {
   assertVaultPath(vaultPath);
-  const { kind, limit } = params;
+  const { kind, limit, offset } = params;
   if (kind !== "orphans" && kind !== "unresolved_links") {
     throw new Error('kind must be "orphans" or "unresolved_links"');
   }
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
 
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
 
@@ -41,7 +42,7 @@ export async function listVaultIssues(
     const orphans = index.getEntries().filter(
       (e) => index.outbound(e.path).length === 0 && index.backlinks(e.path).length === 0
     );
-    return toListResponse(orphans.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit);
+    return toListResponse(orphans.map(entryToHeader), effectiveLimit === 0 ? undefined : effectiveLimit, offset);
   }
 
   // unresolved_links, grouped by source note (entries are already path-sorted).
@@ -53,5 +54,5 @@ export async function listVaultIssues(
       groups.push({ source: entry.path, targets });
     }
   }
-  return toListResponse(groups, effectiveLimit === 0 ? undefined : effectiveLimit);
+  return toListResponse(groups, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }

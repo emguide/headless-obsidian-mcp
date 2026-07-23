@@ -1,6 +1,6 @@
 import { assertVaultPath, walkVault } from "./vault.js";
 import { ListFilesParams, ListResponse, VaultFileEntry } from "../types.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 
 /** Default cap on `list_files` so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
@@ -20,10 +20,11 @@ export async function listFiles(
   params: ListFilesParams = {}
 ): Promise<ListResponse<VaultFileEntry>> {
   assertVaultPath(vaultPath);
-  const { folder, extension, limit } = params;
+  const { folder, extension, limit, offset } = params;
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
 
   const wantExt = extension
     ? extension.replace(/^\./, "").toLowerCase()
@@ -49,5 +50,5 @@ export async function listFiles(
   }
 
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
-  return toListResponse(out, effectiveLimit === 0 ? undefined : effectiveLimit);
+  return toListResponse(out, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }

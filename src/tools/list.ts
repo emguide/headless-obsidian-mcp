@@ -1,7 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { ListNotesParams, ListResponse, NoteHeader } from "../types.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 
 /** Default cap on `list_notes` so the first orientation call is bounded. */
 const DEFAULT_LIMIT = 100;
@@ -22,13 +22,14 @@ export async function listNotes(
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
-  const { folder, limit } = params;
+  const { folder, limit, offset } = params;
 
   // `limit: 0` is the sentinel for "unbounded"; any other non-positive or
   // non-integer value is rejected. Omitting `limit` applies DEFAULT_LIMIT.
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
 
   const index = await getIndex(vaultPath);
   let entries = index.getEntries();
@@ -45,6 +46,7 @@ export async function listNotes(
 
   return toListResponse(
     entries.map(entryToHeader),
-    effectiveLimit === 0 ? undefined : effectiveLimit
+    effectiveLimit === 0 ? undefined : effectiveLimit,
+    offset
   );
 }

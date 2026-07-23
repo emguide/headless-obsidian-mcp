@@ -134,6 +134,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Max matches to return per file (default: 20, 0 = unlimited)"
             },
+            offset: {
+              type: "number",
+              description: "Matching files to skip before the window, for pagination (default 0). Reported as files_skipped."
+            },
             folder: { type: "string", description: "Restrict to notes under this folder (relative to the vault root)." },
             tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
             match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
@@ -156,6 +160,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of results (default 100; pass 0 for unbounded; a positive limit is capped at 100).",
+            },
+            offset: {
+              type: "number",
+              description: "Ranked hits to skip before the window, for pagination (default 0). With the 100-row cap, offset: 100 reaches hits 101-200 without limit: 0.",
             },
             folder: { type: "string", description: "Restrict to notes under this folder (relative to the vault root)." },
             tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
@@ -193,6 +201,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of notes to return (default 100; pass 0 for unbounded)"
+            },
+            offset: {
+              type: "number",
+              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
             }
           }
         }
@@ -208,6 +220,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of files to return (default 100; pass 0 for unbounded)"
+            },
+            offset: {
+              type: "number",
+              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
             }
           }
         }
@@ -229,6 +245,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of folders to return (default 100; pass 0 for unbounded)"
+            },
+            offset: {
+              type: "number",
+              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
             }
           }
         }
@@ -285,10 +305,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_tags",
-        description: "List every tag used across the vault with the number of notes using it, sorted by frequency. Unifies inline #tags and frontmatter tags:. Use it to see the vault's topic index. Returns { results, returned, omitted, truncated }: results is the tag/count rows; there is no limit, so truncated is always false and results is the complete set.",
+        description: "List every tag used across the vault with the number of notes using it, sorted by frequency. Unifies inline #tags and frontmatter tags:. Use it to see the vault's topic index. Returns { results, returned, skipped, omitted, truncated }: results is the tag/count rows; there is no limit (truncated is always false), but offset can page through the full set.",
         inputSchema: {
           type: "object",
-          properties: {}
+          properties: {
+            offset: {
+              type: "number",
+              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
+            }
+          }
         }
       },
       {
@@ -310,6 +335,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of notes to return (default 100; pass 0 for unbounded)"
+            },
+            offset: {
+              type: "number",
+              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
             }
           },
           required: ["tags"]
@@ -336,6 +365,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             where: {
               type: "object",
               description: "Frontmatter equality filters, e.g. { \"status\": \"active\" }"
+            },
+            offset: {
+              type: "number",
+              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
             }
           }
         }
@@ -353,6 +386,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of related notes to return (default 100; pass 0 for unbounded)"
+            },
+            offset: {
+              type: "number",
+              description: "Rows to skip before the window, for pagination (default 0). Reported as skipped."
             }
           },
           required: ["path"]
@@ -388,11 +425,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "list_properties",
-        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties. Returns { results, returned, omitted, truncated }: results is the property rows; there is no limit, so truncated is always false and results is the complete set.",
+        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties. Returns { results, returned, skipped, omitted, truncated }: results is the property rows; there is no limit (truncated is always false), but offset can page through the full set.",
         inputSchema: {
           type: "object",
           properties: {
-            include_tags: { type: "boolean", description: "Include the tags key (default: true)" }
+            include_tags: { type: "boolean", description: "Include the tags key (default: true)" },
+            offset: { type: "number", description: "Rows to skip before the window, for pagination (default 0). Reported as skipped." }
           }
         }
       },
@@ -403,7 +441,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             key: { type: "string", description: "The frontmatter property key to facet" },
-            limit: { type: "number", description: "Maximum number of distinct values to return (default 100; pass 0 for unbounded)" }
+            limit: { type: "number", description: "Maximum number of distinct values to return (default 100; pass 0 for unbounded)" },
+            offset: { type: "number", description: "Rows to skip before the window, for pagination (default 0). Reported as skipped." }
           },
           required: ["key"]
         }
@@ -416,7 +455,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             where: { type: "object", description: "Map of property key to condition (scalar or { eq/ne/gt/gte/lt/lte/exists/contains })" },
             match: { type: "string", enum: ["all", "any"], description: "Require all (default) or any of the conditions" },
-            limit: { type: "number", description: "Maximum number of notes to return (default 100; pass 0 for unbounded)" }
+            limit: { type: "number", description: "Maximum number of notes to return (default 100; pass 0 for unbounded)" },
+            offset: { type: "number", description: "Rows to skip before the window, for pagination (default 0). Reported as skipped." }
           },
           required: ["where"]
         }
@@ -455,6 +495,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             limit: {
               type: "number",
               description: "Maximum number of rows/groups to return (default 100; pass 0 for unbounded). For unresolved_links, this counts groups (source notes), not individual targets."
+            },
+            offset: {
+              type: "number",
+              description: "Rows/groups to skip before the window, for pagination (default 0). Reported as skipped."
             }
           },
           required: ["kind"]
@@ -831,7 +875,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "list_tags": {
-        const results = await listTags(VAULT_PATH);
+        const results = await listTags(VAULT_PATH, (args?.offset as number | undefined));
         return {
           content: [{ type: "text", text: JSON.stringify(results) }]
         };

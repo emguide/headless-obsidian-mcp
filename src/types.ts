@@ -18,6 +18,8 @@ export interface SearchNotesParams {
   match?: "any" | "all";
   /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
   where?: Record<string, unknown>;
+  /** Distinct matching files to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 export interface NoteMetadata {
@@ -56,25 +58,32 @@ export interface SearchNotesResponse {
   truncated: boolean;
   /** Number of files in `results` (== results.length). */
   files_returned: number;
-  /** Distinct matching files seen beyond `limit` and not returned. */
+  /** Distinct matching files skipped before the window by `offset`. */
+  files_skipped: number;
+  /** Distinct matching files seen beyond the window (`limit`) and not returned. */
   files_omitted: number;
   /** Paths of files whose matches were capped by max_matches_per_file. */
   matches_capped_in: string[];
 }
 
 /**
- * The self-describing shape every list-style tool returns: the (possibly
- * limited) rows plus enough metadata to tell a complete result from a
- * truncated one. `omitted = total - returned`; `truncated = omitted > 0`.
+ * The self-describing shape every list-style tool returns: a window of rows
+ * plus enough metadata to tell a complete result from a paged one. A window
+ * `[offset, offset + limit)` is sliced from the full set: `skipped` rows fall
+ * before it, `omitted` rows fall after it. `total = skipped + returned +
+ * omitted`; `truncated = omitted > 0` (so `truncated` answers "is there a next
+ * page?"). Skipping forward via `offset` never sets `truncated`.
  */
 export interface ListResponse<T> {
   /** The returned rows (at most `limit` when a limit was applied). */
   results: T[];
   /** Number of rows in `results` (== results.length). */
   returned: number;
-  /** Rows dropped by the limit (0 when nothing was dropped). */
+  /** Rows dropped BEFORE the window by `offset` (0 when offset is 0). */
+  skipped: number;
+  /** Rows dropped AFTER the window by `limit` (0 when nothing was dropped past the window). */
   omitted: number;
-  /** True when at least one row was omitted. */
+  /** True when at least one row was omitted past the window. */
   truncated: boolean;
 }
 
@@ -107,6 +116,8 @@ export interface ListNotesParams {
   folder?: string;
   /** Maximum number of notes to return. */
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 /** One folder in the vault, as reported by list_folders. */
@@ -128,6 +139,8 @@ export interface ListFoldersParams {
   depth?: number;
   /** Maximum number of folders to return. */
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 export interface LinksResult {
@@ -153,6 +166,8 @@ export interface FindByTagParams {
   match?: "all" | "any";
   /** Maximum number of notes to return. */
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 export interface RelatedNotesParams {
@@ -160,6 +175,8 @@ export interface RelatedNotesParams {
   path: string;
   /** Maximum number of related notes to return. Default 100; 0 = unbounded. */
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 /**
@@ -214,6 +231,8 @@ export interface ListVaultIssuesParams {
   kind: "orphans" | "unresolved_links";
   /** Cap on the number of returned rows/headers. */
   limit?: number;
+  /** Rows/groups to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 /** Unresolved outbound links from one source note. */
@@ -233,6 +252,8 @@ export interface RecentNotesParams {
   date_field?: string;
   /** Frontmatter conditions, e.g. { status: "active" } or { priority: { gt: 3 } }. */
   where?: Record<string, Condition>;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 export interface RankedSearchParams {
@@ -248,6 +269,8 @@ export interface RankedSearchParams {
   match?: "any" | "all";
   /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
   where?: Record<string, Condition>;
+  /** Ranked hits to skip before the window, for pagination (reaches hits past the cap). Default 0. */
+  offset?: number;
 }
 
 /** A ranked search hit: a note header plus its relevance score and a snippet. */
@@ -291,11 +314,15 @@ export interface PropertySchemaEntry {
 export interface ListPropertiesParams {
   /** Include the `tags` key (already covered by list_tags). Default: true. */
   include_tags?: boolean;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 export interface PropertyValuesParamsRead {
   key: string;
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 export interface PropertyValueCount {
@@ -307,6 +334,8 @@ export interface QueryNotesParams {
   where: Record<string, Condition>;
   match?: "all" | "any";
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 export interface GetPropertyParams {
@@ -353,6 +382,8 @@ export interface ListFilesParams {
   extension?: string;
   /** Maximum number of files to return. */
   limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
 }
 
 /** A non-markdown vault file with lightweight filesystem metadata. */

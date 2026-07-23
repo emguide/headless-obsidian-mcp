@@ -16,7 +16,7 @@ export async function searchNotesRanked(
   params: RankedSearchParams
 ): Promise<ListResponse<RankedSearchResult>> {
   assertVaultPath(vaultPath);
-  const { query, limit, folder, tags, where, match } = params;
+  const { query, limit, folder, tags, where, match, offset } = params;
 
   if (!query || typeof query !== "string" || !query.trim()) {
     throw new Error("query must be a non-empty string");
@@ -27,6 +27,9 @@ export async function searchNotesRanked(
 
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
+  }
+  if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
+    throw new Error("offset must be a non-negative integer");
   }
 
   let effectiveLimit: number | undefined;
@@ -42,7 +45,7 @@ export async function searchNotesRanked(
 
   const hasFilter = folder !== undefined || tags !== undefined || where !== undefined;
   if (!hasFilter) {
-    return index.searchRanked(query, effectiveLimit);
+    return index.searchRanked(query, effectiveLimit, undefined, offset);
   }
 
   validateCandidateFilter({ tags, where, match });
@@ -53,8 +56,8 @@ export async function searchNotesRanked(
     tagMatch: match ?? "any",
     whereMatch: "all", // mirror search_notes: match governs only tags
   });
-  if (entries.length === 0) return { results: [], returned: 0, omitted: 0, truncated: false };
+  if (entries.length === 0) return { results: [], returned: 0, skipped: 0, omitted: 0, truncated: false };
 
   const allowedIds = new Set(entries.map((e) => e.path));
-  return index.searchRanked(query, effectiveLimit, allowedIds);
+  return index.searchRanked(query, effectiveLimit, allowedIds, offset);
 }

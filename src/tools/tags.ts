@@ -1,7 +1,7 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { TagCount, FindByTagParams, NoteHeader, ListResponse } from "../types.js";
-import { toListResponse } from "./list-response.js";
+import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 
 /** Default cap on `find_by_tag` so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
@@ -11,8 +11,12 @@ const DEFAULT_LIMIT = 100;
  * it, sorted by count (descending) then name. Unifies inline `#tags` with
  * frontmatter `tags:` so the vault's full topic index is visible to the agent.
  */
-export async function listTags(vaultPath: string): Promise<ListResponse<TagCount>> {
+export async function listTags(
+  vaultPath: string,
+  offset?: number
+): Promise<ListResponse<TagCount>> {
   assertVaultPath(vaultPath);
+  assertNonNegativeInt(offset, "offset");
   const index = await getIndex(vaultPath);
   const counts = new Map<string, number>();
 
@@ -25,7 +29,7 @@ export async function listTags(vaultPath: string): Promise<ListResponse<TagCount
   const tags = [...counts.entries()]
     .map(([tag, count]) => ({ tag, count }))
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
-  return toListResponse(tags);
+  return toListResponse(tags, undefined, offset ?? 0);
 }
 
 /**
@@ -44,7 +48,7 @@ export async function findByTag(
 ): Promise<ListResponse<NoteHeader>> {
   assertVaultPath(vaultPath);
 
-  const { tags, match = "any", limit } = params;
+  const { tags, match = "any", limit, offset } = params;
   if (!Array.isArray(tags) || tags.length === 0) {
     throw new Error("tags must be a non-empty array");
   }
@@ -54,6 +58,7 @@ export async function findByTag(
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
+  assertNonNegativeInt(offset, "offset");
 
   // Normalize requested tags: drop leading "#", lowercase for comparison.
   const wanted = tags.map((t) => String(t).replace(/^#/, "").toLowerCase());
@@ -69,6 +74,7 @@ export async function findByTag(
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
   return toListResponse(
     matched.map(entryToHeader),
-    effectiveLimit === 0 ? undefined : effectiveLimit
+    effectiveLimit === 0 ? undefined : effectiveLimit,
+    offset
   );
 }
