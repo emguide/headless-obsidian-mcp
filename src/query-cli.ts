@@ -36,6 +36,7 @@ import {
   addNotePropertyValues,
   removeNotePropertyValues,
   renameNoteProperty,
+  renameSectionInVault,
 } from "./tools/write.js";
 import {
   listProperties,
@@ -111,6 +112,8 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await moveFile(VAULT_PATH!, args);
     } else if (toolName === "patch_note") {
       result = await patchNote(VAULT_PATH!, args);
+    } else if (toolName === "rename_section") {
+      result = await renameSectionInVault(VAULT_PATH!, args);
     } else if (toolName === "add_tag") {
       result = await addTag(VAULT_PATH!, args);
     } else if (toolName === "remove_tag") {
@@ -722,6 +725,18 @@ program
   .description("Rename a frontmatter property key in a note")
   .action(async (path: string, from: string, to: string, _options: any, command: Command) => {
     await queryTool("rename_property", { path, from, to }, command.parent?.opts().verbose);
+  });
+
+program
+  .command("rename-section <path> <from> <to>")
+  .description("Rename a heading and rewrite inbound [[note#heading]] anchors")
+  .option("--no-update-anchors", "Do not rewrite inbound anchors")
+  .action(async (path: string, from: string, to: string, options: any, command: Command) => {
+    await queryTool(
+      "rename_section",
+      { path, from, to, update_anchors: options.updateAnchors },
+      command.parent?.opts().verbose
+    );
   });
 
 program.parseAsync(process.argv);
