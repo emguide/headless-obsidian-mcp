@@ -18,6 +18,7 @@ import { resolveNote } from "./tools/resolve.js";
 import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
+import { listFolders } from "./tools/folders.js";
 import {
   writeNote,
   appendNote,
@@ -94,6 +95,8 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await listVaultIssues(VAULT_PATH!, args);
     } else if (toolName === "list_files") {
       result = await listFiles(VAULT_PATH!, args);
+    } else if (toolName === "list_folders") {
+      result = await listFolders(VAULT_PATH!, args);
     } else if (toolName === "write_note") {
       result = await writeNote(VAULT_PATH!, args);
     } else if (toolName === "append_note") {
@@ -252,6 +255,22 @@ program
       ...(options.limit && { limit: parseInt(options.limit, 10) })
     };
     await queryTool("list_notes", args, verbose);
+  });
+
+program
+  .command("folders")
+  .description("List folders as a flat tree with note counts")
+  .option("-f, --folder <folder>", "Restrict to folders under this folder")
+  .option("-d, --depth <n>", "Relative depth cap (1 = immediate children)")
+  .option("-l, --limit <n>", "Maximum number of folders to return")
+  .action(async (options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      ...(options.folder && { folder: options.folder }),
+      ...(options.depth && { depth: parseInt(options.depth, 10) }),
+      ...(options.limit && { limit: parseInt(options.limit, 10) }),
+    };
+    await queryTool("list_folders", args, verbose);
   });
 
 program

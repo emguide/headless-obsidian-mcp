@@ -147,6 +147,15 @@ Anything beyond trivial work (a single-line fix or a pure question) should be do
 - **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of file entries (`path`, `size`, `modified`, `extension`), bounded by `limit` (default `100`); `path` is vault-relative with the extension preserved (unlike note paths, `.md` is never stripped here because these aren't notes), `modified` is an ISO timestamp, `extension` is lowercased without the dot. `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`.
 - **Notes**: Markdown files are never returned. Reuses the same directory walk and ignore rules as the vault index, but does not read from or write to the index itself.
 
+### list_folders
+- **Purpose**: Enumerate the vault's folders so an agent can see the shape of the vault before searching or reading — the folder-level counterpart to `list_notes` (notes) and `list_files` (attachments). Closes the folder-discovery gap that otherwise forces an unbounded `list_notes`.
+- **Input**:
+  - `folder` (optional): Restrict to folders under this folder (relative to the vault root).
+  - `depth` (optional): Relative depth cap — `1` = immediate children of the scope (top-level folders when no `folder` is given).
+  - `limit` (optional): Maximum number of folders to return (default `100`; pass `0` for unbounded).
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of `{ path, notes, total_notes, subfolders }` sorted by `path`. `notes` counts notes directly in the folder; `total_notes` counts notes recursively under it (including subfolders); `subfolders` counts direct child folders. `returned`/`omitted`/`truncated` report what the `limit` dropped.
+- **Notes**: Index-backed (no extra file read); notes-only, so a folder containing only attachments does not appear (use `list_files`). Root-level notes contribute no folder row.
+
 ### list_properties
 - **Purpose**: The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
 - **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`)
@@ -386,6 +395,8 @@ npm run query -- stats                                  # Whole-vault statistics
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
 npm run query -- files --folder assets --extension png  # Non-markdown files (attachments)
+npm run query -- folders                                 # Folder tree with note counts
+npm run query -- folders --folder projects --depth 1     # Immediate subfolders of projects/
 npm run query -- properties                             # Frontmatter schema
 npm run query -- property-values status                 # Distinct values of a key
 npm run query -- query --where '{"status":"active","priority":{"gt":3}}'

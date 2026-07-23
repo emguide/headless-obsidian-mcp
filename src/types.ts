@@ -109,6 +109,27 @@ export interface ListNotesParams {
   limit?: number;
 }
 
+/** One folder in the vault, as reported by list_folders. */
+export interface FolderEntry {
+  /** Vault-relative folder path, e.g. "projects/alpha". */
+  path: string;
+  /** Notes directly in this folder (immediate parent). */
+  notes: number;
+  /** Notes recursively under this folder (including subfolders). */
+  total_notes: number;
+  /** Number of direct child folders. */
+  subfolders: number;
+}
+
+export interface ListFoldersParams {
+  /** Restrict to folders under this folder (relative to the vault root). */
+  folder?: string;
+  /** Relative depth cap: 1 = immediate children of the scope only. */
+  depth?: number;
+  /** Maximum number of folders to return. */
+  limit?: number;
+}
+
 export interface LinksResult {
   /** The note these links were computed for (relative path, no .md). */
   note: string;

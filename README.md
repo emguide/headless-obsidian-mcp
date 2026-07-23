@@ -154,6 +154,10 @@ npm run query -- vault-issues unresolved_links --limit 50
 # List non-markdown files (attachments/images), optionally scoped/filtered
 npm run query -- files --folder assets --extension png
 
+# Folder tree with note counts, optionally scoped/depth-limited
+npm run query -- folders
+npm run query -- folders --folder projects --depth 1
+
 # Frontmatter schema, distinct values, and condition queries
 npm run query -- properties
 npm run query -- property-values status
@@ -418,6 +422,17 @@ List non-markdown files in the vault (attachments, images, PDFs) — the counter
 - `limit` (number, optional): Maximum number of files to return (default `100`; pass `0` for unbounded — no cap)
 
 **Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of file entries (`path`, `size`, `modified`, `extension`) — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`. Markdown files are never returned; does not touch the vault index.
+
+### list_folders
+
+Enumerate the vault's folders so an agent can see the shape of the vault before searching or reading — the folder-level counterpart to `list_notes` (notes) and `list_files` (attachments).
+
+**Parameters:**
+- `folder` (string, optional): Restrict to folders under this folder (relative to the vault root)
+- `depth` (number, optional): Relative depth cap — `1` = immediate children of the scope (top-level folders when no `folder` is given)
+- `limit` (number, optional): Maximum number of folders to return (default `100`; pass `0` for unbounded — no cap)
+
+**Returns:** `{ results, returned, omitted, truncated }`. `results` is the array of `{ path, notes, total_notes, subfolders }` sorted by `path` — `notes` counts notes directly in the folder, `total_notes` counts notes recursively under it, `subfolders` counts direct child folders — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of folders dropped by the limit, and `truncated` is `true` when `omitted > 0`. Notes-only: a folder containing only attachments does not appear (use `list_files`). Root-level notes contribute no folder row. Index-backed.
 
 ### list_properties
 
@@ -780,7 +795,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_properties`, `get_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `bulk_edit`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `get_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `bulk_edit`).
 
 ## Acknowledgments
 
