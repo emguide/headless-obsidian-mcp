@@ -1,20 +1,22 @@
 import { getIndex } from "./vault-index.js";
 import { assertVaultPath } from "./vault.js";
 import { RankedSearchParams, RankedSearchResult, ListResponse } from "../types.js";
+import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 100;
 
 /**
- * Rank vault notes by BM25 relevance to a free-text query. Complements the
- * regex/substring `searchNotes` (ripgrep) tool with relevance ordering.
+ * Rank vault notes by BM25 relevance to a free-text query, optionally scoped
+ * to a candidate set by folder / tags / where (same filters as search_notes).
+ * Complements the regex/substring `searchNotes` (ripgrep) tool.
  */
 export async function searchNotesRanked(
   vaultPath: string,
   params: RankedSearchParams
 ): Promise<ListResponse<RankedSearchResult>> {
   assertVaultPath(vaultPath);
-  const { query, limit } = params;
+  const { query, limit, folder, tags, where, match } = params;
 
   if (!query || typeof query !== "string" || !query.trim()) {
     throw new Error("query must be a non-empty string");
@@ -37,5 +39,22 @@ export async function searchNotesRanked(
   }
 
   const index = await getIndex(vaultPath);
-  return index.searchRanked(query, effectiveLimit);
+
+  const hasFilter = folder !== undefined || tags !== undefined || where !== undefined;
+  if (!hasFilter) {
+    return index.searchRanked(query, effectiveLimit);
+  }
+
+  validateCandidateFilter({ tags, where, match });
+  const entries = resolveCandidates(index, {
+    folder,
+    tags,
+    where,
+    tagMatch: match ?? "any",
+    whereMatch: "all", // mirror search_notes: match governs only tags
+  });
+  if (entries.length === 0) return { results: [], returned: 0, omitted: 0, truncated: false };
+
+  const allowedIds = new Set(entries.map((e) => e.path));
+  return index.searchRanked(query, effectiveLimit, allowedIds);
 }

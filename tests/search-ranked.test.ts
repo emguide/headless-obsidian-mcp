@@ -166,3 +166,16 @@ test("searchNotesRanked: limit 0 is unbounded and returns every match", async ()
     await fx4.cleanup();
   }
 });
+
+test("searchRanked restricts results to allowedIds", async () => {
+  const idx = await getIndex(fx.vaultPath);
+  const res = await idx.searchRanked("networking", 10, new Set(["aside"]));
+  assert.deepEqual(res.results.map((r) => r.path), ["aside"]);
+});
+
+test("searchRanked with empty allowedIds returns nothing", async () => {
+  const idx = await getIndex(fx.vaultPath);
+  const res = await idx.searchRanked("networking", 10, new Set());
+  assert.deepEqual(res.results, []);
+  assert.equal(res.returned, 0);
+});

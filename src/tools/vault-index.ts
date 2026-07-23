@@ -170,11 +170,13 @@ export class VaultIndex {
    */
   async searchRanked(
     query: string,
-    limit: number | undefined
+    limit: number | undefined,
+    allowedIds?: Set<string>
   ): Promise<ListResponse<RankedSearchResult>> {
     const queryTokens = tokenize(query);
     if (queryTokens.length === 0) return { results: [], returned: 0, omitted: 0, truncated: false };
-    const { hits, total } = this.bm25.search(queryTokens, limit ?? Number.MAX_SAFE_INTEGER);
+    if (allowedIds && allowedIds.size === 0) return { results: [], returned: 0, omitted: 0, truncated: false };
+    const { hits, total } = this.bm25.search(queryTokens, limit ?? Number.MAX_SAFE_INTEGER, allowedIds);
 
     // Raw (unstemmed) query words used only to locate a snippet line.
     const rawWords = query

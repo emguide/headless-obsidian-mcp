@@ -142,7 +142,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "search_notes_ranked",
         description:
-          "Full-text search ranked by BM25 relevance. Returns the most relevant notes first (title/heading/tag matches boosted), each with a relevance score and a matched snippet. Complements search_notes (which is literal/regex, unranked). Returns { results, returned, omitted, truncated }: results is ranked note headers with score and snippet, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
+          "Full-text search ranked by BM25 relevance, optionally scoped by folder, tags, or a frontmatter where filter. Returns the most relevant notes first (title/heading/tag matches boosted), each with a relevance score and a matched snippet. Complements search_notes (which is literal/regex, unranked). Returns { results, returned, omitted, truncated }: results is ranked note headers with score and snippet, capped at 100 by default (pass limit: 0 for all), and truncated is true when the cap dropped notes (omitted > 0).",
         inputSchema: {
           type: "object",
           properties: {
@@ -154,6 +154,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Maximum number of results (default 100; pass 0 for unbounded; a positive limit is capped at 100).",
             },
+            folder: { type: "string", description: "Restrict to notes under this folder (relative to the vault root)." },
+            tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
+            match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
+            where: { type: "object", description: "Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax)." },
           },
           required: ["query"],
         },

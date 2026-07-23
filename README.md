@@ -110,6 +110,10 @@ npm run query -- search "alpha" --where '{"status":"active"}'
 npm run query -- search-ranked "kubernetes networking"
 npm run query -- search-ranked "kubernetes networking" --limit 5
 
+# BM25-ranked search scoped to a folder, tags, or frontmatter condition
+npm run query -- search-ranked "kubernetes" --folder work --tag active --match all
+npm run query -- search-ranked "kubernetes" --where '{"status":"active"}'
+
 # Read specific notes (returns { notes, errors } — one bad path won't fail the batch)
 npm run query -- read "daily-notes/2024-01-15"
 npm run query -- read "note1" "folder/note2"
@@ -250,6 +254,10 @@ Full-text search ranked by BM25 relevance — the most relevant notes first, rat
 **Parameters:**
 - `query` (string, required): Free-text query (max 1000 chars)
 - `limit` (number, optional): Maximum number of results (default 100; `limit: 0` = unbounded; a positive limit is capped at 100)
+- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
+- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
+- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
+- `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
 
 **Returns:** `{ results, returned, omitted, truncated }` — `results` is an array of note headers (same shape as `list_notes`) extended with:
 - `score`: BM25 relevance score (higher = more relevant)
@@ -258,6 +266,8 @@ Full-text search ranked by BM25 relevance — the most relevant notes first, rat
 `returned`/`omitted`/`truncated` report how many rows came back vs. were dropped by the limit, so a truncated result isn't mistaken for a complete one.
 
 Note: tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, stemmed), so non-Latin scripts (e.g. CJK) and accented characters aren't well indexed here — use `search_notes` for literal non-ASCII matching.
+
+Scopes to a candidate set via the same `folder`/`tags`/`where`/`match` filters as `search_notes` (resolved from the shared index first, then ranked over just those notes), so "the most relevant note about X among my work notes" is expressible.
 
 ### read_notes
 

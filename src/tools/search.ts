@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { relative } from "node:path";
 import { SearchNotesParams, SearchResult, SearchNotesResponse } from "../types.js";
 import { getIndex } from "./vault-index.js";
-import { matchesWhere } from "./property-match.js";
 import type { Condition } from "./property-match.js";
+import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 
 interface RipgrepResult {
   stdout: string;
@@ -93,37 +93,15 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
   let candidatePaths: string[] | null = null; // null = whole-vault (no filter)
 
   if (hasFilter) {
-    if (tags !== undefined && (!Array.isArray(tags) || tags.length === 0)) {
-      throw new Error("tags must be a non-empty array when provided");
-    }
-    if (match !== "any" && match !== "all") {
-      throw new Error('match must be "any" or "all"');
-    }
-    if (where !== undefined && (typeof where !== "object" || where === null || Array.isArray(where))) {
-      throw new Error("where must be an object of property conditions");
-    }
+    validateCandidateFilter({ tags, where, match });
 
     const index = await getIndex(vaultPath);
-    const wantedTags = tags?.map((t) => String(t).replace(/^#/, "").toLowerCase());
-    const folderPrefix = folder
-      ? folder.replace(/\\/g, "/").replace(/\/$/, "") + "/"
-      : undefined;
-
-    const matched = index.getEntries().filter((entry) => {
-      if (folderPrefix && !(entry.path + "/").startsWith(folderPrefix) && !entry.path.startsWith(folderPrefix)) {
-        return false;
-      }
-      if (wantedTags) {
-        const noteSet = new Set(entry.tags.map((t) => t.toLowerCase()));
-        const ok = match === "all"
-          ? wantedTags.every((w) => noteSet.has(w))
-          : wantedTags.some((w) => noteSet.has(w));
-        if (!ok) return false;
-      }
-      if (where) {
-        if (!matchesWhere(entry.frontmatter, where as Record<string, Condition>, "all")) return false;
-      }
-      return true;
+    const matched = resolveCandidates(index, {
+      folder,
+      tags,
+      where: where as Record<string, Condition> | undefined,
+      tagMatch: match,
+      whereMatch: "all", // search_notes: match governs only tags
     });
 
     candidatePaths = matched.map((e) => e.fullPath);
