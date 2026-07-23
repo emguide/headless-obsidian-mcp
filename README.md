@@ -163,6 +163,10 @@ npm run query -- add-property-values "projects/alpha" aliases a2 a3
 npm run query -- remove-property-values "projects/alpha" aliases a3
 npm run query -- rename-property "projects/alpha" author authors
 
+# Bulk frontmatter edit across many notes (one git snapshot for the batch)
+npm run query -- bulk-edit --select '{"where":{"status":"draft"}}' \
+  --operations '[{"op":"add_tag","tags":["review"]},{"op":"set_frontmatter","set":{"status":"active"}}]' --dry-run
+
 # Sections (heading-scoped edits)
 npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
 npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
@@ -551,6 +555,18 @@ Replace the body under an existing heading (the heading line is kept). Errors if
 
 **Returns:** `{ path, heading }`
 
+### bulk_edit
+
+Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot, with per-note result reporting. Turns "tag these 30 notes" from 30 round trips (and 30 auto-snapshot commits) into one.
+
+**Parameters:**
+- `select` (object, required): either `paths` (array of explicit note paths) **or** a filter — `where` (query_notes-style condition object) and/or `tags` (find_by_tag-style), optionally scoped by `folder` and combined via `match` (`"all"` default or `"any"`), plus an optional `limit`. Exactly one of `paths` or the filter form may be given — mixing them errors.
+- `operations` (array, required): ordered, non-empty list of frontmatter-only mutations applied in turn to each matched note (e.g. `rename_property` then `set_frontmatter` on the new key, in one pass). Supported ops: `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property` — same shapes as the single-note tools. No section/body ops.
+- `dry_run` (boolean, optional): preview the matched notes and operations with zero writes and no git snapshot.
+- `expected_count` (number, optional): abort before any snapshot or write if the resolved match count differs — guards a filter that drifted between an agent's preview and its commit.
+
+**Returns:** `{ dry_run, matched_count, applied_count, failed_count, results }`, where each `results` entry is `{ path, ok: true, changed }` or `{ path, ok: false, error }`. A per-note failure is isolated and reported; it never sinks the rest of the batch. `changed: false` marks a note whose operations were all no-ops. One git snapshot covers the whole batch, not one per note.
+
 > **Body vs. frontmatter fidelity:** section edits preserve the frontmatter block byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML in canonical form (block-style lists) but leave the body untouched. Headings inside fenced code blocks are ignored. All writes are path-traversal protected.
 
 > **Validation:** every frontmatter write rejects nested objects/maps, arrays containing non-scalar elements, and markdown syntax in string values (bare URLs are allowed). Validation runs only on the keys a given write actually touches, so a pre-existing violation on an untouched key never blocks an unrelated edit.
@@ -595,6 +611,16 @@ await write_note({ path: "inbox/idea", content: "# Idea\n\nbody" });
 await add_tag({ path: "projects/alpha", tags: ["review"] });
 await set_frontmatter({ path: "projects/alpha", set: { status: "done" } });
 await append_to_section({ path: "projects/alpha", heading: "Log", content: "shipped" });
+
+// Bulk frontmatter edit across many notes, one git snapshot
+await bulk_edit({
+  select: { where: { status: "draft" } },
+  operations: [
+    { op: "add_tag", tags: ["review"] },
+    { op: "set_frontmatter", set: { status: "active" } }
+  ],
+  dry_run: true
+});
 ```
 
 ## Configuration
@@ -611,14 +637,14 @@ expose them:
 export OBSIDIAN_ALLOW_WRITES=1
 ```
 
-When disabled, the sixteen write tools (`write_note`, `append_note`,
+When disabled, the seventeen write tools (`write_note`, `append_note`,
 `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`,
 `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`,
 `remove_property_values`, `rename_property`, `add_section`,
-`append_to_section`, `replace_section`) are hidden from the tool list and any
-call to one is rejected, so an agent only ever sees the read tools. The flag
-gates the MCP server; the query CLI is the operator's own tool and is not
-affected by it.
+`append_to_section`, `replace_section`, `bulk_edit`) are hidden from the tool
+list and any call to one is rejected, so an agent only ever sees the read
+tools. The flag gates the MCP server; the query CLI is the operator's own tool
+and is not affected by it.
 
 ### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
@@ -676,7 +702,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_properties`, `get_property_values`, `query_notes`, `get_property`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `bulk_edit`).
 
 ## Acknowledgments
 

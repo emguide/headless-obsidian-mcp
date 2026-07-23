@@ -145,7 +145,7 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 
 **The write tools are off by default.** The server is read-only unless
 `OBSIDIAN_ALLOW_WRITES` is set to a truthy value (`1`, `true`, `yes`, `on`).
-When disabled, the sixteen write tools are hidden from `list_tools` and any call
+When disabled, the seventeen write tools are hidden from `list_tools` and any call
 to one is rejected — so an agent only ever sees the read tools. When enabled, all
 tools are exposed. The flag gates the MCP server (the agent-facing surface); the
 query CLI is the operator's own tool and is not gated. Flag helpers live in
@@ -229,6 +229,17 @@ change a tag or a section without reading and rewriting the whole note.
 - **Purpose**: Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
 - **Input**: `path` (required), `heading` (required), `content` (required)
 - **Output**: `{ path, heading }`
+
+### bulk_edit
+- **Purpose**: Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot, with per-note result reporting. Turns "tag these 30 notes" from 30 round trips (and 30 auto-snapshot commits) into one.
+- **Input**:
+  - `select` (required): either `paths` (explicit array of note paths) **or** a filter — `where` (query_notes-style condition object) and/or `tags` (find_by_tag-style), optionally scoped by `folder` and combined via `match` (`"all"` default or `"any"`), plus an optional `limit`. Exactly one of `paths` or the filter form must be given — mixing them errors.
+  - `operations` (required): an ordered, non-empty array of frontmatter-only mutations, applied in order to each matched note (e.g. rename then set the new key in one pass). Supported ops: `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property` — same shapes as the single-note tools of the same name. No section/body ops.
+  - `dry_run` (optional): preview the matched notes and parsed operations with **zero writes and no git snapshot**.
+  - `expected_count` (optional): abort before any snapshot or write if the resolved match count differs — guards a filter that drifted between an agent's preview and its commit.
+- **Output**: `{ dry_run, matched_count, applied_count, failed_count, results }` where each `results` entry is `{ path, ok: true, changed }` or `{ path, ok: false, error }`. A per-note failure (missing note, frontmatter validation error, write error) is isolated and reported — it does not sink the rest of the batch. `changed: false` marks a note whose operations were all no-ops (e.g. a tag already present).
+- **Git**: One `snapshotBeforeWrite` call for the whole batch, not one per note — the pre-existing state is committed once, then every note in the batch is written uncommitted, so a partial batch still reviews and reverts as a single diff.
+- **Security**: Path traversal protected via the same guard as read_notes.
 
 **Structure notes**: Body-only edits (sections) preserve the frontmatter block
 byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML block in
@@ -351,6 +362,8 @@ npm run query -- move-file "assets/old.png" "assets/new.png"
 npm run query -- patch "projects/alpha" "old text" "new text" --all
 npm run query -- delete "inbox/idea"                    # Trash-safe (recoverable)
 npm run query -- delete "inbox/idea" --permanent        # Unlink outright
+npm run query -- bulk-edit --select '{"where":{"status":"draft"}}' \
+  --operations '[{"op":"add_tag","tags":["review"]},{"op":"set_frontmatter","set":{"status":"active"}}]' --dry-run
 
 # Content beginning with "-" (e.g. markdown lists) via stdin or --file:
 printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"
