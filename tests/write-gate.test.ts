@@ -31,7 +31,7 @@ test("git guard flag is independent of the write flag", () => {
 });
 
 test("every mutating tool is classified as a write tool", () => {
-  for (const name of ["write_note", "append_note", "delete_note", "add_tag", "remove_tag", "set_frontmatter", "add_section", "append_to_section", "replace_section"]) {
+  for (const name of ["write_note", "append_note", "delete_note", "add_tag", "remove_tag", "set_frontmatter", "add_section", "append_to_section", "replace_section", "bulk_edit"]) {
     assert.equal(isWriteTool(name), true, `${name} should be a write tool`);
     assert.ok(WRITE_TOOL_NAMES.has(name));
   }

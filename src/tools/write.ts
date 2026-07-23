@@ -38,6 +38,7 @@ export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "add_section",
   "append_to_section",
   "replace_section",
+  "bulk_edit",
 ]);
 
 /** Whether a tool name mutates the vault. */
