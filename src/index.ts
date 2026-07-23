@@ -412,7 +412,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of rows/headers to return."
+              description: "Maximum number of rows/groups to return (default 100; 0 = unbounded). For unresolved_links, this counts groups (source notes), not individual targets."
             }
           },
           required: ["kind"]

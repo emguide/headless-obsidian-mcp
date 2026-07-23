@@ -125,11 +125,12 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 
 ### list_vault_issues
 - **Purpose**: Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
-- **Input**: `kind` (required): `"orphans"` or `"unresolved_links"`. `limit` (optional): Cap on the number of returned rows/headers.
-- **Output**: Shape depends on `kind`:
+- **Input**: `kind` (required): `"orphans"` or `"unresolved_links"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap).
+- **Output**: `{ results, returned, omitted, truncated }`. `results`' shape depends on `kind`:
   - `"orphans"`: Array of note headers (same shape as `list_notes`) for notes with no inbound and no outbound resolved links — the exact predicate `get_vault_stats` uses for `orphan_notes`.
-  - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing.
-- **Count relationship**: `orphans` array length equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links` equals `get_vault_stats`'s `unresolved_links` count (both before any `limit` is applied).
+  - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
+  `returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`.
+- **Count relationship**: for the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), `orphans`' `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count. A group-limited result naturally shows fewer.
 - **Notes**: Index-backed (no file read).
 
 ### list_files

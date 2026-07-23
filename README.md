@@ -385,13 +385,13 @@ Vault-hygiene findings the index already knows about but that `get_vault_stats` 
 
 **Parameters:**
 - `kind` (string, required): `"orphans"` or `"unresolved_links"`
-- `limit` (number, optional): Cap on the number of returned rows/headers
+- `limit` (number, optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap)
 
-**Returns:** Shape depends on `kind`:
+**Returns:** `{ results, returned, omitted, truncated }`. `results`' shape depends on `kind`:
 - `"orphans"`: Array of note headers (same shape as `list_notes`) — notes with no inbound and no outbound resolved links (the same predicate behind `get_vault_stats`'s `orphan_notes`)
-- `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing
+- `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
 
-The `orphans` array length equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links` equals `get_vault_stats`'s `unresolved_links` count (both before `limit` is applied). Index-backed.
+`returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`. For the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), the `orphans` `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count — a group-limited result naturally shows fewer. Index-backed.
 
 ### list_files
 

@@ -17,18 +17,18 @@ before(async () => {
 after(() => fx.cleanup());
 
 test("orphans lists notes with no inbound or outbound resolved links", async () => {
-  const orphans = (await listVaultIssues(fx.vaultPath, { kind: "orphans" })) as Array<{ path: string }>;
+  const orphans = (await listVaultIssues(fx.vaultPath, { kind: "orphans" })).results as Array<{ path: string }>;
   assert.ok(orphans.some((o) => o.path === "orphan"));
 });
 
 test("orphans list length equals the stats orphan_notes count", async () => {
   const orphans = await listVaultIssues(fx.vaultPath, { kind: "orphans" });
   const stats = await getVaultStats(fx.vaultPath);
-  assert.equal(orphans.length, stats.orphan_notes);
+  assert.equal(orphans.results.length, stats.orphan_notes);
 });
 
 test("unresolved_links groups broken targets by source note", async () => {
-  const groups = (await listVaultIssues(fx.vaultPath, { kind: "unresolved_links" })) as Array<{
+  const groups = (await listVaultIssues(fx.vaultPath, { kind: "unresolved_links" })).results as Array<{
     source: string;
     targets: string[];
   }>;
@@ -38,7 +38,7 @@ test("unresolved_links groups broken targets by source note", async () => {
 });
 
 test("sum of unresolved targets equals the stats unresolved_links count", async () => {
-  const groups = (await listVaultIssues(fx.vaultPath, { kind: "unresolved_links" })) as Array<{
+  const groups = (await listVaultIssues(fx.vaultPath, { kind: "unresolved_links" })).results as Array<{
     targets: string[];
   }>;
   const stats = await getVaultStats(fx.vaultPath);
@@ -48,13 +48,18 @@ test("sum of unresolved targets equals the stats unresolved_links count", async 
 
 test("limit caps the number of rows", async () => {
   const groups = await listVaultIssues(fx.vaultPath, { kind: "unresolved_links", limit: 1 });
-  assert.ok(Array.isArray(groups));
-  assert.ok(groups.length <= 1);
+  assert.ok(Array.isArray(groups.results));
+  assert.ok(groups.results.length <= 1);
 });
 
-test("limit of 0 is rejected (must be a positive integer)", async () => {
+test("limit of 0 is unbounded (not rejected)", async () => {
+  const result = await listVaultIssues(fx.vaultPath, { kind: "unresolved_links", limit: 0 });
+  assert.equal(result.truncated, false);
+});
+
+test("negative limit is rejected (must be a positive integer)", async () => {
   await assert.rejects(
-    () => listVaultIssues(fx.vaultPath, { kind: "unresolved_links", limit: 0 as any }),
+    () => listVaultIssues(fx.vaultPath, { kind: "unresolved_links", limit: -1 as any }),
     /limit must be/
   );
 });
@@ -64,4 +69,60 @@ test("rejects an unknown kind", async () => {
     () => listVaultIssues(fx.vaultPath, { kind: "bogus" as any }),
     /kind must be/
   );
+});
+
+test("orphans: limit truncates and reports returned/omitted", async () => {
+  const extraOrphans: FixtureNote[] = [
+    { path: "orphan2.md", content: "# Orphan 2\nNo links here." },
+    { path: "orphan3.md", content: "# Orphan 3\nNo links here." },
+  ];
+  const fx2 = await makeVault([...sampleNotes(), { path: "orphan.md", content: "# Orphan\nNo links here." }, ...extraOrphans]);
+  try {
+    const full = await listVaultIssues(fx2.vaultPath, { kind: "orphans" });
+    assert.ok(full.results.length >= 3, "expect at least 3 orphan notes in this fixture");
+
+    const limited = await listVaultIssues(fx2.vaultPath, { kind: "orphans", limit: 2 });
+    assert.equal(limited.truncated, true);
+    assert.equal(limited.returned, 2);
+    assert.equal(limited.results.length, 2);
+    assert.equal(limited.omitted, full.results.length - 2);
+
+    const unlimited = await listVaultIssues(fx2.vaultPath, { kind: "orphans", limit: 0 });
+    assert.equal(unlimited.truncated, false);
+    assert.equal(unlimited.omitted, 0);
+    assert.equal(unlimited.results.length, full.results.length);
+  } finally {
+    await fx2.cleanup();
+  }
+});
+
+test("unresolved_links: limit truncates by GROUP count, not target count", async () => {
+  // broken-a carries TWO unresolved targets so group-count (3) diverges from
+  // target-count (4) — this distinguishes group-truncation from a bug that
+  // would (mis)count/limit by flattened target count instead.
+  const notes: FixtureNote[] = [
+    { path: "broken-a.md", content: "# A\nSee [[nope-a]] and [[nope-d]]." },
+    { path: "broken-b.md", content: "# B\nSee [[nope-b]]." },
+    { path: "broken-c.md", content: "# C\nSee [[nope-c]]." },
+  ];
+  const fx3 = await makeVault(notes);
+  try {
+    const full = await listVaultIssues(fx3.vaultPath, { kind: "unresolved_links" });
+    assert.equal(full.results.length, 3, "expect 3 source-note groups");
+    const fullTargetCount = full.results.reduce((n, g) => n + g.targets.length, 0);
+    assert.equal(fullTargetCount, 4, "expect 4 flattened targets across 3 groups");
+
+    const limited = await listVaultIssues(fx3.vaultPath, { kind: "unresolved_links", limit: 2 });
+    assert.equal(limited.truncated, true);
+    assert.equal(limited.returned, 2);
+    assert.equal(limited.results.length, 2);
+    assert.equal(limited.omitted, 1);
+
+    const unlimited = await listVaultIssues(fx3.vaultPath, { kind: "unresolved_links", limit: 0 });
+    assert.equal(unlimited.truncated, false);
+    assert.equal(unlimited.omitted, 0);
+    assert.equal(unlimited.results.length, 3);
+  } finally {
+    await fx3.cleanup();
+  }
 });
