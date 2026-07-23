@@ -1,8 +1,8 @@
 import { getIndex } from "./vault-index.js";
 import { assertVaultPath } from "./vault.js";
-import { RankedSearchParams, RankedSearchResult } from "../types.js";
+import { RankedSearchParams, RankedSearchResult, ListResponse } from "../types.js";
 
-const DEFAULT_LIMIT = 10;
+const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 100;
 
 /**
@@ -12,7 +12,7 @@ const MAX_LIMIT = 100;
 export async function searchNotesRanked(
   vaultPath: string,
   params: RankedSearchParams
-): Promise<RankedSearchResult[]> {
+): Promise<ListResponse<RankedSearchResult>> {
   assertVaultPath(vaultPath);
   const { query, limit } = params;
 
@@ -23,11 +23,16 @@ export async function searchNotesRanked(
     throw new Error("query too long (max 1000 characters)");
   }
 
-  let effectiveLimit = DEFAULT_LIMIT;
-  if (limit !== undefined) {
-    if (!Number.isInteger(limit) || limit < 1) {
-      throw new Error("limit must be a positive integer");
-    }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+    throw new Error("limit must be a positive integer");
+  }
+
+  let effectiveLimit: number | undefined;
+  if (limit === undefined) {
+    effectiveLimit = DEFAULT_LIMIT;
+  } else if (limit === 0) {
+    effectiveLimit = undefined; // unbounded
+  } else {
     effectiveLimit = Math.min(limit, MAX_LIMIT);
   }
 

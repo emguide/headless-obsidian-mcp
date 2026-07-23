@@ -152,7 +152,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             limit: {
               type: "number",
-              description: "Maximum number of results (default: 10, max: 100).",
+              description: "Maximum number of results (default 100; pass 0 for unbounded; a positive limit is capped at 100).",
             },
           },
           required: ["query"],

@@ -11,7 +11,7 @@ import {
 } from "./vault.js";
 import { tokenize } from "./text/tokenize.js";
 import { BM25 } from "./text/bm25.js";
-import { NoteHeader, RankedSearchResult, ParsedHeading } from "../types.js";
+import { NoteHeader, RankedSearchResult, ParsedHeading, ListResponse } from "../types.js";
 
 /**
  * A fully-parsed note in the index. Raw file contents are not retained —
@@ -168,10 +168,13 @@ export class VaultIndex {
    * Rank notes by BM25 relevance to a free-text query. Snippets are read from
    * the ≤ limit winning files at query time (never stored in the index).
    */
-  async searchRanked(query: string, limit: number): Promise<RankedSearchResult[]> {
+  async searchRanked(
+    query: string,
+    limit: number | undefined
+  ): Promise<ListResponse<RankedSearchResult>> {
     const queryTokens = tokenize(query);
-    if (queryTokens.length === 0) return [];
-    const { hits } = this.bm25.search(queryTokens, limit);
+    if (queryTokens.length === 0) return { results: [], returned: 0, omitted: 0, truncated: false };
+    const { hits, total } = this.bm25.search(queryTokens, limit ?? Number.MAX_SAFE_INTEGER);
 
     // Raw (unstemmed) query words used only to locate a snippet line.
     const rawWords = query
@@ -186,7 +189,12 @@ export class VaultIndex {
       const snippet = await this.buildSnippet(entry.fullPath, rawWords);
       results.push({ ...entryToHeader(entry), score: hit.score, snippet });
     }
-    return results;
+    return {
+      results,
+      returned: results.length,
+      omitted: total - results.length,
+      truncated: total > results.length,
+    };
   }
 
   /** Best-effort snippet: first body line containing a query word, else first body line. */

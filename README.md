@@ -249,11 +249,13 @@ Full-text search ranked by BM25 relevance — the most relevant notes first, rat
 
 **Parameters:**
 - `query` (string, required): Free-text query (max 1000 chars)
-- `limit` (number, optional): Maximum number of results (default: 10, max: 100)
+- `limit` (number, optional): Maximum number of results (default 100; `limit: 0` = unbounded; a positive limit is capped at 100)
 
-**Returns:** Array of note headers (same shape as `list_notes`) extended with:
+**Returns:** `{ results, returned, omitted, truncated }` — `results` is an array of note headers (same shape as `list_notes`) extended with:
 - `score`: BM25 relevance score (higher = more relevant)
 - `snippet`: A short matched excerpt
+
+`returned`/`omitted`/`truncated` report how many rows came back vs. were dropped by the limit, so a truncated result isn't mistaken for a complete one.
 
 Note: tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, stemmed), so non-Latin scripts (e.g. CJK) and accented characters aren't well indexed here — use `search_notes` for literal non-ASCII matching.
 

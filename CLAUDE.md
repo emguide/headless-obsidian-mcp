@@ -33,8 +33,8 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 - **Purpose**: Full-text search ranked by BM25 relevance — the most relevant notes first, rather than every literal match. Complements `search_notes` (which is literal/regex and unranked).
 - **Input**:
   - `query` (required): Free-text query (max 1000 chars). Multi-word queries are ranked by relevance.
-  - `limit` (optional): Maximum number of results (default: 10, max: 100)
-- **Output**: Array of note headers (same shape as `list_notes`) extended with `score` (BM25 relevance, higher = more relevant) and `snippet` (a short matched excerpt).
+  - `limit` (optional): Maximum number of results (default 100; `limit: 0` = unbounded; a positive limit is capped at 100)
+- **Output**: `{ results, returned, omitted, truncated }` — `results` is the array of ranked note headers (same shape as `list_notes`) extended with `score` (BM25 relevance, higher = more relevant) and `snippet` (a short matched excerpt); the other fields report what was dropped so a truncated result isn't mistaken for a complete one.
 - **Ranking**: Standard Okapi BM25 (`k1=1.2`, `b=0.75`) over a stemmed, stopword-filtered token stream. Title, heading, and tag terms are boosted (indexed at ×2 weight) so a title hit outranks a passing body mention. Built on the shared in-memory vault index — no per-query vault scan.
 - **Limitation**: Tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, Porter-stemmed), so non-Latin scripts (e.g. CJK) and accented characters are not well indexed for ranked search. Use `search_notes` (ripgrep) for literal non-ASCII matching.
 
