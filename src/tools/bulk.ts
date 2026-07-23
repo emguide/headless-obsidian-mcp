@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import {
   NoteDocument,
   addTags,
@@ -9,6 +10,9 @@ import {
 } from "./note-document.js";
 import { getIndex } from "./vault-index.js";
 import { matchesWhere } from "./property-match.js";
+import { resolveNotePath } from "./vault.js";
+import { writeResolved } from "./write.js";
+import { snapshotBeforeWrite } from "./git-guard.js";
 
 export type BulkOperation =
   | { op: "add_tag"; tags: string[] }
@@ -147,4 +151,84 @@ export async function resolveSelection(
     entries = entries.slice(0, select.limit);
   }
   return entries.map((e) => e.path);
+}
+
+export interface BulkEditParams {
+  select: BulkSelect;
+  operations: BulkOperation[];
+  dry_run?: boolean;
+  expected_count?: number;
+}
+
+export interface BulkNoteResult {
+  path: string;
+  ok: boolean;
+  changed?: boolean;
+  error?: string;
+}
+
+export interface BulkEditResult {
+  dry_run: boolean;
+  matched_count: number;
+  applied_count?: number;
+  failed_count?: number;
+  matched?: string[];
+  operations?: BulkOperation[];
+  results?: BulkNoteResult[];
+}
+
+/**
+ * Batch orchestrator: validate + resolve the selection, take exactly one git
+ * snapshot for the whole batch (real runs only), then apply the operations
+ * note-by-note with per-note error isolation so one bad note never aborts the
+ * rest of the batch.
+ */
+export async function bulkEdit(
+  vaultPath: string,
+  params: BulkEditParams
+): Promise<BulkEditResult> {
+  const operations = validateOperations(params.operations);
+  const matched = await resolveSelection(vaultPath, params.select ?? {});
+
+  if (params.expected_count !== undefined && params.expected_count !== matched.length) {
+    throw new Error(
+      `expected_count ${params.expected_count} but ${matched.length} notes matched`
+    );
+  }
+
+  if (params.dry_run) {
+    return {
+      dry_run: true,
+      matched_count: matched.length,
+      matched,
+      operations,
+    };
+  }
+
+  await snapshotBeforeWrite(vaultPath);
+
+  const results: BulkNoteResult[] = [];
+  for (const notePath of matched) {
+    try {
+      const raw = await readFile(resolveNotePath(vaultPath, notePath), "utf-8");
+      const doc = NoteDocument.parse(raw);
+      const changed = applyOperations(doc, operations);
+      if (changed) await writeResolved(vaultPath, notePath, doc.serialize());
+      results.push({ path: notePath, ok: true, changed });
+    } catch (error) {
+      results.push({
+        path: notePath,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    dry_run: false,
+    matched_count: matched.length,
+    applied_count: results.filter((r) => r.ok).length,
+    failed_count: results.filter((r) => !r.ok).length,
+    results,
+  };
 }

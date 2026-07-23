@@ -75,3 +75,78 @@ test("resolveSelection rejects paths + filter together", async () => {
 test("resolveSelection rejects an empty select", async () => {
   await assert.rejects(() => resolveSelection(fx.vaultPath, {}), /requires/);
 });
+
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { bulkEdit } from "../src/tools/bulk.js";
+const readNote = (v: string, name: string) => readFile(join(v, name), "utf-8");
+
+test("bulkEdit dry_run returns matches and writes nothing", async () => {
+  const local = await makeVault(sampleNotes());
+  const res = await bulkEdit(local.vaultPath, {
+    select: { tags: ["productivity"] },
+    operations: [{ op: "add_tag", tags: ["reviewed"] }],
+    dry_run: true,
+  });
+  assert.equal(res.dry_run, true);
+  assert.equal(res.matched_count, res.matched!.length);
+  // No write happened.
+  const alpha = await readNote(local.vaultPath, "projects/alpha.md");
+  assert.doesNotMatch(alpha, /reviewed/);
+  await local.cleanup();
+});
+
+test("bulkEdit applies ops to every matched note", async () => {
+  const local = await makeVault(sampleNotes());
+  const res = await bulkEdit(local.vaultPath, {
+    select: { where: { status: "active" } },
+    operations: [{ op: "set_frontmatter", set: { reviewed: true } }],
+  });
+  assert.equal(res.dry_run, false);
+  assert.equal(res.applied_count, 1);
+  assert.equal(res.failed_count, 0);
+  const alpha = await readNote(local.vaultPath, "projects/alpha.md");
+  assert.match(alpha, /reviewed: true/);
+  await local.cleanup();
+});
+
+test("bulkEdit expected_count mismatch aborts before writing", async () => {
+  const local = await makeVault(sampleNotes());
+  await assert.rejects(
+    () => bulkEdit(local.vaultPath, {
+      select: { where: { status: "active" } },
+      operations: [{ op: "add_tag", tags: ["x"] }],
+      expected_count: 5,
+    }),
+    /expected_count 5 but 1/
+  );
+  const alpha = await readNote(local.vaultPath, "projects/alpha.md");
+  assert.doesNotMatch(alpha, /- x\b/);
+  await local.cleanup();
+});
+
+test("bulkEdit isolates a per-note failure and reports it", async () => {
+  const local = await makeVault(sampleNotes());
+  const res = await bulkEdit(local.vaultPath, {
+    select: { paths: ["projects/alpha", "does/not/exist"] },
+    operations: [{ op: "add_tag", tags: ["x"] }],
+  });
+  assert.equal(res.applied_count, 1);
+  assert.equal(res.failed_count, 1);
+  const bad = res.results!.find((r) => r.path === "does/not/exist");
+  assert.equal(bad!.ok, false);
+  assert.match(bad!.error!, /not found|ENOENT/i);
+  await local.cleanup();
+});
+
+test("bulkEdit reports changed:false for an idempotent no-op", async () => {
+  const local = await makeVault(sampleNotes());
+  const res = await bulkEdit(local.vaultPath, {
+    select: { paths: ["index"] },
+    operations: [{ op: "add_tag", tags: ["moc"] }], // already present
+  });
+  const r = res.results!.find((x) => x.path === "index");
+  assert.equal(r!.ok, true);
+  assert.equal(r!.changed, false);
+  await local.cleanup();
+});

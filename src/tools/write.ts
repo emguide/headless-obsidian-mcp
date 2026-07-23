@@ -60,7 +60,7 @@ async function fileExists(fullPath: string): Promise<boolean> {
 }
 
 /** Resolve + path-guard a note path and write it, creating parent dirs. */
-async function writeResolved(
+export async function writeResolved(
   vaultPath: string,
   notePath: string,
   content: string
