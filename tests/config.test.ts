@@ -110,3 +110,15 @@ test("selectConfigSection throws on an unknown section, listing valid ones", asy
     await fx.cleanup();
   }
 });
+
+test("dispatch: selectConfigSection round-trips through JSON for a section", async () => {
+  const fx = await vaultWithTemplateConfig();
+  try {
+    const cfg = await resolveServerConfig(fx.vaultPath);
+    const payload = JSON.parse(JSON.stringify(selectConfigSection(cfg, "template")));
+    assert.equal(payload.folder, "Templates");
+    assert.equal(payload.date_format, "DD/MM/YYYY");
+  } finally {
+    await fx.cleanup();
+  }
+});
