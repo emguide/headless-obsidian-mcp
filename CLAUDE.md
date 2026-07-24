@@ -27,7 +27,7 @@ Tool names follow a fixed verb taxonomy. A new tool reuses an existing verb; it 
 
 **No merges.** `list_notes` / `find_by_tag` / `query_notes` / `list_recent_notes` are distinct intents, not one query tool: `find_by_tag` matches the unified inline-plus-frontmatter tag set while `query_notes` sees frontmatter only, and `list_recent_notes` carries ordering semantics (`date_field`, mtime) that `query_notes` has no vocabulary for. The separation is structural.
 
-**Extending the surface.** A new note-selecting tool reuses the `folder` / `tags` / `where` / `match` filter vocabulary rather than inventing its own. A new vault-hygiene finding becomes a `kind` of `list_vault_issues`, not a new tool.
+**Extending the surface.** A new note-selecting tool reuses the `folder` / `tags` / `where` / `match` filter vocabulary rather than inventing its own. A new vault-hygiene finding becomes a `kind` of `list_vault_issues`, not a new tool. Every new tool must also be classified into exactly one domain group of the `OBSIDIAN_TOOLS` tool policy (`GROUP_MEMBERS` in `src/tools/tool-policy.ts`; see "Tool policy" below) — a mutating tool additionally joins `WRITE_TOOL_NAMES` in `src/tools/write.ts`, which is what marks it as write-mode. This is enforced: the server refuses to start, and the taxonomy tests fail, if a defined tool has no group.
 
 **Filter vocabulary (shared).** Every note-selecting tool — `search_notes`,
 `search_notes_ranked`, `list_notes`, `list_recent_notes`, `find_by_tag`,
