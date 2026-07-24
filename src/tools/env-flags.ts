@@ -15,6 +15,9 @@ export const GIT_AUTOCOMMIT_ENV = "OBSIDIAN_GIT_AUTOCOMMIT";
 /** Master switch that exposes the write tools; off by default (read-only). */
 export const ALLOW_WRITES_ENV = "OBSIDIAN_ALLOW_WRITES";
 
+/** Selector policy naming the tools the server exposes (see tool-policy.ts). */
+export const TOOLS_ENV = "OBSIDIAN_TOOLS";
+
 export function gitGuardEnabled(): boolean {
   return flagEnabled(GIT_AUTOCOMMIT_ENV);
 }
