@@ -1,9 +1,16 @@
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { makeVault, Fixture } from "./fixtures.js";
 import { resolveServerConfig, selectConfigSection } from "../src/tools/config.js";
+import { TOOLS_ENV } from "../src/tools/env-flags.js";
+import { RETIRED_ALLOW_WRITES_ENV } from "../src/tools/tool-policy.js";
+
+afterEach(() => {
+  delete process.env[TOOLS_ENV];
+  delete process.env[RETIRED_ALLOW_WRITES_ENV];
+});
 
 async function vaultWithTemplateConfig(): Promise<Fixture> {
   const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
@@ -52,16 +59,61 @@ test("OBSIDIAN_TEMPLATE_FOLDER override wins", async () => {
   }
 });
 
-test("writes section tracks the env flags", async () => {
+test("writes_enabled derives from the tool policy", async () => {
   const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
-  process.env.OBSIDIAN_ALLOW_WRITES = "1";
   delete process.env.OBSIDIAN_GIT_AUTOCOMMIT;
   try {
-    const cfg = await resolveServerConfig(fx.vaultPath);
-    assert.equal(cfg.writes.writes_enabled, true);
+    delete process.env[TOOLS_ENV];
+    let cfg = await resolveServerConfig(fx.vaultPath);
+    assert.equal(cfg.writes.writes_enabled, false); // default policy is read-only
     assert.equal(cfg.writes.git_autocommit, false);
+
+    process.env[TOOLS_ENV] = "all";
+    cfg = await resolveServerConfig(fx.vaultPath);
+    assert.equal(cfg.writes.writes_enabled, true);
+
+    process.env[TOOLS_ENV] = "reads,tasks.write"; // one write tool is enough
+    cfg = await resolveServerConfig(fx.vaultPath);
+    assert.equal(cfg.writes.writes_enabled, true);
   } finally {
-    delete process.env.OBSIDIAN_ALLOW_WRITES;
+    await fx.cleanup();
+  }
+});
+
+test("tools section reports policy, exposed, and excluded", async () => {
+  const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
+  try {
+    delete process.env[TOOLS_ENV];
+    let cfg = await resolveServerConfig(fx.vaultPath);
+    assert.equal(cfg.tools.policy, null);
+    assert.ok(cfg.tools.exposed.includes("get_config"));
+    assert.ok(cfg.tools.exposed.includes("search_notes"));
+    assert.ok(cfg.tools.excluded.includes("write_note"));
+    assert.equal(cfg.tools.exposed.length, 24);
+    assert.equal(cfg.tools.excluded.length, 21);
+    // sorted, disjoint, complete
+    assert.deepEqual(cfg.tools.exposed, [...cfg.tools.exposed].sort());
+    assert.deepEqual(cfg.tools.excluded, [...cfg.tools.excluded].sort());
+
+    process.env[TOOLS_ENV] = "search,notes.read";
+    cfg = await resolveServerConfig(fx.vaultPath);
+    assert.equal(cfg.tools.policy, "search,notes.read");
+    assert.deepEqual(cfg.tools.exposed, [
+      "get_config", "list_notes", "list_recent_notes", "read_notes",
+      "resolve_note", "search_notes", "search_notes_ranked",
+    ]);
+    assert.equal(cfg.tools.excluded.length, 44 - 6);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("retired OBSIDIAN_ALLOW_WRITES makes config resolution fail loud", async () => {
+  const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
+  process.env[RETIRED_ALLOW_WRITES_ENV] = "1";
+  try {
+    await assert.rejects(() => resolveServerConfig(fx.vaultPath), /OBSIDIAN_TOOLS/);
+  } finally {
     await fx.cleanup();
   }
 });
@@ -93,6 +145,7 @@ test("selectConfigSection unwraps a named section", async () => {
     assert.deepEqual(selectConfigSection(cfg, "template"), cfg.template);
     assert.deepEqual(selectConfigSection(cfg, "writes"), cfg.writes);
     assert.deepEqual(selectConfigSection(cfg, "vault"), cfg.vault);
+    assert.deepEqual(selectConfigSection(cfg, "tools"), cfg.tools);
   } finally {
     await fx.cleanup();
   }
@@ -104,7 +157,7 @@ test("selectConfigSection throws on an unknown section, listing valid ones", asy
     const cfg = await resolveServerConfig(fx.vaultPath);
     assert.throws(
       () => selectConfigSection(cfg, "bogus"),
-      /template.*writes.*vault/i
+      /template.*writes.*vault.*tools/i
     );
   } finally {
     await fx.cleanup();

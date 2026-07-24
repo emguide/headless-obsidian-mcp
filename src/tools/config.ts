@@ -1,5 +1,7 @@
 import { resolveTemplateConfig } from "./templates.js";
-import { writesEnabled, gitGuardEnabled } from "./env-flags.js";
+import { gitGuardEnabled } from "./env-flags.js";
+import { GATED_TOOL_NAMES, resolveToolPolicy } from "./tool-policy.js";
+import { isWriteTool } from "./write.js";
 
 /** Obsidian's built-in defaults for a bare {{date}} / {{time}}. */
 const DEFAULT_DATE_FORMAT = "YYYY-MM-DD";
@@ -21,11 +23,19 @@ export interface ServerConfig {
   vault: {
     path: string;
   };
+  tools: {
+    /** Raw OBSIDIAN_TOOLS value, or null when unset (default policy in force). */
+    policy: string | null;
+    /** Exposed tool names, sorted (always includes get_config). */
+    exposed: string[];
+    /** Gated tool names the policy hides, sorted. */
+    excluded: string[];
+  };
 }
 
 export type ConfigSection = keyof ServerConfig;
 
-const SECTIONS: ConfigSection[] = ["template", "writes", "vault"];
+const SECTIONS: ConfigSection[] = ["template", "writes", "vault", "tools"];
 
 /**
  * Assemble the server's own configuration. Unlike the template tools, an
@@ -47,13 +57,20 @@ export async function resolveServerConfig(
     /* no template folder configured — folder stays null, formats stay default */
   }
 
+  const { policy, exposed } = resolveToolPolicy();
+
   return {
     template: { folder, date_format: dateFormat, time_format: timeFormat },
     writes: {
-      writes_enabled: writesEnabled(),
+      writes_enabled: [...exposed].some((name) => isWriteTool(name)),
       git_autocommit: gitGuardEnabled(),
     },
     vault: { path: vaultPath },
+    tools: {
+      policy,
+      exposed: [...exposed].sort(),
+      excluded: [...GATED_TOOL_NAMES].filter((name) => !exposed.has(name)).sort(),
+    },
   };
 }
 
