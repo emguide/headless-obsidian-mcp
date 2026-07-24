@@ -15,6 +15,7 @@ import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
 import { resolveNote } from "./tools/resolve.js";
+import { resolveDailyNote } from "./tools/daily-notes.js";
 import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
@@ -94,6 +95,8 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await getFrontmatter(VAULT_PATH!, args.path);
     } else if (toolName === "resolve_note") {
       result = await resolveNote(VAULT_PATH!, args.query);
+    } else if (toolName === "resolve_daily_note") {
+      result = await resolveDailyNote(VAULT_PATH!, args);
     } else if (toolName === "get_vault_stats") {
       result = await getVaultStats(VAULT_PATH!);
     } else if (toolName === "list_vault_issues") {
@@ -535,6 +538,15 @@ program
   });
 
 program
+  .command("daily")
+  .description("Resolve a date to its daily-note path (Daily Notes plugin config)")
+  .argument("[date]", 'YYYY-MM-DD, or "today" (default) | "yesterday" | "tomorrow"')
+  .action(async (date: string | undefined, _options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool("resolve_daily_note", { ...(date && { date }) }, verbose);
+  });
+
+program
   .command("stats")
   .description("Summarize the whole vault (notes, tags, link-graph health, size)")
   .action(async (_options: any, command: Command) => {
@@ -544,8 +556,8 @@ program
 
 program
   .command("config")
-  .description("Report the server's own configuration (template folder + formats, write status, vault path, tool policy)")
-  .argument("[section]", "Narrow to one section: template | writes | vault | tools")
+  .description("Report the server's own configuration (template folder + formats, daily notes, write status, vault path, tool policy)")
+  .argument("[section]", "Narrow to one section: template | daily | writes | vault | tools")
   .action(async (section: string | undefined, _options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     await queryTool("get_config", { ...(section && { section }) }, verbose);

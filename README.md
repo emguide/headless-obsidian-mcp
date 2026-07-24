@@ -21,6 +21,7 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 - **Move & rename**: Move notes (rewriting the wikilinks that point to them) or arbitrary attachment files
 - **Link-graph safety on writes**: Every content write reports the resulting note's `unresolved_links` and `broken_anchors`, so a typo'd `[[wikilink]]` surfaces immediately instead of silently rotting the graph (report-only, like delete's `dangled_backlinks`)
 - **Templates** (opt-in): Apply the vault's existing core Templates-plugin templates — discover them (`list_templates`), create a note from one (`apply_template`), or insert one into an existing note (`insert_template`), with faithful `{{title}}`/`{{date}}`/`{{time}}` and `{{date:FORMAT}}` substitution (Templater scripting is not supported)
+- **Daily notes**: Resolve "today"/"yesterday"/any date to its canonical daily-note path from the Daily Notes core plugin's own config (`resolve_daily_note`) — folder, date format, and template come from the vault, not from out-of-band knowledge
 - **Trash-safe delete**: Deletes move to the vault's `.trash` by default, so they're recoverable
 - **Git safety net**: Optionally snapshot the vault into a commit before every write (`OBSIDIAN_GIT_AUTOCOMMIT`)
 - **Cross-platform**: Works on Windows, macOS, and Linux
@@ -156,9 +157,15 @@ npm run query -- stats
 # Resolve a human name (title/alias/basename) to a note path
 npm run query -- resolve "Alpha Project"
 
-# Report the server's own configuration (template folder/formats, write flags, vault path)
+# Resolve a date to its daily-note path (Daily Notes plugin config)
+npm run query -- daily
+npm run query -- daily yesterday
+npm run query -- daily 2026-07-01
+
+# Report the server's own configuration (template folder/formats, daily notes, write flags, vault path)
 npm run query -- config
 npm run query -- config template
+npm run query -- config daily
 
 # Vault hygiene: orphaned notes, broken wikilinks, and dead heading anchors (drill-down from stats)
 npm run query -- vault-issues orphans
@@ -591,14 +598,25 @@ Map a human-facing note name to its canonical path. Humans refer to notes by tit
 
 Matching is exact and case-insensitive against frontmatter `title`, each frontmatter `aliases[]` entry (a single string or an array), and the file basename. No partial/substring/fuzzy matching — that is `search_notes_ranked`'s job. A no-match is a normal empty result, not an error. Index-backed.
 
+### resolve_daily_note
+
+Map a calendar date to its canonical daily-note path — the date analogue of `resolve_note`. The answer comes from the **Daily Notes core plugin's own config** (`.obsidian/daily-notes.json`: `folder`, `format`, `template`), so "append this to today's note" and "what did I log yesterday" need no out-of-band knowledge of the vault's structure and keep working when the user changes the folder or date format in Obsidian.
+
+**Parameters:**
+- `date` (string, optional): `"YYYY-MM-DD"`, or a keyword `"today"` (default) / `"yesterday"` / `"tomorrow"` (case-insensitive). Anything else errors loudly, listing the accepted forms.
+
+**Returns:** `{ date, path, exists, template }`. `date` is the resolved ISO day; `path` the canonical note path (no `.md`; slashes in the configured format nest folders, e.g. `YYYY/MM/YYYY-MM-DD`, exactly as in Obsidian); `exists` whether that note is on disk; `template` the configured daily template as a vault-relative path, or `null`.
+
+Missing config keys take Obsidian's own defaults (vault root, `YYYY-MM-DD`, no template). `OBSIDIAN_DAILY_FOLDER` overrides the folder for headless setups; with neither the config file nor the env var present the tool fails loud rather than guessing. Read-only by design — existing tools do the rest: `apply_template` (which accepts the returned `template` path) or `write_note` to create the note, `append_note`/`append_to_section` to log into it, `read_notes`/`read_section` to read it. Note that `{{date}}`/`{{time}}` in an applied template expand with the current moment, not the resolved day — exact Obsidian parity for today, a caveat when creating past/future notes.
+
 ### get_config
 
 Report the server's own configuration — how it is set up, not what is in the vault (that's `get_vault_stats`). Answers "where is the template folder?", "are writes enabled?", "which vault am I pointed at?" in one call.
 
 **Parameters:**
-- `section` (string, optional): `"template" | "writes" | "vault"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors, listing the valid ones.
+- `section` (string, optional): `"template" | "daily" | "writes" | "vault" | "tools"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors, listing the valid ones.
 
-**Returns:** `{ template, writes, vault, tools }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `writes` is `{ writes_enabled, git_autocommit }` — `writes_enabled` is derived (`true` iff the tool policy exposes at least one write tool); `git_autocommit` is the `OBSIDIAN_GIT_AUTOCOMMIT` flag state. `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents). `tools` is `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset) and the sorted exposed/excluded tool names.
+**Returns:** `{ template, daily, writes, vault, tools }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `daily` is `{ folder, format, template }` — the Daily Notes configuration `resolve_daily_note` runs on, reported leniently (`folder: null` when unconfigured, `""` when configured at the vault root). `writes` is `{ writes_enabled, git_autocommit }` — `writes_enabled` is derived (`true` iff the tool policy exposes at least one write tool); `git_autocommit` is the `OBSIDIAN_GIT_AUTOCOMMIT` flag state. `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents). `tools` is `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset) and the sorted exposed/excluded tool names.
 
 Read-only and never excludable by `OBSIDIAN_TOOLS` — it's how an agent discovers the active tool policy, so it's always exposed.
 
@@ -894,7 +912,7 @@ The 11 domain groups (every gated tool belongs to exactly one):
 | Group | Read | Write |
 |---|---|---|
 | `search` | search_notes, search_notes_ranked | — |
-| `notes` | read_notes, list_notes, list_recent_notes, resolve_note | write_note, append_note, prepend_note, patch_note, delete_note, move_note |
+| `notes` | read_notes, list_notes, list_recent_notes, resolve_note, resolve_daily_note | write_note, append_note, prepend_note, patch_note, delete_note, move_note |
 | `sections` | get_outline, read_section | add_section, append_to_section, replace_section, rename_section |
 | `links` | get_links, get_related_notes | — |
 | `tags` | list_tags, find_by_tag | add_tag, remove_tag |
@@ -975,7 +993,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_TOOLS": "all"` to the `env` block above (with the variable unset the server is read-only). Any selector policy works here — e.g. `"OBSIDIAN_TOOLS": "reads,tasks.write"` for a read-everything, write-only-tasks agent; see [Tool policy](#tool-policy-obsidian_tools). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_config`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_templates`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`). With write tools selected in `OBSIDIAN_TOOLS` it also provides them (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`, `apply_template`, `insert_template`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_config`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_templates`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`, `resolve_daily_note`). With write tools selected in `OBSIDIAN_TOOLS` it also provides them (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`, `apply_template`, `insert_template`).
 
 ## Acknowledgments
 

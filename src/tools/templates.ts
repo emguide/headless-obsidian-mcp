@@ -127,8 +127,23 @@ export async function listTemplates(
   return toListResponse(all, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
 }
 
+/** The template config, or null when none is configured (no throw). */
+async function templateConfigOrNull(
+  vaultPath: string
+): Promise<TemplateConfig | null> {
+  try {
+    return await resolveTemplateConfig(vaultPath);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Read a template's raw text by name (basename, with or without .md). A
+ * Read a template's raw text by name (basename, with or without .md). A name
+ * is resolved inside the configured template folder first; failing that, it is
+ * tried as a vault-relative note path — the Daily Notes plugin's template can
+ * live anywhere in the vault (and exists without a Templates folder at all),
+ * so `resolve_daily_note`'s template value is always accepted here. A
  * not-found name fails loud, listing the available templates so the caller can
  * retry with a real one.
  */
@@ -136,17 +151,28 @@ export async function readTemplate(
   vaultPath: string,
   name: string
 ): Promise<{ path: string; raw: string }> {
-  const cfg = await resolveTemplateConfig(vaultPath);
+  const cfg = await templateConfigOrNull(vaultPath);
   const base = name.replace(/\.md$/, "");
-  const rel = `${cfg.folder}/${base}.md`;
-  const full = resolveVaultFile(vaultPath, rel);
+  if (cfg) {
+    const rel = `${cfg.folder}/${base}.md`;
+    try {
+      const raw = await readFile(resolveVaultFile(vaultPath, rel), "utf-8");
+      return { path: rel, raw };
+    } catch {
+      /* not in the template folder — try the vault-relative fallback */
+    }
+  }
+  const rel = `${base}.md`;
   try {
-    const raw = await readFile(full, "utf-8");
+    const raw = await readFile(resolveVaultFile(vaultPath, rel), "utf-8");
     return { path: rel, raw };
   } catch {
-    const avail = (await templateFiles(vaultPath, cfg.folder)).map((t) => t.name);
+    const avail = cfg
+      ? (await templateFiles(vaultPath, cfg.folder)).map((t) => t.name)
+      : [];
     throw new Error(
-      `Template not found: ${base}. Available: ${avail.join(", ") || "(none)"}`
+      `Template not found: ${base}. Available: ${avail.join(", ") || "(none)"} ` +
+        `(a vault-relative note path is also accepted).`
     );
   }
 }
@@ -156,19 +182,23 @@ function titleOf(notePath: string): string {
   return basename(notePath).replace(/\.md$/, "");
 }
 
-/** Expand a named template's placeholders for a given target note path. */
+/**
+ * Expand a named template's placeholders for a given target note path. Config
+ * is fetched leniently: with no Templates folder configured, a vault-path
+ * template still expands, with the plugin-default date/time formats.
+ */
 async function expandTemplateFor(
   vaultPath: string,
   template: string,
   targetPath: string
 ): Promise<string> {
-  const cfg = await resolveTemplateConfig(vaultPath);
+  const cfg = await templateConfigOrNull(vaultPath);
   const { raw } = await readTemplate(vaultPath, template);
   return expand(raw, {
     title: titleOf(targetPath),
     now: new Date(),
-    dateFormat: cfg.dateFormat,
-    timeFormat: cfg.timeFormat,
+    dateFormat: cfg?.dateFormat,
+    timeFormat: cfg?.timeFormat,
   });
 }
 

@@ -21,7 +21,7 @@ Tool names follow a fixed verb taxonomy. A new tool reuses an existing verb; it 
 
 - **`get_`** — return one addressed thing: a note by path (`get_links`, `get_outline`, `get_frontmatter`, `get_property`, `get_related_notes`), or the vault as a single object (`get_vault_stats`). A collection-valued return is fine when it is *about* one addressed note (`get_related_notes`); it is not `get_` when it enumerates a vault-wide collection — that is `list_`.
 - **`list_`** — enumerate a vault-wide collection, optionally scoped or parameterized: `list_notes`, `list_files`, `list_folders`, `list_tags`, `list_properties`, `list_property_values`, `list_recent_notes`, `list_vault_issues`. A required argument does not demote it to `get_` (`list_property_values(key)`, `list_vault_issues(kind)`).
-- **`search_`** — text query over content (`search_notes`, `search_notes_ranked`). **`read_`** — return body text from disk (`read_notes`, `read_section`). **`resolve_`** — map a human name to a canonical path (`resolve_note`).
+- **`search_`** — text query over content (`search_notes`, `search_notes_ranked`). **`read_`** — return body text from disk (`read_notes`, `read_section`). **`resolve_`** — map a human name to a canonical path (`resolve_note`, `resolve_daily_note` — a date is a human-facing name too).
 - **`find_by_X`** — retrieval by one named criterion (`find_by_tag`). **`query_`** — retrieval by a condition object (`query_notes`); `where` is the single condition language, anchored by `query_notes`, and reused verbatim by every tool that filters notes.
 - **Writes** name the mutation: `write/append/prepend/delete/move`, `add/remove_tag`, `set_frontmatter`, `add/remove_property_values`, `rename_property`, `add/append_to/replace_section`, `patch_note`, `bulk_edit`. The `_property_values` noun is per-note when prefixed `add_`/`remove_` (writes) and vault-wide when prefixed `list_` (read) — the verb, not the noun, carries the scope.
 
@@ -330,6 +330,14 @@ individual tool descriptions state only their deviations from it.
 - **Matching**: Exact, case-insensitive equality against frontmatter `title`, each frontmatter `aliases[]` entry (a single string or an array), and the file basename. No partial/substring/fuzzy matching — that is `search_notes_ranked`'s job. A no-match is a normal empty result, not an error.
 - **Index-backed**: A single map lookup over the shared index (the index now also records each note's `aliases`); no per-call vault scan.
 
+### resolve_daily_note
+- **Purpose**: Map a calendar date to its canonical daily-note path — the `resolve_` verb's date analogue of `resolve_note`. Removes the out-of-band "which folder, which format?" knowledge for "append this to today's note" / "what did I log yesterday": the answer comes from the **Daily Notes core plugin's own config**, so it tracks whatever the user sets in Obsidian.
+- **Input**: `date` (optional) — `"YYYY-MM-DD"`, or a keyword `"today"` (default) / `"yesterday"` / `"tomorrow"` (case-insensitive). Anything else errors loudly, listing the accepted forms. Keywords exist because the tool's purpose is removing out-of-band knowledge — an agent that doesn't know the current date can still say "yesterday".
+- **Output**: `{ date, path, exists, template }` — `date` is the resolved ISO day; `path` the canonical note path (no `.md`; slashes in the configured format nest folders, e.g. `YYYY/MM/YYYY-MM-DD`, exactly as in Obsidian); `exists` whether that note is on disk (fresh stat, so a just-created note shows immediately); `template` the configured daily template as a vault-relative path (no `.md`), or `null`.
+- **Config resolution (config-first, mirroring Templates)**: reads `.obsidian/daily-notes.json` (`folder`, `format`, `template`); missing keys take Obsidian's own defaults (vault root, `YYYY-MM-DD`, no template), so an empty `{}` config is fully valid. `OBSIDIAN_DAILY_FOLDER` overrides the folder for headless setups. Neither present → **fail loud** (with no evidence the plugin is in use, guessing would silently resolve wrong paths). Date rendering uses the same dayjs machinery as `{{date:...}}` — one date engine. Implemented in `src/tools/daily-notes.ts`.
+- **Read-only by design** — existing tools do the rest: `apply_template` (which accepts the returned `template` path — see the vault-path fallback under Templates) or `write_note` to create it, `append_note`/`append_to_section` to log into it, `read_notes`/`read_section` to read it. **Caveat**: `{{date}}`/`{{time}}` in an applied template expand with the current moment, not the resolved day — exact Obsidian parity for today (the only day the core plugin itself creates), a known caveat when creating past/future notes; `{{title}}` renders the date-formatted basename either way.
+- **Security**: The resolved path is traversal-guarded via the same guard as read_notes.
+
 ## Writing tools
 
 **Tool exposure is policy-controlled.** The server exposes tools according to
@@ -489,6 +497,16 @@ tools fail loud rather than returning an empty result. Helpers live in
 (the new note for `apply_template`, the existing note for `insert_template`) —
 exact Obsidian parity.
 
+**Vault-path fallback.** A `template` argument is resolved inside the
+configured template folder first; failing that, it is tried as a
+**vault-relative note path** (`.md` optional). This exists because the Daily
+Notes plugin's template can live anywhere in the vault — and daily notes can
+be configured with no Templates folder at all — so `resolve_daily_note`'s
+`template` value is always directly consumable by
+`apply_template`/`insert_template` (with an unconfigured Templates folder,
+date/time formats fall back to the Obsidian defaults). Folder-relative names
+keep precedence, so existing behavior is unchanged.
+
 ### list_templates
 - **Purpose**: Enumerate the configured template folder — the discovery entry
   point for the two template write tools. Read-only, never gated.
@@ -504,7 +522,8 @@ exact Obsidian parity.
 - **Purpose**: Create a new note from a template — the template-driven
   counterpart of `write_note`. A write tool under the tool policy; routed through
   the git guard.
-- **Input**: `template` (required — name or template-folder-relative path),
+- **Input**: `template` (required — name, template-folder-relative path, or
+  vault-relative note path; see the vault-path fallback above),
   `path` (required — destination note), `overwrite` (optional, default `false`
   — refuses to clobber, like `write_note`).
 - **Output**: `{ path, created, unresolved_links, broken_anchors }` — same shape
@@ -529,9 +548,10 @@ exact Obsidian parity.
 
 ### get_config
 - **Purpose**: Report the server's *own configuration* — how it is set up, not what is in the vault (that is `get_vault_stats`). Answers "where is the template folder?", "are writes enabled?", "which vault am I pointed at?" in one call, instead of inferring them from other tools' side effects.
-- **Input**: `section` (optional): `"template" | "writes" | "vault"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors loudly, listing the valid sections.
-- **Output**: `{ template, writes, vault }` (or one unwrapped section):
+- **Input**: `section` (optional): `"template" | "daily" | "writes" | "vault" | "tools"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors loudly, listing the valid sections.
+- **Output**: `{ template, daily, writes, vault, tools }` (or one unwrapped section):
   - `template`: `{ folder, date_format, time_format }` — `folder` is the resolved template folder or `null` when none is configured (this tool does **not** throw on an unconfigured folder, unlike the template tools); `date_format`/`time_format` are the **effective** formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`).
+  - `daily`: `{ folder, format, template }` — the Daily Notes configuration `resolve_daily_note` runs on, reported leniently (`folder: null` when daily notes are unconfigured, no throw; `""` means configured at the vault root); `format` is the effective filename format, `template` the configured daily template path or `null`.
   - `writes`: `{ writes_enabled, git_autocommit }` — `writes_enabled` is **derived**: `true` iff at least one write tool is exposed by the tool policy; `git_autocommit` is the `OBSIDIAN_GIT_AUTOCOMMIT` flag state.
   - `vault`: `{ path }` — the configured `OBSIDIAN_VAULT_PATH`. Configuration only; vault contents (counts, sizes, link health) stay in `get_vault_stats`.
   - `tools`: `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset), the sorted exposed tool names (always including `get_config`), and the sorted gated tool names the policy hides.
@@ -558,7 +578,7 @@ The 11 domain groups (every gated tool belongs to exactly one):
 | Group | Read | Write |
 |---|---|---|
 | `search` | search_notes, search_notes_ranked | — |
-| `notes` | read_notes, list_notes, list_recent_notes, resolve_note | write_note, append_note, prepend_note, patch_note, delete_note, move_note |
+| `notes` | read_notes, list_notes, list_recent_notes, resolve_note, resolve_daily_note | write_note, append_note, prepend_note, patch_note, delete_note, move_note |
 | `sections` | get_outline, read_section | add_section, append_to_section, replace_section, rename_section |
 | `links` | get_links, get_related_notes | — |
 | `tags` | list_tags, find_by_tag | add_tag, remove_tag |
@@ -688,9 +708,13 @@ npm run query -- related "projects/alpha" --limit 5    # Top 5 related notes
 npm run query -- related "projects/alpha" --folder work --tag active  # Scope the candidate pool
 npm run query -- frontmatter "projects/alpha"          # Just the frontmatter
 npm run query -- resolve "Alpha Project"                # title/alias/basename -> path
+npm run query -- daily                                  # Today's daily-note path ({ date, path, exists, template })
+npm run query -- daily yesterday                        # ... or yesterday / tomorrow / an explicit YYYY-MM-DD
+npm run query -- daily 2026-07-01
 npm run query -- stats                                  # Whole-vault statistics
 npm run query -- config                                 # Whole server config
 npm run query -- config template                        # Just the template section
+npm run query -- config daily                           # Daily Notes config (folder/format/template)
 npm run query -- config tools                           # Active tool policy (exposed/excluded)
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source

@@ -19,7 +19,7 @@ const ALWAYS_EXPOSED = "get_config";
 const GROUP_MEMBERS: Readonly<Record<string, readonly string[]>> = {
   search: ["search_notes", "search_notes_ranked"],
   notes: [
-    "read_notes", "list_notes", "list_recent_notes", "resolve_note",
+    "read_notes", "list_notes", "list_recent_notes", "resolve_note", "resolve_daily_note",
     "write_note", "append_note", "prepend_note", "patch_note", "delete_note", "move_note",
   ],
   sections: [
