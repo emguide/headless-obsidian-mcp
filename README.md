@@ -178,6 +178,11 @@ npm run query -- outline "projects/alpha"
 npm run query -- read-section "projects/alpha" "Log"
 npm run query -- read-section "projects/alpha" "Projects > Log" --include-subsections
 
+# Checkbox tasks across the vault, optionally scoped/filtered by folder/tags/where/status
+npm run query -- tasks
+npm run query -- tasks --folder projects --status open
+npm run query -- tasks --tag work --status open in_progress
+
 # --- Writing ---
 
 # Create a note (inline, from a --file, or from stdin)
@@ -218,6 +223,10 @@ npm run query -- move-file "assets/old.png" "assets/new.png"
 npm run query -- patch "projects/alpha" "old text" "new text"
 npm run query -- patch "projects/alpha" "TODO" "DONE" --all
 
+# Set one checkbox task's state (by text and/or line)
+npm run query -- set-task-state "projects/alpha" --text "ship it" --status done
+npm run query -- set-task-state "projects/alpha" --line 12 --status in_progress
+
 # Delete a note (trash-safe by default; recoverable from .trash)
 npm run query -- delete "inbox/idea"
 npm run query -- delete "inbox/idea" --permanent
@@ -257,7 +266,7 @@ Tool names follow a fixed verb taxonomy — a new tool reuses an existing verb r
 **Filter vocabulary (shared).** Every note-selecting tool — `search_notes`, `search_notes_ranked`, `list_notes`, `list_recent_notes`, `find_by_tag`, `query_notes`, `get_related_notes`, and `bulk_edit.select` — accepts the same optional candidate filters: `folder` (path prefix), `tags` (with `match` `"any"` default / `"all"`), and `where` (frontmatter conditions, `query_notes` syntax). An absent filter imposes no constraint, so a scoped question ("active notes in `projects/` tagged `#work`") is a single call rather than a fetch-wide-then-filter-in-context join. On a tool whose primary filter is already tags (`find_by_tag`) or where (`query_notes`), `match` governs that primary filter and the added secondary filter applies with its own default (tags: `any`, where: `all`). Each tool keeps its distinct core (unified tag set, ordering, frontmatter conditions, relatedness scoring); they differ only in intent.
 
 <a name="link-integrity-on-writes"></a>
-**Link-integrity on writes (shared).** Every content-writing tool — `write_note`, `append_note`, `prepend_note`, `patch_note`, `add_section`, `append_to_section`, `replace_section` — returns, alongside its normal fields, `unresolved_links` (wikilink targets in the *resulting* note that resolve to no vault note) and `broken_anchors` (`[[note#heading]]` links whose note resolves but whose heading anchor matches nothing, as `{ target, anchor }`). Both are **report-only** — the write is never blocked or modified, exactly like `delete_note`'s `dangled_backlinks` — so an agent learns immediately when a write introduces a broken `[[wikilink]]` instead of discovering it later via `list_vault_issues`. The report covers the whole resulting note (not just the changed span); empty arrays mean the write left the graph intact. Block-ref anchors (`#^id`) are never flagged.
+**Link-integrity on writes (shared).** Every content-writing tool — `write_note`, `append_note`, `prepend_note`, `patch_note`, `add_section`, `append_to_section`, `replace_section`, `set_task_state` — returns, alongside its normal fields, `unresolved_links` (wikilink targets in the *resulting* note that resolve to no vault note) and `broken_anchors` (`[[note#heading]]` links whose note resolves but whose heading anchor matches nothing, as `{ target, anchor }`). Both are **report-only** — the write is never blocked or modified, exactly like `delete_note`'s `dangled_backlinks` — so an agent learns immediately when a write introduces a broken `[[wikilink]]` instead of discovering it later via `list_vault_issues`. The report covers the whole resulting note (not just the changed span); empty arrays mean the write left the graph intact. Block-ref anchors (`#^id`) are never flagged.
 
 ### search_notes
 
@@ -377,6 +386,21 @@ Read a single section of a note without loading the whole note — the read-side
 **Returns:** `{ path, section, level, content }`. `section` is the resolved full heading-path; `content` is the heading line plus its own body (nested subsections excluded unless `include_subsections` is set). Frontmatter is never included.
 
 A bare heading resolves when unique; an ambiguous bare heading errors loudly, listing the candidate full paths so you can retry with the exact one (mirrors `patch_note`'s fail-loud behavior).
+
+### list_tasks
+
+The structured checkbox-task surface — every `- [ ]` task in the vault as parsed rows, replacing a hand-rolled `- [ ]` regex through `search_notes`. Index-backed (no per-call file reads).
+
+**Parameters:**
+- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
+- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
+- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
+- `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
+- `status` (array, optional): Status names to match, any-of (`"open"`, `"done"`, `"in_progress"`, `"cancelled"`, `"forwarded"`, `"other"`); omitted = all statuses
+- `limit` (number, optional): Maximum number of tasks to return (default 100; `limit: 0` = unbounded)
+- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
+
+**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of task rows: `{ path, text, status, marker, line, section }`. `text` is the task text after the checkbox; `status` is the named state; `marker` is the raw checkbox character verbatim; `line` is **1-based and body-relative** (frontmatter stripped) — the same convention as `get_outline`/`read_section`, so a task's `line` cross-references directly against an outline's `line`; `section` is the `" > "`-joined heading-path the task falls under, or `null` when it sits above every heading.
 
 ### list_tags
 
@@ -630,6 +654,20 @@ With `all` false, a `find` that occurs more than once errors (reporting the coun
 
 **Returns:** `{ path, replacements, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)). A patch that swaps a wikilink target for a typo surfaces it here immediately.
 
+### set_task_state
+
+Change one checkbox task's state, rewriting only the marker character — the write-side complement of `list_tasks`.
+
+**Parameters:**
+- `path` (string, required): Relative note path
+- `text` (string, optional): Exact task text to match (the part after the checkbox)
+- `line` (number, optional): 1-based, body-relative line — a tiebreak alongside `text`, or a positional address on its own
+- `status` (string, required): Target state — a **writable** status only: `"open"`, `"done"`, `"in_progress"`, `"cancelled"`, `"forwarded"`. `"other"` is rejected (no canonical marker to write).
+
+At least one of `text`/`line` is required. Addressing is fail-loud, mirroring `patch_note`: `text` alone with zero matches errors "not found"; more than one match errors, listing the candidate line numbers so you can retry with `line`; `line` alone addresses whatever task is on that line; both given requires `text` to match the task found at `line`, or the call errors.
+
+**Returns:** `{ path, line, text, status, marker, changed, unresolved_links, broken_anchors }` — `line`/`text` echo the resolved task, `marker` is the raw character written, `changed` is `false` (no write, no git snapshot) when the task was already in the requested state; the link-health fields are report-only (see [Link-integrity on writes](#link-integrity-on-writes)).
+
 ### add_tag / remove_tag
 
 Add or remove tags in a note's frontmatter without rewriting the note. Adds are idempotent; storage is normalized to a `tags:` array.
@@ -809,14 +847,14 @@ expose them:
 export OBSIDIAN_ALLOW_WRITES=1
 ```
 
-When disabled, the eighteen write tools (`write_note`, `append_note`,
+When disabled, the nineteen write tools (`write_note`, `append_note`,
 `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`,
 `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`,
 `remove_property_values`, `rename_property`, `add_section`,
-`append_to_section`, `replace_section`, `rename_section`, `bulk_edit`) are
-hidden from the tool list and any call to one is rejected, so an agent only
-ever sees the read tools. The flag gates the MCP server; the query CLI is the
-operator's own tool and is not affected by it.
+`append_to_section`, `replace_section`, `rename_section`, `bulk_edit`,
+`set_task_state`) are hidden from the tool list and any call to one is
+rejected, so an agent only ever sees the read tools. The flag gates the MCP
+server; the query CLI is the operator's own tool and is not affected by it.
 
 ### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
@@ -874,7 +912,7 @@ Replace the paths with:
 
 To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`).
 
 ## Acknowledgments
 
