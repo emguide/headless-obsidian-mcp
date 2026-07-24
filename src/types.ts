@@ -111,6 +111,32 @@ export interface ParsedHeading {
   line: number;
 }
 
+/** A named checkbox-task state; agent-facing so no marker char is needed. */
+export type TaskStatus =
+  | "open"
+  | "done"
+  | "in_progress"
+  | "cancelled"
+  | "forwarded"
+  | "other";
+
+/** The subset of TaskStatus that set_task_state can write (excludes "other"). */
+export type WritableTaskStatus = Exclude<TaskStatus, "other">;
+
+/** A checkbox task line parsed from a note body. */
+export interface ParsedTask {
+  /** Task text after the checkbox, trimmed. */
+  text: string;
+  /** Named state mapped from the raw marker. */
+  status: TaskStatus;
+  /** Raw marker char inside the brackets (" " for empty/open), verbatim. */
+  marker: string;
+  /** 0-based index of the task line within the body (exposed 1-based downstream). */
+  line: number;
+  /** Leading-whitespace column count before the bullet (0 = top-level). */
+  indent: number;
+}
+
 export interface ListNotesParams {
   /** Restrict to notes under this folder (relative to the vault root). */
   folder?: string;
