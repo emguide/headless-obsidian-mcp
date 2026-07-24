@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import matter from "gray-matter";
 import { assertVaultPath, resolveNotePath } from "./vault.js";
+import { noteNotFoundError } from "./not-found.js";
 
 /** Canonical vault name for a note path (forward slashes, no .md suffix). */
 function canonicalName(notePath: string): string {
@@ -25,7 +26,7 @@ export async function getFrontmatter(
   try {
     raw = await readFile(fullPath, "utf-8");
   } catch {
-    throw new Error(`Note not found: ${canonicalName(notePath)}`);
+    throw await noteNotFoundError(vaultPath, notePath);
   }
   const frontmatter = (matter(raw).data ?? {}) as Record<string, unknown>;
   return { path: canonicalName(notePath), frontmatter };

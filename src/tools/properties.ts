@@ -1,5 +1,6 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
+import { noteNotFoundMessage } from "./not-found.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 import {
@@ -162,7 +163,7 @@ export async function getProperty(
   const canonical = canonicalName(path);
   const resolved = index.resolve(canonical) ?? canonical;
   const entry = index.getEntry(resolved);
-  if (!entry) throw new Error(`Note not found: ${canonical}`);
+  if (!entry) throw new Error(noteNotFoundMessage(index, canonical));
   const present = key in entry.frontmatter;
   return {
     path: entry.path,
