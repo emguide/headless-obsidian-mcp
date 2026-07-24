@@ -134,7 +134,7 @@ const server = new Server(
 const TOOL_DEFINITIONS = [
       {
         name: "search_notes",
-        description: "Search notes with ripgrep, optionally scoped by folder, tags, or a frontmatter where filter (index-resolved candidates, then rg over just those notes). Paginates over matching files: returns { results, truncated, files_returned, files_skipped, files_omitted, matches_capped_in }.",
+        description: "Search notes with ripgrep, optionally scoped by folder, tags, or a frontmatter where filter (index-resolved candidates, then rg over just those notes). Paginates over matching files: returns { results, truncated, files_returned, files_skipped, files_omitted, matches_capped_in }. Each match carries line_number (file-absolute, ripgrep's) and body_line (1-based body-relative with frontmatter stripped — the same line convention as get_outline/list_tasks/set_task_state, so a hit can be handed straight to those tools; null for hits inside the frontmatter block).",
         inputSchema: {
           type: "object",
           properties: {

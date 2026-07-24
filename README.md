@@ -292,7 +292,7 @@ Search through markdown files in your vault using ripgrep patterns.
 - `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
 
 **Returns:** An object bounding the result set:
-- `results`: Array of search results, each with `path` (relative, without .md) and `matches` (line numbers + context)
+- `results`: Array of search results, each with `path` (relative, without .md) and `matches` (line numbers + context); each match carries `line_number` (file-absolute) and `body_line` (1-based body-relative, frontmatter stripped — the same convention as `get_outline`/`list_tasks`/`set_task_state`, so a grep hit feeds `set_task_state` directly; `null` for hits inside the frontmatter block)
 - `truncated`: `true` if any cap dropped results (skipping forward via `offset` does not set it)
 - `files_returned`: number of files in `results`
 - `files_skipped`: matching files skipped before the window by `offset`
