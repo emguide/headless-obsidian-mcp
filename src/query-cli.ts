@@ -19,6 +19,7 @@ import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
 import { listFolders } from "./tools/folders.js";
+import { listTasks } from "./tools/tasks.js";
 import {
   writeNote,
   appendNote,
@@ -37,6 +38,7 @@ import {
   removeNotePropertyValues,
   renameNoteProperty,
   renameSectionInVault,
+  setTaskState,
 } from "./tools/write.js";
 import {
   listProperties,
@@ -98,6 +100,10 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await listFiles(VAULT_PATH!, args);
     } else if (toolName === "list_folders") {
       result = await listFolders(VAULT_PATH!, args);
+    } else if (toolName === "list_tasks") {
+      result = await listTasks(VAULT_PATH!, args);
+    } else if (toolName === "set_task_state") {
+      result = await setTaskState(VAULT_PATH!, args);
     } else if (toolName === "write_note") {
       result = await writeNote(VAULT_PATH!, args);
     } else if (toolName === "append_note") {
@@ -331,6 +337,31 @@ program
       { path, section, include_subsections: !!options.includeSubsections },
       verbose
     );
+  });
+
+program
+  .command("tasks")
+  .description("List checkbox tasks across the vault, optionally scoped/filtered")
+  .option("-f, --folder <folder>", "Restrict to notes under this folder")
+  .option("-t, --tag <tags...>", "Restrict to notes carrying these tags")
+  .option("-a, --all", "Require all tags (default: any)")
+  .option("--where <json>", "Frontmatter filter as JSON (query_notes syntax)")
+  .option("-s, --status <statuses...>", "Restrict to these statuses (open|done|in_progress|cancelled|forwarded|other)")
+  .option("-l, --limit <n>", "Maximum number of tasks to return")
+  .option("-o, --offset <n>", "Rows to skip before the window (pagination)")
+  .action(async (options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const where = parseWhere(options.where);
+    const args = {
+      ...(options.folder && { folder: options.folder }),
+      ...(options.tag && { tags: options.tag }),
+      ...(options.all && { match: "all" }),
+      ...(where !== undefined && { where }),
+      ...(options.status && { status: options.status }),
+      ...(options.limit && { limit: parseInt(options.limit, 10) }),
+      ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
+    };
+    await queryTool("list_tasks", args, verbose);
   });
 
 program
@@ -587,6 +618,23 @@ program
     const verbose = command.parent?.opts().verbose ?? false;
     const args = { path, find, replace, ...(options.all && { all: true }) };
     await queryTool("patch_note", args, verbose);
+  });
+
+program
+  .command("set-task-state <path>")
+  .description("Set one checkbox task's state (by text and/or line)")
+  .option("--text <text>", "Exact task text to match")
+  .option("--line <n>", "1-based line tiebreak / positional address")
+  .requiredOption("--status <status>", "Target state (open|done|in_progress|cancelled|forwarded)")
+  .action(async (path: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      path,
+      ...(options.text !== undefined && { text: options.text }),
+      ...(options.line !== undefined && { line: parseInt(options.line, 10) }),
+      status: options.status,
+    };
+    await queryTool("set_task_state", args, verbose);
   });
 
 program
