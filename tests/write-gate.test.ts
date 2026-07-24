@@ -42,3 +42,15 @@ test("read tools are not classified as write tools", () => {
     assert.equal(isWriteTool(name), false, `${name} should not be a write tool`);
   }
 });
+
+test("get_config is never write-gated (isWriteTool returns false)", () => {
+  // Regression guard: get_config must NEVER be write-gated, regardless of
+  // OBSIDIAN_ALLOW_WRITES. It must always be in list_tools and always
+  // dispatchable. This invariant is load-bearing for server availability.
+  assert.equal(isWriteTool("get_config"), false, "get_config should not be a write tool");
+  assert.ok(!WRITE_TOOL_NAMES.has("get_config"), "get_config should not be in WRITE_TOOL_NAMES");
+
+  // Prove the predicate actually discriminates (not broken to always return false).
+  assert.equal(isWriteTool("write_note"), true, "write_note should be a write tool");
+  assert.ok(WRITE_TOOL_NAMES.has("write_note"), "write_note should be in WRITE_TOOL_NAMES");
+});
