@@ -20,6 +20,7 @@ import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
 import { listFolders } from "./tools/folders.js";
 import { listTemplates, applyTemplate, insertTemplate } from "./tools/templates.js";
+import { resolveServerConfig, selectConfigSection } from "./tools/config.js";
 import {
   writeNote,
   appendNote,
@@ -149,6 +150,9 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await applyTemplate(VAULT_PATH!, args);
     } else if (toolName === "insert_template") {
       result = await insertTemplate(VAULT_PATH!, args);
+    } else if (toolName === "get_config") {
+      const config = await resolveServerConfig(VAULT_PATH!);
+      result = selectConfigSection(config, args.section);
     } else {
       throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -497,6 +501,15 @@ program
   .action(async (_options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     await queryTool("get_vault_stats", {}, verbose);
+  });
+
+program
+  .command("config")
+  .description("Report the server's own configuration (template folder + formats, write flags, vault path)")
+  .argument("[section]", "Narrow to one section: template | writes | vault")
+  .action(async (section: string | undefined, _options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    await queryTool("get_config", { ...(section && { section }) }, verbose);
   });
 
 program
