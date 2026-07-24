@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import matter from "gray-matter";
 import { setTaskState } from "../src/tools/write.js";
+import { listTasks } from "../src/tools/tasks.js";
 import { makeVault, Fixture } from "./fixtures.js";
 
 const read = (v: string, n: string) => readFile(join(v, n), "utf-8");
@@ -187,6 +189,54 @@ test("note WITH frontmatter: body-relative line addresses the correct task and f
     assert.match(raw, /^ {2}- \[x\] nested item$/m);
     assert.match(raw, /^- \[ \] review draft$/m);
     assert.match(raw, /^- \[x\] already done$/m);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("closing frontmatter fence with trailing whitespace: set_task_state agrees with list_tasks on line numbering", async () => {
+  // NoteDocument's FENCE regex (`[ \t]*` after the closing "---") swallows the
+  // trailing spaces on the closing fence into the frontmatter block, while
+  // gray-matter (used by list_tasks/get_outline) does not — that whitespace
+  // becomes the note's first "body" line. On a note like this the two body
+  // splits disagree by one line unless set_task_state strips frontmatter the
+  // same way the index does.
+  const raw =
+    "---\ntitle: X\ntags: [a]\n---   \n# H\n- [ ] alpha\n- [ ] beta\n";
+  const fx = await makeVault([{ path: "trail.md", content: raw }]);
+  try {
+    // Sanity-check the premise: gray-matter's stripped body is a suffix of raw
+    // (raw.endsWith(body)), which the fix relies on to reattach frontmatter
+    // byte-for-byte via slicing.
+    const body = matter(raw).content;
+    assert.ok(raw.endsWith(body), "matter(raw).content must be a suffix of raw");
+
+    const listed = await listTasks(fx.vaultPath, {});
+    const betaRow = listed.results.find((t) => t.text === "beta");
+    assert.ok(betaRow, "list_tasks must report the 'beta' task");
+    const betaLine = betaRow!.line;
+
+    // Handing list_tasks' reported line straight to set_task_state must land
+    // on "beta" (not "alpha", not the heading) — the documented invariant.
+    const res = await setTaskState(fx.vaultPath, {
+      path: "trail",
+      line: betaLine,
+      text: "beta",
+      status: "done",
+    });
+    assert.equal(res.text, "beta");
+    assert.equal(res.marker, "x");
+    assert.equal(res.line, betaLine);
+
+    const after = await read(fx.vaultPath, "trail.md");
+    // Frontmatter block (including its trailing-space closing fence) intact.
+    assert.ok(
+      after.startsWith("---\ntitle: X\ntags: [a]\n---   \n"),
+      "frontmatter block, including trailing-space closing fence, must be byte-for-byte intact"
+    );
+    // Only beta's marker changed; alpha untouched.
+    assert.match(after, /^- \[x\] beta$/m);
+    assert.match(after, /^- \[ \] alpha$/m);
   } finally {
     await fx.cleanup();
   }

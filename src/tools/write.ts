@@ -671,10 +671,14 @@ export async function renameSectionInVault(
  * Change one checkbox task's state, rewriting only its marker character.
  * Addressing (`text` and/or `line`) and `parseTasks` both use 1-based
  * body-relative line numbers — the same convention as `list_tasks` and
- * `get_outline` (frontmatter stripped before parsing, so a note's line 1 is
- * its first body line, never the frontmatter fence). Frontmatter is preserved
- * byte-for-byte via `NoteDocument`, matching the body-only-edit convention
- * used by the section tools.
+ * `get_outline`. Frontmatter is stripped via gray-matter (`matter(raw).content`)
+ * — the SAME stripper `list_tasks`/`get_outline` use via the shared index —
+ * rather than `NoteDocument`, because `NoteDocument`'s fence regex swallows
+ * trailing whitespace on the closing `---` fence into the frontmatter block
+ * while gray-matter does not; on such a note the two would otherwise disagree
+ * by one body line. The original frontmatter block is reattached byte-for-byte
+ * by slicing it off `raw` (gray-matter's stripped body is always a suffix of
+ * `raw`), matching the body-only-edit convention used by the section tools.
  */
 export async function setTaskState(
   vaultPath: string,
@@ -703,12 +707,13 @@ export async function setTaskState(
 
   const canon = canonicalName(path);
   const raw = await readRaw(vaultPath, path);
-  const doc = NoteDocument.parse(raw);
   // parseTasks/`.line` operate on the frontmatter-stripped body, so both the
-  // parse and the line-array edit below must use `doc.body` — never `raw` —
-  // to keep the 1-based `line` param body-relative for notes WITH frontmatter.
-  const bodyLines = doc.body.split("\n");
-  const tasks = parseTasks(doc.body);
+  // parse and the line-array edit below must use gray-matter's `body` — never
+  // `raw`, and never NoteDocument's body — to match list_tasks/get_outline
+  // exactly (see the fence-regex divergence note in the doc comment above).
+  const body = matter(raw).content;
+  const bodyLines = body.split("\n");
+  const tasks = parseTasks(body);
 
   // Locate the target task. parseTasks lines are 0-based; `line` is 1-based.
   let target;
@@ -758,8 +763,13 @@ export async function setTaskState(
   const original = bodyLines[target.line];
   const rewritten = original.replace(/\[(.?)\]/, `[${marker}]`);
   bodyLines[target.line] = rewritten;
-  doc.body = bodyLines.join("\n");
-  const next = doc.serialize(); // frontmatter reattached byte-for-byte (not marked dirty)
+  const newBody = bodyLines.join("\n");
+  // Reattach the original frontmatter block byte-for-byte: gray-matter's
+  // stripped body is always a suffix of raw, so slicing off exactly its
+  // length recovers the original block (including e.g. a trailing-whitespace
+  // closing fence) untouched — only the target line's marker changes.
+  const block = raw.slice(0, raw.length - body.length);
+  const next = block + newBody;
 
   await commitWrite(vaultPath, path, next);
   const health = await linkHealthAfterWrite(vaultPath, path, next);
