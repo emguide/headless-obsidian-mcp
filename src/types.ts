@@ -491,3 +491,13 @@ export interface ListTasksParams {
   /** Rows to skip before the window, for pagination. Default 0. */
   offset?: number;
 }
+
+export interface SetTaskStateParams {
+  path: string;
+  /** Exact task text to match (the part after the checkbox). */
+  text?: string;
+  /** 1-based line tiebreak / positional address. */
+  line?: number;
+  /** Target state; "other" is read-only and rejected. */
+  status: WritableTaskStatus;
+}
