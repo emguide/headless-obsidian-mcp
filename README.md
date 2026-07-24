@@ -155,6 +155,10 @@ npm run query -- stats
 # Resolve a human name (title/alias/basename) to a note path
 npm run query -- resolve "Alpha Project"
 
+# Report the server's own configuration (template folder/formats, write flags, vault path)
+npm run query -- config
+npm run query -- config template
+
 # Vault hygiene: orphaned notes, broken wikilinks, and dead heading anchors (drill-down from stats)
 npm run query -- vault-issues orphans
 npm run query -- vault-issues unresolved_links --limit 50
@@ -549,6 +553,17 @@ Map a human-facing note name to its canonical path. Humans refer to notes by tit
 **Returns:** `{ query, matches, resolved }`. `matches` is an array of `{ path, title, matched_on }` sorted by path, where `matched_on` is `"title" | "alias" | "basename"`; a note matching on more than one field appears once, labeled with its strongest field (precedence `title > alias > basename`). `resolved` is the single path when exactly one note matches, else `null` (ambiguous or no match) — the tool never guesses among candidates.
 
 Matching is exact and case-insensitive against frontmatter `title`, each frontmatter `aliases[]` entry (a single string or an array), and the file basename. No partial/substring/fuzzy matching — that is `search_notes_ranked`'s job. A no-match is a normal empty result, not an error. Index-backed.
+
+### get_config
+
+Report the server's own configuration — how it is set up, not what is in the vault (that's `get_vault_stats`). Answers "where is the template folder?", "are writes enabled?", "which vault am I pointed at?" in one call.
+
+**Parameters:**
+- `section` (string, optional): `"template" | "writes" | "vault"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors, listing the valid ones.
+
+**Returns:** `{ template, writes, vault }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `writes` is `{ writes_enabled, git_autocommit }` — the `OBSIDIAN_ALLOW_WRITES` / `OBSIDIAN_GIT_AUTOCOMMIT` flag states. `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents).
+
+Read-only and never gated by `OBSIDIAN_ALLOW_WRITES` — it's how an agent discovers whether writes are enabled, so it's always exposed.
 
 ### write_note
 

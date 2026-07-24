@@ -467,6 +467,15 @@ exact Obsidian parity.
   touched). The note must already exist — a missing note surfaces the
   underlying "Note not found" error (creating notes is `apply_template`'s job).
 
+### get_config
+- **Purpose**: Report the server's *own configuration* — how it is set up, not what is in the vault (that is `get_vault_stats`). Answers "where is the template folder?", "are writes enabled?", "which vault am I pointed at?" in one call, instead of inferring them from other tools' side effects.
+- **Input**: `section` (optional): `"template" | "writes" | "vault"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors loudly, listing the valid sections.
+- **Output**: `{ template, writes, vault }` (or one unwrapped section):
+  - `template`: `{ folder, date_format, time_format }` — `folder` is the resolved template folder or `null` when none is configured (this tool does **not** throw on an unconfigured folder, unlike the template tools); `date_format`/`time_format` are the **effective** formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`).
+  - `writes`: `{ writes_enabled, git_autocommit }` — the `OBSIDIAN_ALLOW_WRITES` / `OBSIDIAN_GIT_AUTOCOMMIT` flag states.
+  - `vault`: `{ path }` — the configured `OBSIDIAN_VAULT_PATH`. Configuration only; vault contents (counts, sizes, link health) stay in `get_vault_stats`.
+- **Gating**: Read-only and **never gated** by `OBSIDIAN_ALLOW_WRITES` — it is how an agent discovers whether writes are enabled, so it is always exposed.
+
 ### Git guard (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
 Set `OBSIDIAN_GIT_AUTOCOMMIT` to a truthy value (`1`, `true`, `yes`, `on`) to
@@ -563,6 +572,8 @@ npm run query -- related "projects/alpha" --folder work --tag active  # Scope th
 npm run query -- frontmatter "projects/alpha"          # Just the frontmatter
 npm run query -- resolve "Alpha Project"                # title/alias/basename -> path
 npm run query -- stats                                  # Whole-vault statistics
+npm run query -- config                                 # Whole server config
+npm run query -- config template                        # Just the template section
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
 npm run query -- vault-issues broken_anchors --limit 50    # Resolved-note, dead-heading anchors, by source
