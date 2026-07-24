@@ -1,5 +1,6 @@
 import { resolveNotePath, assertVaultPath } from "./vault.js";
 import { getIndex } from "./vault-index.js";
+import { noteNotFoundMessage } from "./not-found.js";
 import { LinksResult, LinksResultWithContext } from "../types.js";
 import { scanLinkLines, linkContext, resolvesTo, backlinkContext } from "./link-context.js";
 
@@ -49,7 +50,9 @@ export async function getLinks(
   const self = index.resolve(noteName) ?? noteName;
   const entry = index.getEntry(self);
   if (!entry) {
-    throw new Error(`Note not found or not readable: ${notePath}`);
+    throw new Error(
+      noteNotFoundMessage(index, notePath, "Note not found or not readable")
+    );
   }
 
   const outbound: Array<{ target: string; path: string }> = [];

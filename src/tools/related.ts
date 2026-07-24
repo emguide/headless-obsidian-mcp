@@ -1,5 +1,6 @@
 import { resolveNotePath, assertVaultPath } from "./vault.js";
 import { getIndex, entryToHeader, VaultIndex, IndexEntry } from "./vault-index.js";
+import { noteNotFoundMessage } from "./not-found.js";
 import { RelatedNotesParams, RelatedNote, ListResponse } from "../types.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
@@ -77,7 +78,9 @@ export async function getRelatedNotes(
   const self = index.resolve(path.replace(/\.md$/i, "")) ?? path.replace(/\.md$/i, "");
   const source = index.getEntry(self);
   if (!source) {
-    throw new Error(`Note not found or not readable: ${path}`);
+    throw new Error(
+      noteNotFoundMessage(index, path, "Note not found or not readable")
+    );
   }
 
   const sourceTags = source.tags;

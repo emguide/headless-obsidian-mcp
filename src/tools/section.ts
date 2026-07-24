@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import matter from "gray-matter";
 import { resolveNotePath, parseHeadings, headingPaths } from "./vault.js";
+import { noteNotFoundError } from "./not-found.js";
 import { ReadSectionParams, SectionResult } from "../types.js";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -26,9 +27,16 @@ export async function readSection(
   }
 
   const fullPath = resolveNotePath(vaultPath, notePath); // guards traversal
-  const info = await stat(fullPath).catch(() => {
-    throw new Error(`Note not found or not readable: ${notePath}`);
-  });
+  let info;
+  try {
+    info = await stat(fullPath);
+  } catch {
+    throw await noteNotFoundError(
+      vaultPath,
+      notePath,
+      "Note not found or not readable"
+    );
+  }
   if (info.size > MAX_BYTES) {
     throw new Error("Note file too large (max 10MB)");
   }
