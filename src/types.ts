@@ -186,6 +186,24 @@ export interface LinksResult {
   backlinks: string[];
 }
 
+/**
+ * One source line containing a reported link (the `include_context`
+ * decoration). `line` is 1-based and body-relative (frontmatter stripped) —
+ * the same convention as get_outline/list_tasks; `text` is the line verbatim.
+ */
+export interface LinkContextLine {
+  line: number;
+  text: string;
+}
+
+/** `get_links` result when `include_context: true`: every row gains `context`. */
+export interface LinksResultWithContext {
+  note: string;
+  outbound_links: Array<{ target: string; path: string; context: LinkContextLine[] }>;
+  unresolved_links: Array<{ target: string; context: LinkContextLine[] }>;
+  backlinks: Array<{ path: string; context: LinkContextLine[] }>;
+}
+
 export interface TagCount {
   tag: string;
   count: number;
@@ -277,6 +295,11 @@ export interface ListVaultIssuesParams {
   limit?: number;
   /** Rows/groups to skip before the window, for pagination. Default 0. */
   offset?: number;
+  /**
+   * Decorate each target with the source line(s) containing it (call-time
+   * file reads over the returned window only). Errors on kind "orphans".
+   */
+  include_context?: boolean;
 }
 
 /** Unresolved outbound links from one source note. */
@@ -291,6 +314,18 @@ export interface UnresolvedLinkGroup {
 export interface BrokenAnchorGroup {
   source: string;
   targets: { target: string; anchor: string }[];
+}
+
+/** `unresolved_links` group when `include_context: true`. */
+export interface UnresolvedLinkGroupWithContext {
+  source: string;
+  targets: Array<{ target: string; context: LinkContextLine[] }>;
+}
+
+/** `broken_anchors` group when `include_context: true`. */
+export interface BrokenAnchorGroupWithContext {
+  source: string;
+  targets: Array<{ target: string; anchor: string; context: LinkContextLine[] }>;
 }
 
 export interface RecentNotesParams {
