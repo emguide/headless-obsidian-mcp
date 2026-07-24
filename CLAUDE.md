@@ -49,7 +49,7 @@ small, this convention is stated once in the server's MCP `instructions`
 
 **Link-integrity on writes (shared).** Every content-writing tool —
 `write_note`, `append_note`, `prepend_note`, `patch_note`, `add_section`,
-`append_to_section`, `replace_section` — returns, alongside its normal fields,
+`append_to_section`, `replace_section`, `set_task_state` — returns, alongside its normal fields,
 `unresolved_links` (wikilink targets in the *resulting* note that resolve to no
 vault note) and `broken_anchors` (`[[note#heading]]` links whose note resolves
 but whose heading anchor matches nothing, as `{ target, anchor }`). Both are
@@ -158,6 +158,19 @@ individual tool descriptions state only their deviations from it.
 - **Output**: `{ path, section, level, content }`. `section` is the resolved full heading-path; `content` is the heading line plus its own body (nested subsections excluded unless `include_subsections` is set). Frontmatter is never included.
 - **Addressing**: A bare heading resolves when unique; an ambiguous bare heading errors loudly, listing the candidate full paths so you can retry with the exact one (mirrors `patch_note`'s fail-loud behavior). Reads the file at call time (the index does not retain body text).
 - **Security**: Path traversal protected via the same guard as read_notes.
+
+### list_tasks
+- **Purpose**: The structured checkbox-task surface — every `- [ ]` task in the vault as parsed rows, replacing a hand-rolled `- [ ]` regex through `search_notes`.
+- **Input**:
+  - `folder` (optional): Restrict to notes under this folder (relative to the vault root)
+  - `tags` (optional): Restrict to notes carrying these tags (leading `#` optional)
+  - `match` (optional): Semantics of `tags` — `"any"` (default) or `"all"`
+  - `where` (optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
+  - `status` (optional): Array of status names to match, any-of (`"open"`, `"done"`, `"in_progress"`, `"cancelled"`, `"forwarded"`, `"other"`); omitted = all statuses
+  - `limit` (optional): Maximum number of tasks to return (default `100`; pass `0` for unbounded)
+  - `offset` (optional): Rows to skip before the window, for pagination (default `0`; skipping past the end returns an empty result, not an error)
+- **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of task rows: `{ path, text, status, marker, line, section }`. `text` is the task text after the checkbox; `status` is the named state; `marker` is the raw checkbox char verbatim; `line` is **1-based and body-relative** (frontmatter stripped) — the same convention as `get_outline`/`read_section`, so a task's `line` cross-references directly against an outline's `line`; `section` is the `" > "`-joined heading-path the task falls under, or `null` when it sits above every heading.
+- **Notes**: Index-backed (no per-call file reads).
 
 ### list_tags
 - **Purpose**: Show the vault's topic index. Returns every tag with the number of notes using it, sorted by frequency.
@@ -282,7 +295,7 @@ individual tool descriptions state only their deviations from it.
 
 **The write tools are off by default.** The server is read-only unless
 `OBSIDIAN_ALLOW_WRITES` is set to a truthy value (`1`, `true`, `yes`, `on`).
-When disabled, the twenty write tools are hidden from `list_tools` and any call
+When disabled, the twenty-one write tools are hidden from `list_tools` and any call
 to one is rejected — so an agent only ever sees the read tools. When enabled, all
 tools are exposed. The flag gates the MCP server (the agent-facing surface); the
 query CLI is the operator's own tool and is not gated. Flag helpers live in
@@ -332,6 +345,12 @@ change a tag or a section without reading and rewriting the whole note.
 - **Input**: `path` (required), `find` (required), `replace` (required), `all` (optional — replace every occurrence instead of only the first)
 - **Output**: `{ path, replacements, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only. A patch that swaps a wikilink target for a typo surfaces it here immediately.
 - **Ambiguity**: With `all` false, a `find` that occurs more than once errors (reporting the count) rather than silently patching the first — set `all: true` to replace every occurrence, or narrow `find` until it is unique.
+
+### set_task_state
+- **Purpose**: Change one checkbox task's state, rewriting only the marker character — the write-side complement of `list_tasks`.
+- **Input**: `path` (required), `text` (optional — exact task text to match), `line` (optional — 1-based, body-relative tiebreak or positional address), `status` (required — a **writable** status only: `"open"`, `"done"`, `"in_progress"`, `"cancelled"`, `"forwarded"`; `"other"` is rejected, since it has no canonical marker to write)
+- **Addressing**: Fail-loud, mirroring `patch_note`. At least one of `text`/`line` is required. `text` alone: zero matches errors "not found"; more than one match errors, listing the candidate line numbers so you can retry with `line`. `line` alone: positional — addresses whatever task is on that line. Both given: `text` must match the task found at `line`, or the call errors.
+- **Output**: `{ path, line, text, status, marker, changed, unresolved_links, broken_anchors }` — `line`/`text` echo the resolved task; `marker` is the raw char written; `changed` is `false` (no write, no git snapshot) when the task was already in the requested state; the link-health fields follow the shared link-integrity convention above (report-only).
 
 ### add_tag / remove_tag
 - **Purpose**: Add or remove tags in a note's frontmatter without rewriting it. Adds are idempotent; storage is normalized to a `tags:` array.
@@ -511,7 +530,7 @@ refused rather than proceeding without the safety net. Implemented in
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
 `list_recent_notes`, `get_related_notes`, `get_vault_stats`, `search_notes_ranked`,
 `query_notes`, `list_properties`, `list_property_values`, `get_outline`,
-`list_vault_issues`, `resolve_note`) share an
+`list_vault_issues`, `resolve_note`, `list_tasks`) share an
 in-memory index (`src/tools/vault-index.ts`) that parses each note once
 (frontmatter, tags, wikilinks, headings, aliases) and caches the result. Each tool call
 refreshes the index by walking the vault and re-reading only files whose size
@@ -520,8 +539,9 @@ scans. Both the backlink graph and the resolved outbound-link graph are
 precomputed during refresh, so `get_related_notes` scores candidates from
 lookups rather than re-resolving links on every call. The index now also
 stores each note's structured headings (level, text, line, fence-aware),
-which backs `get_outline` directly; `read_section` still reads the file at
-call time since the index does not retain body text.
+which backs `get_outline` directly, and each note's parsed checkbox tasks
+(text, status, marker, line), which backs `list_tasks` directly; `read_section`
+still reads the file at call time since the index does not retain body text.
 
 The index also builds a BM25 full-text index (`src/tools/text/bm25.ts`) from a
 stemmed token stream per note (`src/tools/text/tokenize.ts`), rebuilt from cached
@@ -589,6 +609,9 @@ npm run query -- get-property "projects/alpha" status
 npm run query -- outline "projects/alpha"                # Heading outline
 npm run query -- read-section "projects/alpha" "Log"     # One section
 npm run query -- read-section "projects/alpha" "Projects > Log" --include-subsections
+npm run query -- tasks                                   # All checkbox tasks
+npm run query -- tasks --folder projects --status open   # Open tasks in projects/
+npm run query -- tasks --tag work --status open in_progress  # Outstanding work tasks
 
 # Write examples (the query CLI is not gated by OBSIDIAN_ALLOW_WRITES)
 npm run query -- write "inbox/idea" "# Idea\n\nbody"    # Create a note
@@ -611,6 +634,8 @@ npm run query -- move-file "assets/old.png" "assets/new.png"
 npm run query -- template-apply "Daily" "journal/2026-07-23"   # New note from a template
 npm run query -- template-insert "Meeting" "journal/2026-07-23" --position section --section Notes --create-section
 npm run query -- patch "projects/alpha" "old text" "new text" --all
+npm run query -- set-task-state "projects/alpha" --text "ship it" --status done
+npm run query -- set-task-state "projects/alpha" --line 12 --status in_progress
 npm run query -- delete "inbox/idea"                    # Trash-safe (recoverable)
 npm run query -- delete "inbox/idea" --permanent        # Unlink outright
 npm run query -- bulk-edit --select '{"where":{"status":"draft"}}' \

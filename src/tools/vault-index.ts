@@ -7,6 +7,7 @@ import {
   extractLinkTargets,
   extractLinkRefs,
   parseHeadings,
+  parseTasks,
   assertVaultPath,
   VaultFile,
   LinkRef,
@@ -17,6 +18,7 @@ import {
   NoteHeader,
   RankedSearchResult,
   ParsedHeading,
+  ParsedTask,
   ListResponse,
   ResolveMatch,
   ResolveMatchField,
@@ -44,6 +46,8 @@ export interface IndexEntry {
   aliases: string[];
   /** Fence-aware headings in document order (shared parser). */
   headings: ParsedHeading[];
+  /** Fence-aware checkbox tasks in document order (shared parser). */
+  tasks: ParsedTask[];
   /** BM25 token stream: body plus title/headings/tags injected at ×2 weight. */
   tokens: string[];
 }
@@ -309,6 +313,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let title = basename(f.path);
   let aliases: string[] = [];
   let headings: ParsedHeading[] = [];
+  let tasks: ParsedTask[] = [];
   let tokens: string[] = [];
 
   try {
@@ -319,6 +324,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     linkTargets = extractLinkTargets(parsed.content);
     linkRefs = extractLinkRefs(parsed.content);
     headings = parseHeadings(parsed.content);
+    tasks = parseTasks(parsed.content);
     headline = headings[0]?.text;
     if (typeof frontmatter.title === "string" && frontmatter.title.trim()) {
       title = frontmatter.title.trim();
@@ -353,6 +359,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     title,
     aliases,
     headings,
+    tasks,
     tokens,
   };
 }

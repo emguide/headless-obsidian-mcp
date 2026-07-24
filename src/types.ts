@@ -111,6 +111,32 @@ export interface ParsedHeading {
   line: number;
 }
 
+/** A named checkbox-task state; agent-facing so no marker char is needed. */
+export type TaskStatus =
+  | "open"
+  | "done"
+  | "in_progress"
+  | "cancelled"
+  | "forwarded"
+  | "other";
+
+/** The subset of TaskStatus that set_task_state can write (excludes "other"). */
+export type WritableTaskStatus = Exclude<TaskStatus, "other">;
+
+/** A checkbox task line parsed from a note body. */
+export interface ParsedTask {
+  /** Task text after the checkbox, trimmed. */
+  text: string;
+  /** Named state mapped from the raw marker. */
+  status: TaskStatus;
+  /** Raw marker char inside the brackets (" " for empty/open), verbatim. */
+  marker: string;
+  /** 0-based index of the task line within the body (exposed 1-based downstream). */
+  line: number;
+  /** Leading-whitespace column count before the bullet (0 = top-level). */
+  indent: number;
+}
+
 export interface ListNotesParams {
   /** Restrict to notes under this folder (relative to the vault root). */
   folder?: string;
@@ -431,4 +457,47 @@ export interface VaultFileEntry {
   modified: string;
   /** Lowercased extension without the dot (e.g. "png"). */
   extension: string;
+}
+
+/** One checkbox task, as returned by list_tasks. */
+export interface TaskRow {
+  /** Note path (no .md). */
+  path: string;
+  /** Task text after the checkbox. */
+  text: string;
+  /** Named state. */
+  status: TaskStatus;
+  /** Raw marker char. */
+  marker: string;
+  /** 1-based body line of the task. */
+  line: number;
+  /** " > "-joined heading-path the task falls under, or null if above all headings. */
+  section: string | null;
+}
+
+export interface ListTasksParams {
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Restrict to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
+  /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
+  where?: Record<string, Condition>;
+  /** Restrict to tasks in any of these statuses; omitted = all statuses. */
+  status?: TaskStatus[];
+  /** Maximum number of tasks to return (default 100; 0 = unbounded). */
+  limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
+}
+
+export interface SetTaskStateParams {
+  path: string;
+  /** Exact task text to match (the part after the checkbox). */
+  text?: string;
+  /** 1-based line tiebreak / positional address. */
+  line?: number;
+  /** Target state; "other" is read-only and rejected. */
+  status: WritableTaskStatus;
 }

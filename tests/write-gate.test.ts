@@ -54,3 +54,8 @@ test("get_config is never write-gated (isWriteTool returns false)", () => {
   assert.equal(isWriteTool("write_note"), true, "write_note should be a write tool");
   assert.ok(WRITE_TOOL_NAMES.has("write_note"), "write_note should be in WRITE_TOOL_NAMES");
 });
+
+test("set_task_state is a gated write tool", () => {
+  assert.equal(WRITE_TOOL_NAMES.has("set_task_state"), true);
+  assert.equal(isWriteTool("set_task_state"), true);
+});

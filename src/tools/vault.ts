@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, resolve, relative, sep } from "node:path";
-import { ParsedHeading } from "../types.js";
+import { ParsedHeading, ParsedTask, TaskStatus, WritableTaskStatus } from "../types.js";
 
 /**
  * A markdown file discovered in the vault, with lightweight filesystem
@@ -324,4 +324,92 @@ export function headingPaths(headings: ParsedHeading[]): string[] {
 
 export function firstHeading(content: string): string | undefined {
   return parseHeadings(content)[0]?.text;
+}
+
+/** Ordered writable statuses (excludes "other"). */
+export const WRITABLE_TASK_STATUSES: readonly WritableTaskStatus[] = [
+  "open",
+  "done",
+  "in_progress",
+  "cancelled",
+  "forwarded",
+];
+
+/** All statuses, including read-only "other". */
+export const TASK_STATUSES: readonly TaskStatus[] = [
+  ...WRITABLE_TASK_STATUSES,
+  "other",
+];
+
+// Canonical marker for each writable status (write direction).
+const STATUS_TO_MARKER: Record<WritableTaskStatus, string> = {
+  open: " ",
+  done: "x",
+  in_progress: "/",
+  cancelled: "-",
+  forwarded: ">",
+};
+
+// Raw marker -> named status (read direction). Empty brackets normalize to open.
+const MARKER_TO_STATUS: Record<string, TaskStatus> = {
+  " ": "open",
+  "": "open",
+  x: "done",
+  X: "done",
+  "/": "in_progress",
+  "-": "cancelled",
+  ">": "forwarded",
+};
+
+/** Map a raw checkbox marker to its named status ("other" when unrecognized). */
+export function markerToStatus(marker: string): TaskStatus {
+  return MARKER_TO_STATUS[marker] ?? "other";
+}
+
+/** Canonical marker char for a writable status. */
+export function statusToMarker(status: WritableTaskStatus): string {
+  return STATUS_TO_MARKER[status];
+}
+
+// A checkbox list item: indent, bullet, single-or-empty marker, then text.
+const TASK_RE = /^(\s*)([-*+])\s+\[(.?)\]\s?(.*)$/;
+
+/**
+ * All checkbox tasks (`- [ ] ...`) in document order, skipping fenced code
+ * blocks — the task analogue of {@link parseHeadings}, sharing its fence
+ * tracking so the two never disagree about what is "inside code". A plain
+ * bullet (`- text`) is not a task. The raw marker is preserved verbatim; an
+ * empty `[]` normalizes to the open marker (" ").
+ */
+export function parseTasks(content: string): ParsedTask[] {
+  const lines = content.split("\n");
+  const tasks: ParsedTask[] = [];
+  let inFence = false;
+  let fence = "";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fenceMatch = line.match(/^\s*(```+|~~~+)/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true;
+        fence = marker;
+      } else if (marker === fence) {
+        inFence = false;
+      }
+      continue;
+    }
+    if (inFence) continue;
+    const m = line.match(TASK_RE);
+    if (!m) continue;
+    const rawMarker = m[3] === "" ? " " : m[3];
+    tasks.push({
+      text: m[4].trim(),
+      status: markerToStatus(rawMarker),
+      marker: rawMarker,
+      line: i,
+      indent: m[1].length,
+    });
+  }
+  return tasks;
 }

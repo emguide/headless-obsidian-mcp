@@ -2,9 +2,18 @@ import { readFile, writeFile, mkdir, unlink, rename, stat } from "node:fs/promis
 import { dirname, join, sep } from "node:path";
 import matter from "gray-matter";
 import { getIndex } from "./vault-index.js";
-import { resolveNotePath, resolveVaultFile, rewriteWikilinks, headingMatchesAnchor } from "./vault.js";
+import {
+  resolveNotePath,
+  resolveVaultFile,
+  rewriteWikilinks,
+  headingMatchesAnchor,
+  parseTasks,
+  statusToMarker,
+  WRITABLE_TASK_STATUSES,
+} from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
 import { linkHealthOf, LinkHealth } from "./link-health.js";
+import { SetTaskStateParams, WritableTaskStatus } from "../types.js";
 import {
   NoteDocument,
   frontmatterTagList,
@@ -46,6 +55,7 @@ export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "bulk_edit",
   "apply_template",
   "insert_template",
+  "set_task_state",
 ]);
 
 /** Whether a tool name mutates the vault. */
@@ -655,6 +665,125 @@ export async function renameSectionInVault(
   }
 
   return { path: canon, from: oldHeading, to: to.trim(), updated_notes: updatedNotes, updated_links: updatedLinks };
+}
+
+/* -------------------------------------------------------------------- tasks -- */
+
+/**
+ * Change one checkbox task's state, rewriting only its marker character.
+ * Addressing (`text` and/or `line`) and `parseTasks` both use 1-based
+ * body-relative line numbers — the same convention as `list_tasks` and
+ * `get_outline`. Frontmatter is stripped via gray-matter (`matter(raw).content`)
+ * — the SAME stripper `list_tasks`/`get_outline` use via the shared index —
+ * rather than `NoteDocument`, because `NoteDocument`'s fence regex swallows
+ * trailing whitespace on the closing `---` fence into the frontmatter block
+ * while gray-matter does not; on such a note the two would otherwise disagree
+ * by one body line. The original frontmatter block is reattached byte-for-byte
+ * by slicing it off `raw` (gray-matter's stripped body is always a suffix of
+ * `raw`), matching the body-only-edit convention used by the section tools.
+ */
+export async function setTaskState(
+  vaultPath: string,
+  { path, text, line, status }: SetTaskStateParams
+): Promise<{
+  path: string;
+  line: number;
+  text: string;
+  status: WritableTaskStatus;
+  marker: string;
+  changed: boolean;
+} & LinkHealth> {
+  if (!WRITABLE_TASK_STATUSES.includes(status)) {
+    throw new Error(
+      `status must be one of: ${WRITABLE_TASK_STATUSES.join(", ")} (got "${status}")`
+    );
+  }
+  const hasText = typeof text === "string" && text.length > 0;
+  const hasLine = typeof line === "number";
+  if (!hasText && !hasLine) {
+    throw new Error("Provide `text` and/or `line` to address the task");
+  }
+  if (hasLine && (!Number.isInteger(line) || (line as number) < 1)) {
+    throw new Error("line must be a positive integer (1-based)");
+  }
+
+  const canon = canonicalName(path);
+  const raw = await readRaw(vaultPath, path);
+  // parseTasks/`.line` operate on the frontmatter-stripped body, so both the
+  // parse and the line-array edit below must use gray-matter's `body` — never
+  // `raw`, and never NoteDocument's body — to match list_tasks/get_outline
+  // exactly (see the fence-regex divergence note in the doc comment above).
+  const body = matter(raw).content;
+  const bodyLines = body.split("\n");
+  const tasks = parseTasks(body);
+
+  // Locate the target task. parseTasks lines are 0-based; `line` is 1-based.
+  let target;
+  if (hasLine) {
+    const zero = (line as number) - 1;
+    target = tasks.find((t) => t.line === zero);
+    if (!target) {
+      throw new Error(`No task at line ${line} in ${canon}`);
+    }
+    if (hasText && target.text !== text) {
+      throw new Error(
+        `Task text at line ${line} does not match "${text}" in ${canon} (found "${target.text}")`
+      );
+    }
+  } else {
+    const matches = tasks.filter((t) => t.text === text);
+    if (matches.length === 0) {
+      throw new Error(`Task "${text}" not found in ${canon}`);
+    }
+    if (matches.length > 1) {
+      const lines = matches.map((m) => m.line + 1).join(", ");
+      throw new Error(
+        `Task "${text}" occurs at lines ${lines} in ${canon}; pass \`line\` to disambiguate`
+      );
+    }
+    target = matches[0];
+  }
+
+  const marker = statusToMarker(status);
+  const oneBasedLine = target.line + 1;
+
+  // No-op when already in the requested state — skip the write and snapshot.
+  if (target.marker === marker) {
+    const health = await linkHealthAfterWrite(vaultPath, path, raw);
+    return {
+      path: canon,
+      line: oneBasedLine,
+      text: target.text,
+      status,
+      marker,
+      changed: false,
+      ...health,
+    };
+  }
+
+  // Rewrite ONLY the marker char on the target line, preserving everything else.
+  const original = bodyLines[target.line];
+  const rewritten = original.replace(/\[(.?)\]/, `[${marker}]`);
+  bodyLines[target.line] = rewritten;
+  const newBody = bodyLines.join("\n");
+  // Reattach the original frontmatter block byte-for-byte: gray-matter's
+  // stripped body is always a suffix of raw, so slicing off exactly its
+  // length recovers the original block (including e.g. a trailing-whitespace
+  // closing fence) untouched — only the target line's marker changes.
+  const block = raw.slice(0, raw.length - body.length);
+  const next = block + newBody;
+
+  await commitWrite(vaultPath, path, next);
+  const health = await linkHealthAfterWrite(vaultPath, path, next);
+  return {
+    path: canon,
+    line: oneBasedLine,
+    text: target.text,
+    status,
+    marker,
+    changed: true,
+    ...health,
+  };
 }
 
 /* ------------------------------------------------------------------- tags -- */
