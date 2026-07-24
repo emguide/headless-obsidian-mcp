@@ -48,6 +48,13 @@ export interface IndexEntry {
   headings: ParsedHeading[];
   /** Fence-aware checkbox tasks in document order (shared parser). */
   tasks: ParsedTask[];
+  /**
+   * Raw lines before the gray-matter body starts (the frontmatter block
+   * including both fences); 0 when the note has no frontmatter. Bridges
+   * file-absolute line numbers (ripgrep) to the body-relative convention of
+   * headings/tasks: body line = raw line - bodyBegin.
+   */
+  bodyBegin: number;
   /** BM25 token stream: body plus title/headings/tags injected at ×2 weight. */
   tokens: string[];
 }
@@ -314,11 +321,18 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let aliases: string[] = [];
   let headings: ParsedHeading[] = [];
   let tasks: ParsedTask[] = [];
+  let bodyBegin = 0;
   let tokens: string[] = [];
 
   try {
     const raw = await readFile(f.fullPath, "utf-8");
     const parsed = matter(raw);
+    // Lines consumed by the frontmatter block, per gray-matter — the same
+    // stripper whose body parseHeadings/parseTasks run on, so body-relative
+    // line math stays consistent even on fences NoteDocument would swallow
+    // differently. Relies on parsed.content being a suffix of raw (the same
+    // invariant set_task_state's byte-preserving reattach uses).
+    bodyBegin = raw.slice(0, raw.length - parsed.content.length).split("\n").length - 1;
     frontmatter = parsed.data as Record<string, unknown>;
     tags = collectTags(frontmatter, parsed.content);
     linkTargets = extractLinkTargets(parsed.content);
@@ -360,6 +374,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     aliases,
     headings,
     tasks,
+    bodyBegin,
     tokens,
   };
 }
