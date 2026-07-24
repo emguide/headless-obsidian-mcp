@@ -63,6 +63,24 @@ The report covers the whole resulting note (not just the changed span), and
 empty arrays mean the write left the graph intact. Stated once in the server's
 MCP `instructions`; write-tool descriptions carry only a short pointer.
 
+**Link context (shared, opt-in).** `get_links`, `delete_note`, and
+`list_vault_issues` (kinds `unresolved_links`/`broken_anchors`) accept
+`include_context: true`, decorating each reported link row with `context` —
+the source line(s) containing that link, as `{ line, text }` pairs. `line` is
+1-based and **body-relative** (frontmatter stripped, the same convention as
+`get_outline`/`list_tasks`); `text` is the line verbatim, so it can be fed
+straight into `patch_note`'s `find`. This answers "who references this note,
+and why" in one call — a `search_notes` on the basename cannot distinguish
+resolved links from text mentions or from same-basename links to a different
+note. Context lines are identified with the shared wikilink parser and index
+resolution (`src/tools/link-context.ts`), never a hand-rolled regex, and are
+computed by call-time file reads (the index does not retain body text — same
+precedent as `read_section`); on `list_vault_issues` only the returned window
+is read. Opt-in so a 200-backlink hub note stays cheap by default; an
+unreadable source degrades to an empty `context` (report-only decoration).
+Stated once in the server's MCP `instructions`; the three tool descriptions
+carry only a short pointer.
+
 **Pagination (`offset`).** Every envelope-returning tool (all the list-style
 tools plus `search_notes` and `search_notes_ranked`) accepts an optional
 `offset` (default `0`): the rows are a window `[offset, offset + limit)` over the
@@ -137,12 +155,13 @@ individual tool descriptions state only their deviations from it.
 
 ### get_links
 - **Purpose**: Resolve the Obsidian link graph for a note, turning the flat vault into a navigable graph.
-- **Input**: `path` (required) - Relative note path (with or without .md extension)
+- **Input**: `path` (required) - Relative note path (with or without .md extension); `include_context` (optional) - decorate every link row with the source line(s) containing it (see "Link context" above)
 - **Output**: Object with:
   - `note`: The canonical path of the inspected note
   - `outbound_links`: Resolved `[[wikilinks]]` (each with the raw `target` and resolved `path`)
   - `unresolved_links`: Wikilink targets that do not resolve to any note
   - `backlinks`: Notes elsewhere in the vault that link to this one
+  - With `include_context: true`, every row in all three arrays gains `context` (`{ line, text }` pairs): `outbound_links` rows become `{ target, path, context }`, `unresolved_links` rows become `{ target, context }` (bare strings without the flag), and `backlinks` rows become `{ path, context }` — the linking lines in each source note. Without the flag the shapes are unchanged.
 - **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default). When a bare `[[basename]]` matches several notes, it resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — matching Obsidian's shortest-path rule, so a bare link points to the same note vault-wide regardless of where it appears.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
@@ -229,7 +248,7 @@ individual tool descriptions state only their deviations from it.
 
 ### list_vault_issues
 - **Purpose**: Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
-- **Input**: `kind` (required): `"orphans"`, `"unresolved_links"`, or `"broken_anchors"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap). `offset` (optional): Rows/groups to skip before the window, for pagination (default `0`).
+- **Input**: `kind` (required): `"orphans"`, `"unresolved_links"`, or `"broken_anchors"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap). `offset` (optional): Rows/groups to skip before the window, for pagination (default `0`). `include_context` (optional): For the two link kinds, decorate each target with the source line(s) containing it — `{ target, context }` / `{ target, anchor, context }` — so you can see what the broken reference says before deciding how to fix it (see "Link context" above; only the returned window is read). Errors on `kind: "orphans"`.
 - **Output**: `{ results, returned, skipped, omitted, truncated }`. `results`' shape depends on `kind`:
   - `"orphans"`: Array of note headers (same shape as `list_notes`) for notes with no inbound and no outbound resolved links — the exact predicate `get_vault_stats` uses for `orphan_notes`.
   - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
@@ -327,8 +346,8 @@ change a tag or a section without reading and rewriting the whole note.
 
 ### delete_note
 - **Purpose**: Delete a note. **Trash-safe by default**: the note is moved to the vault's `.trash` folder (Obsidian's convention, ignored by the index) so the deletion is recoverable. Repeated trashings of the same name are disambiguated with a numeric suffix. Errors if the note does not exist.
-- **Input**: `path` (required), `permanent` (optional — unlink outright instead of trashing)
-- **Output**: `{ path, deleted, trashed, trash_path?, dangled_backlinks }` — `dangled_backlinks` lists the paths of notes elsewhere in the vault that linked to the deleted note and now have a broken `[[wikilink]]`. Reported only; those notes are not modified.
+- **Input**: `path` (required), `permanent` (optional — unlink outright instead of trashing), `include_context` (optional — decorate each dangled backlink with the source line(s) linking to the deleted note; see "Link context" above)
+- **Output**: `{ path, deleted, trashed, trash_path?, dangled_backlinks }` — `dangled_backlinks` lists the paths of notes elsewhere in the vault that linked to the deleted note and now have a broken `[[wikilink]]`. Reported only; those notes are not modified. With `include_context: true` its rows become `{ path, context }`, computed against the pre-delete index (where the note still resolves), so the broken references can be fixed without re-reading each source.
 
 ### move_note
 - **Purpose**: Move or rename a note. By default every `[[wikilink]]` elsewhere in the vault that pointed to the old location is rewritten to the new one (full-path links become the new full path; bare-basename links become the new basename; aliases and `#anchors` are preserved), so the link graph is never broken.
@@ -637,6 +656,7 @@ npm run query -- list --folder projects --limit 20     # Scope to a folder
 npm run query -- list --tag work --match all --where '{"status":"active"}'  # Scope by tags/frontmatter
 npm run query -- list --limit 20 --offset 20            # Second page (skipped: 20)
 npm run query -- links "projects/alpha"                # Outbound links + backlinks
+npm run query -- links "projects/alpha" --include-context  # ...with the linking lines
 npm run query -- tags                                   # All tags with counts
 npm run query -- find-by-tag productivity project --all # Notes with all tags
 npm run query -- find-by-tag work --folder projects --where '{"status":"active"}'  # Narrow a tag query
@@ -654,6 +674,7 @@ npm run query -- config template                        # Just the template sect
 npm run query -- config tools                           # Active tool policy (exposed/excluded)
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
+npm run query -- vault-issues unresolved_links --include-context  # ...with the offending lines
 npm run query -- vault-issues broken_anchors --limit 50    # Resolved-note, dead-heading anchors, by source
 npm run query -- files --folder assets --extension png  # Non-markdown files (attachments)
 npm run query -- folders                                 # Folder tree with note counts
@@ -696,6 +717,7 @@ npm run query -- set-task-state "projects/alpha" --text "ship it" --status done
 npm run query -- set-task-state "projects/alpha" --line 12 --status in_progress
 npm run query -- delete "inbox/idea"                    # Trash-safe (recoverable)
 npm run query -- delete "inbox/idea" --permanent        # Unlink outright
+npm run query -- delete "inbox/idea" --include-context  # ...showing each dangled backlink's line
 npm run query -- bulk-edit --select '{"where":{"status":"draft"}}' \
   --operations '[{"op":"add_tag","tags":["review"]},{"op":"set_frontmatter","set":{"status":"active"}}]' --dry-run
 

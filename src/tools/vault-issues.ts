@@ -1,7 +1,16 @@
 import { assertVaultPath, headingMatchesAnchor } from "./vault.js";
-import { getIndex, entryToHeader } from "./vault-index.js";
-import { ListVaultIssuesParams, UnresolvedLinkGroup, NoteHeader, ListResponse, BrokenAnchorGroup } from "../types.js";
+import { getIndex, entryToHeader, VaultIndex } from "./vault-index.js";
+import {
+  ListVaultIssuesParams,
+  UnresolvedLinkGroup,
+  NoteHeader,
+  ListResponse,
+  BrokenAnchorGroup,
+  UnresolvedLinkGroupWithContext,
+  BrokenAnchorGroupWithContext,
+} from "../types.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
+import { scanLinkLines, linkContext, ScannedLinkLine } from "./link-context.js";
 
 /** Default cap on `list_vault_issues` so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
@@ -19,13 +28,25 @@ const DEFAULT_LIMIT = 100;
  * groups) are returned. Pass `limit: 0` for an unbounded list. The result is a
  * `ListResponse` envelope reporting `returned`/`omitted`/`truncated` so a capped
  * list is never mistaken for a complete one.
+ *
+ * `include_context: true` (unresolved_links/broken_anchors only — orphans have
+ * no links to contextualize, so it errors there) decorates each target with the
+ * source line(s) containing it. Context is computed by call-time file reads
+ * over the returned window only, so a bounded call reads a bounded number of
+ * files.
  */
 export async function listVaultIssues(
   vaultPath: string,
   params: ListVaultIssuesParams
-): Promise<ListResponse<NoteHeader> | ListResponse<UnresolvedLinkGroup> | ListResponse<BrokenAnchorGroup>> {
+): Promise<
+  | ListResponse<NoteHeader>
+  | ListResponse<UnresolvedLinkGroup>
+  | ListResponse<BrokenAnchorGroup>
+  | ListResponse<UnresolvedLinkGroupWithContext>
+  | ListResponse<BrokenAnchorGroupWithContext>
+> {
   assertVaultPath(vaultPath);
-  const { kind, limit, offset } = params;
+  const { kind, limit, offset, include_context } = params;
   if (kind !== "orphans" && kind !== "unresolved_links" && kind !== "broken_anchors") {
     throw new Error('kind must be "orphans", "unresolved_links", or "broken_anchors"');
   }
@@ -33,6 +54,11 @@ export async function listVaultIssues(
     throw new Error("limit must be a positive integer");
   }
   assertNonNegativeInt(offset, "offset");
+  if (include_context && kind === "orphans") {
+    throw new Error(
+      'include_context is only valid for kinds "unresolved_links" and "broken_anchors" — orphans have no links to contextualize'
+    );
+  }
 
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
 
@@ -61,7 +87,25 @@ export async function listVaultIssues(
       }
       if (targets.length > 0) groups.push({ source: entry.path, targets });
     }
-    return toListResponse(groups, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
+    const response = toListResponse(groups, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
+    if (!include_context) return response;
+    return {
+      ...response,
+      results: await Promise.all(
+        response.results.map(async (group) => ({
+          source: group.source,
+          targets: await withScan(index, group.source, (scanned) =>
+            group.targets.map((t) => ({
+              ...t,
+              context: linkContext(
+                scanned,
+                (ref) => !ref.isBlockRef && ref.target === t.target && ref.anchor === t.anchor
+              ),
+            }))
+          ),
+        }))
+      ),
+    };
   }
 
   // unresolved_links, grouped by source note (entries are already path-sorted).
@@ -73,5 +117,31 @@ export async function listVaultIssues(
       groups.push({ source: entry.path, targets });
     }
   }
-  return toListResponse(groups, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
+  const response = toListResponse(groups, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
+  if (!include_context) return response;
+  return {
+    ...response,
+    results: await Promise.all(
+      response.results.map(async (group) => ({
+        source: group.source,
+        targets: await withScan(index, group.source, (scanned) =>
+          group.targets.map((target) => ({
+            target,
+            context: linkContext(scanned, (ref) => ref.target === target),
+          }))
+        ),
+      }))
+    ),
+  };
+}
+
+/** Scan one source note and derive its decorated targets from the scan. */
+async function withScan<T>(
+  index: VaultIndex,
+  source: string,
+  derive: (scanned: ScannedLinkLine[]) => T
+): Promise<T> {
+  const entry = index.getEntry(source);
+  const scanned = entry ? await scanLinkLines(entry.fullPath) : [];
+  return derive(scanned);
 }
