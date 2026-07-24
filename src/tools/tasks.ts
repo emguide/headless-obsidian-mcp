@@ -72,7 +72,7 @@ function entryTaskRows(entry: IndexEntry): TaskRow[] {
     text: task.text,
     status: task.status,
     marker: task.marker,
-    line: task.line + entry.bodyLineOffset + 1, // body-relative 0-based → file-absolute 1-based
+    line: task.line + 1, // index tasks are 0-based; expose 1-based (body-relative, like get_outline)
     section: sectionForLine(entry, paths, task.line),
   }));
 }

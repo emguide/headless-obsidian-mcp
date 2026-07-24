@@ -29,13 +29,14 @@ test("lists tasks with section context and note path", async () => {
   const fx = await makeVault(NOTES);
   try {
     const res = await listTasks(fx.vaultPath, { folder: "projects" });
+    // Lines are BODY-relative 1-based, matching get_outline/read_section.
     assert.deepEqual(
       res.results.map((t) => [t.path, t.text, t.status, t.line, t.section]),
       [
-        ["projects/alpha", "above headings? no — this is under Alpha", "open", 6, "Alpha"],
-        ["projects/alpha", "review draft", "open", 8, "Alpha > Log"],
-        ["projects/alpha", "ship it", "done", 9, "Alpha > Log"],
-        ["projects/alpha", "wip item", "in_progress", 10, "Alpha > Log"],
+        ["projects/alpha", "above headings? no — this is under Alpha", "open", 2, "Alpha"],
+        ["projects/alpha", "review draft", "open", 4, "Alpha > Log"],
+        ["projects/alpha", "ship it", "done", 5, "Alpha > Log"],
+        ["projects/alpha", "wip item", "in_progress", 6, "Alpha > Log"],
       ]
     );
     assert.equal(res.truncated, false);
