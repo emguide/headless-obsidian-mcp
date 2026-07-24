@@ -19,6 +19,7 @@
 - **Task match regex:** `^(\s*)([-*+])\s+\[(.?)\]\s?(.*)$` — group 1 indent, group 2 bullet, group 3 marker (single char or empty), group 4 text. Tasks inside fenced code blocks are excluded (reuse `parseHeadings`' fence tracking).
 - **Writes gated:** `set_task_state` joins `WRITE_TOOL_NAMES`, hidden/rejected unless `OBSIDIAN_ALLOW_WRITES` is truthy. It funnels through `editNote`/`commitWrite` (git snapshot, path guard) and reports link-health (`unresolved_links`/`broken_anchors`).
 - **Envelopes:** `list_tasks` returns `ListResponse<TaskRow>` via `toListResponse`; `limit` default 100, `0` = unbounded; `offset` default 0. Bounds validated with `assertNonNegativeInt`.
+- **Line numbering (BODY-relative):** `list_tasks`' `line` and `set_task_state`'s `line` are 1-based **body** line numbers (frontmatter stripped), the SAME convention `get_outline`/`read_section` use (`line: h.line + 1`, no file offset). `parseTasks` runs on the frontmatter-stripped body and returns 0-based body lines; expose as `line + 1`. Do NOT add any frontmatter/file offset — a task and a heading in the same note must report on one consistent numbering so the tools cross-reference. (The index has no `bodyLineOffset` field; if one was added, remove it.)
 - **Docs:** `CLAUDE.md` and `README.md` are updated together (repo rule).
 - **Test command:** `npm test` runs `tsx --test tests/*.test.ts`. A single file: `npx tsx --test tests/<name>.test.ts`.
 - **Commit trailer:** end every commit message with `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
@@ -397,13 +398,15 @@ test("lists tasks with section context and note path", async () => {
   const fx = await makeVault(NOTES);
   try {
     const res = await listTasks(fx.vaultPath, { folder: "projects" });
+    // Lines are BODY-relative 1-based, matching get_outline/read_section
+    // (frontmatter stripped). The 4-line frontmatter block does NOT count.
     assert.deepEqual(
       res.results.map((t) => [t.path, t.text, t.status, t.line, t.section]),
       [
-        ["projects/alpha", "above headings? no — this is under Alpha", "open", 6, "Alpha"],
-        ["projects/alpha", "review draft", "open", 8, "Alpha > Log"],
-        ["projects/alpha", "ship it", "done", 9, "Alpha > Log"],
-        ["projects/alpha", "wip item", "in_progress", 10, "Alpha > Log"],
+        ["projects/alpha", "above headings? no — this is under Alpha", "open", 2, "Alpha"],
+        ["projects/alpha", "review draft", "open", 4, "Alpha > Log"],
+        ["projects/alpha", "ship it", "done", 5, "Alpha > Log"],
+        ["projects/alpha", "wip item", "in_progress", 6, "Alpha > Log"],
       ]
     );
     assert.equal(res.truncated, false);
