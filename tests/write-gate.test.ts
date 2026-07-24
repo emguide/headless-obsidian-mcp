@@ -32,9 +32,9 @@ test("read tools are not classified as write tools", () => {
 });
 
 test("get_config is never write-gated (isWriteTool returns false)", () => {
-  // Regression guard: get_config must NEVER be write-gated, regardless of
-  // OBSIDIAN_ALLOW_WRITES. It must always be in list_tools and always
-  // dispatchable. This invariant is load-bearing for server availability.
+  // Regression guard: get_config must NEVER be write-gated or policy-excluded.
+  // It must always be in list_tools and always dispatchable. This invariant is
+  // load-bearing for server availability.
   assert.equal(isWriteTool("get_config"), false, "get_config should not be a write tool");
   assert.ok(!WRITE_TOOL_NAMES.has("get_config"), "get_config should not be in WRITE_TOOL_NAMES");
 

@@ -145,6 +145,12 @@ test("unknown token fails loud, listing the vocabulary", () => {
   assert.throws(() => evaluatePolicy("bogus.read"), /bogus\.read/);
 });
 
+test("degenerate '-' tokens fail loud as unknown selectors", () => {
+  assert.throws(() => evaluatePolicy("-"), /Unknown/);
+  assert.throws(() => evaluatePolicy("--tasks"), /Unknown/);
+  assert.throws(() => evaluatePolicy("reads,-"), /Unknown/);
+});
+
 test("empty policies fail loud", () => {
   assert.throws(() => evaluatePolicy(""), /selects no tools/i);
   assert.throws(() => evaluatePolicy(" , ,"), /selects no tools/i);
