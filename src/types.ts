@@ -458,3 +458,36 @@ export interface VaultFileEntry {
   /** Lowercased extension without the dot (e.g. "png"). */
   extension: string;
 }
+
+/** One checkbox task, as returned by list_tasks. */
+export interface TaskRow {
+  /** Note path (no .md). */
+  path: string;
+  /** Task text after the checkbox. */
+  text: string;
+  /** Named state. */
+  status: TaskStatus;
+  /** Raw marker char. */
+  marker: string;
+  /** 1-based body line of the task. */
+  line: number;
+  /** " > "-joined heading-path the task falls under, or null if above all headings. */
+  section: string | null;
+}
+
+export interface ListTasksParams {
+  /** Restrict to notes under this folder (relative to the vault root). */
+  folder?: string;
+  /** Restrict to notes carrying these tags (leading '#' optional). */
+  tags?: string[];
+  /** Semantics of `tags`: "any" (default) or "all". */
+  match?: "any" | "all";
+  /** Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax). */
+  where?: Record<string, Condition>;
+  /** Restrict to tasks in any of these statuses; omitted = all statuses. */
+  status?: TaskStatus[];
+  /** Maximum number of tasks to return (default 100; 0 = unbounded). */
+  limit?: number;
+  /** Rows to skip before the window, for pagination. Default 0. */
+  offset?: number;
+}

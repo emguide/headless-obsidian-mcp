@@ -50,6 +50,8 @@ export interface IndexEntry {
   tasks: ParsedTask[];
   /** BM25 token stream: body plus title/headings/tags injected at ×2 weight. */
   tokens: string[];
+  /** Number of lines in the raw file before the body starts (frontmatter + delimiters). */
+  bodyLineOffset: number;
 }
 
 /**
@@ -304,11 +306,14 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
   let headings: ParsedHeading[] = [];
   let tasks: ParsedTask[] = [];
   let tokens: string[] = [];
+  let bodyLineOffset = 0;
 
   try {
     const raw = await readFile(f.fullPath, "utf-8");
     const parsed = matter(raw);
     frontmatter = parsed.data as Record<string, unknown>;
+    // Compute the line offset: number of lines before the body starts
+    bodyLineOffset = raw.split("\n").length - parsed.content.split("\n").length;
     tags = collectTags(frontmatter, parsed.content);
     linkTargets = extractLinkTargets(parsed.content);
     linkRefs = extractLinkRefs(parsed.content);
@@ -350,6 +355,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     headings,
     tasks,
     tokens,
+    bodyLineOffset,
   };
 }
 
