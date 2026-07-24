@@ -15,7 +15,7 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 - **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter; read a note's frontmatter alone or get whole-vault stats
 - **Vault Hygiene**: Drill down from whole-vault stats into the actual orphaned notes and broken wikilinks
 - **Property Search**: Discover the vault's frontmatter schema, list a property's distinct values, and query notes by frontmatter condition (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `exists`, `contains`)
-- **Write & Edit** (opt-in): Create, overwrite, append, prepend, and delete notes — disabled by default, enabled with `OBSIDIAN_ALLOW_WRITES`
+- **Write & Edit** (opt-in): Create, overwrite, append, prepend, and delete notes — disabled by default, enabled via the `OBSIDIAN_TOOLS` policy (e.g. `OBSIDIAN_TOOLS=all`), which can also expose any custom subset of tools
 - **Structure-aware edits**: Add/remove tags, set frontmatter, add/remove/rename frontmatter properties, add/append/replace sections, and literal find/replace patches without rewriting the whole note — saving agent tokens
 - **Frontmatter validation**: Writes reject nested objects, arrays of non-scalars, and markdown syntax in string values, keeping properties queryable and flat
 - **Move & rename**: Move notes (rewriting the wikilinks that point to them) or arbitrary attachment files
@@ -585,9 +585,9 @@ Report the server's own configuration — how it is set up, not what is in the v
 **Parameters:**
 - `section` (string, optional): `"template" | "writes" | "vault"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors, listing the valid ones.
 
-**Returns:** `{ template, writes, vault }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `writes` is `{ writes_enabled, git_autocommit }` — the `OBSIDIAN_ALLOW_WRITES` / `OBSIDIAN_GIT_AUTOCOMMIT` flag states. `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents).
+**Returns:** `{ template, writes, vault, tools }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `writes` is `{ writes_enabled, git_autocommit }` — `writes_enabled` is derived (`true` iff the tool policy exposes at least one write tool); `git_autocommit` is the `OBSIDIAN_GIT_AUTOCOMMIT` flag state. `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents). `tools` is `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset) and the sorted exposed/excluded tool names.
 
-Read-only and never gated by `OBSIDIAN_ALLOW_WRITES` — it's how an agent discovers whether writes are enabled, so it's always exposed.
+Read-only and never excludable by `OBSIDIAN_TOOLS` — it's how an agent discovers the active tool policy, so it's always exposed.
 
 ### write_note
 
@@ -853,25 +853,57 @@ await bulk_edit({
 
 The server requires the `OBSIDIAN_VAULT_PATH` environment variable to be set to your Obsidian vault directory.
 
-### Enabling writes (`OBSIDIAN_ALLOW_WRITES`)
+### Tool policy (`OBSIDIAN_TOOLS`)
 
-The write tools are **off by default** — out of the box the server is read-only.
-Set `OBSIDIAN_ALLOW_WRITES` to a truthy value (`1`, `true`, `yes`, `on`) to
-expose them:
+One env var selects exactly which tools the server exposes — by domain group,
+by read/write mode, or by individual tool. Out of the box (variable unset) the
+server is **read-only** (default policy `reads`): the twenty-one write tools
+are hidden from the tool list and any call to one is rejected.
 
 ```bash
-export OBSIDIAN_ALLOW_WRITES=1
+export OBSIDIAN_TOOLS="all"                              # everything
+export OBSIDIAN_TOOLS="-templates,-tasks"                # reads minus templates/tasks
+export OBSIDIAN_TOOLS="reads,tasks.write,sections.write" # read all, write tasks+sections
+export OBSIDIAN_TOOLS="all,-bulk,-delete_note"           # everything but the scary ones
+export OBSIDIAN_TOOLS="search,notes.read"                # minimal search-and-read agent
 ```
 
-When disabled, the twenty-one write tools (`write_note`, `append_note`,
-`prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`,
-`add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`,
-`remove_property_values`, `rename_property`, `add_section`,
-`append_to_section`, `replace_section`, `rename_section`, `bulk_edit`,
-`apply_template`, `insert_template`, `set_task_state`) are
-hidden from the tool list and any call to one is rejected, so an agent only
-ever sees the read tools. The flag gates the MCP server; the query CLI is the
-operator's own tool and is not affected by it.
+Selectors are case-insensitive and evaluated **left to right** (plain token
+adds, `-` prefix subtracts): `all` / `reads` / `writes` (meta-groups); a domain
+group; `<group>.read` / `<group>.write` (one mode-slice); or an individual tool
+name. Evaluation starts from the empty set — unless the *first* token
+subtracts, in which case it starts from the default policy `reads`, so
+`-templates` trims the read surface and can never silently expose writes.
+
+The 11 domain groups (every gated tool belongs to exactly one):
+
+| Group | Read | Write |
+|---|---|---|
+| `search` | search_notes, search_notes_ranked | — |
+| `notes` | read_notes, list_notes, list_recent_notes, resolve_note | write_note, append_note, prepend_note, patch_note, delete_note, move_note |
+| `sections` | get_outline, read_section | add_section, append_to_section, replace_section, rename_section |
+| `links` | get_links, get_related_notes | — |
+| `tags` | list_tags, find_by_tag | add_tag, remove_tag |
+| `properties` | get_frontmatter, list_properties, list_property_values, query_notes, get_property | set_frontmatter, add_property_values, remove_property_values, rename_property |
+| `tasks` | list_tasks | set_task_state |
+| `templates` | list_templates | apply_template, insert_template |
+| `files` | list_files, list_folders | move_file |
+| `vault` | get_vault_stats, list_vault_issues | — |
+| `bulk` | — | bulk_edit |
+
+`get_config` is groupless and **always exposed** — its `tools` section reports
+the active policy and the exposed/excluded tool names, so an agent can always
+discover why a tool is absent.
+
+Beyond agent control, the policy also trims token usage: every excluded tool is
+a schema the MCP client never has to carry in context.
+
+**Fail-loud:** an unknown selector, a policy that selects no tools, or the
+retired `OBSIDIAN_ALLOW_WRITES` variable being set at all aborts startup with a
+message listing the valid vocabulary (or a migration hint — use
+`OBSIDIAN_TOOLS=all` where you previously set `OBSIDIAN_ALLOW_WRITES=1`). The
+policy gates the MCP server; the query CLI is the operator's own tool and is
+not affected by it.
 
 ### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
@@ -927,9 +959,9 @@ Replace the paths with:
 - `/path/to/headless-obsidian-mcp`: The absolute path to this project directory
 - `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
 
-To allow the agent to modify your vault, add `"OBSIDIAN_ALLOW_WRITES": "1"` to the `env` block above (writes are off by default). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
+To allow the agent to modify your vault, add `"OBSIDIAN_TOOLS": "all"` to the `env` block above (with the variable unset the server is read-only). Any selector policy works here — e.g. `"OBSIDIAN_TOOLS": "reads,tasks.write"` for a read-everything, write-only-tasks agent; see [Tool policy](#tool-policy-obsidian_tools). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
 
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`). With `OBSIDIAN_ALLOW_WRITES` enabled it also provides the write tools (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`).
+After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_config`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_templates`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`). With write tools selected in `OBSIDIAN_TOOLS` it also provides them (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`, `apply_template`, `insert_template`).
 
 ## Acknowledgments
 

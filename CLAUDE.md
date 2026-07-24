@@ -293,13 +293,15 @@ individual tool descriptions state only their deviations from it.
 
 ## Writing tools
 
-**The write tools are off by default.** The server is read-only unless
-`OBSIDIAN_ALLOW_WRITES` is set to a truthy value (`1`, `true`, `yes`, `on`).
-When disabled, the twenty-one write tools are hidden from `list_tools` and any call
-to one is rejected — so an agent only ever sees the read tools. When enabled, all
-tools are exposed. The flag gates the MCP server (the agent-facing surface); the
-query CLI is the operator's own tool and is not gated. Flag helpers live in
-`src/tools/env-flags.ts`.
+**Tool exposure is policy-controlled.** The server exposes tools according to
+the `OBSIDIAN_TOOLS` selector policy (see "Tool policy" below). With the
+variable unset the server is read-only (default policy `reads`): the twenty-one
+write tools are hidden from `list_tools` and any call to one is rejected — so
+an agent only ever sees the read tools. Set `OBSIDIAN_TOOLS=all` to expose
+everything. The policy gates the MCP server (the agent-facing surface); the
+query CLI is the operator's own tool and is not gated. The retired
+`OBSIDIAN_ALLOW_WRITES` flag is a startup error if set. Flag helpers live in
+`src/tools/env-flags.ts`; the policy itself in `src/tools/tool-policy.ts`.
 
 The server can also mutate the vault. All writes funnel through a single guarded
 path (`src/tools/write.ts` → `commitWrite`) that resolves + path-guards the
@@ -461,7 +463,7 @@ exact Obsidian parity.
 
 ### apply_template
 - **Purpose**: Create a new note from a template — the template-driven
-  counterpart of `write_note`. Gated by `OBSIDIAN_ALLOW_WRITES`; routed through
+  counterpart of `write_note`. A write tool under the tool policy; routed through
   the git guard.
 - **Input**: `template` (required — name or template-folder-relative path),
   `path` (required — destination note), `overwrite` (optional, default `false`
@@ -491,9 +493,64 @@ exact Obsidian parity.
 - **Input**: `section` (optional): `"template" | "writes" | "vault"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors loudly, listing the valid sections.
 - **Output**: `{ template, writes, vault }` (or one unwrapped section):
   - `template`: `{ folder, date_format, time_format }` — `folder` is the resolved template folder or `null` when none is configured (this tool does **not** throw on an unconfigured folder, unlike the template tools); `date_format`/`time_format` are the **effective** formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`).
-  - `writes`: `{ writes_enabled, git_autocommit }` — the `OBSIDIAN_ALLOW_WRITES` / `OBSIDIAN_GIT_AUTOCOMMIT` flag states.
+  - `writes`: `{ writes_enabled, git_autocommit }` — `writes_enabled` is **derived**: `true` iff at least one write tool is exposed by the tool policy; `git_autocommit` is the `OBSIDIAN_GIT_AUTOCOMMIT` flag state.
   - `vault`: `{ path }` — the configured `OBSIDIAN_VAULT_PATH`. Configuration only; vault contents (counts, sizes, link health) stay in `get_vault_stats`.
-- **Gating**: Read-only and **never gated** by `OBSIDIAN_ALLOW_WRITES` — it is how an agent discovers whether writes are enabled, so it is always exposed.
+  - `tools`: `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset), the sorted exposed tool names (always including `get_config`), and the sorted gated tool names the policy hides.
+- **Gating**: Read-only and **never excludable** by `OBSIDIAN_TOOLS` — it is how an agent discovers the active tool policy, so it is always exposed.
+
+### Tool policy (`OBSIDIAN_TOOLS`)
+
+One env var selects exactly which tools the server exposes:
+
+```
+OBSIDIAN_TOOLS="<selector>, <selector>, ..."
+```
+
+Selectors are case-insensitive, evaluated **left to right** (plain token adds,
+`-` prefix subtracts): `all` / `reads` / `writes` (meta-groups); a domain
+group; `<group>.read` / `<group>.write` (one mode-slice); or an individual
+tool name. Evaluation starts from the empty set — unless the *first* token
+subtracts, in which case it starts from the default policy `reads` (so
+`-templates` trims the read surface and can never silently expose writes).
+Unset → policy `reads` (read-only server). Empty segments are ignored.
+
+The 11 domain groups (every gated tool belongs to exactly one):
+
+| Group | Read | Write |
+|---|---|---|
+| `search` | search_notes, search_notes_ranked | — |
+| `notes` | read_notes, list_notes, list_recent_notes, resolve_note | write_note, append_note, prepend_note, patch_note, delete_note, move_note |
+| `sections` | get_outline, read_section | add_section, append_to_section, replace_section, rename_section |
+| `links` | get_links, get_related_notes | — |
+| `tags` | list_tags, find_by_tag | add_tag, remove_tag |
+| `properties` | get_frontmatter, list_properties, list_property_values, query_notes, get_property | set_frontmatter, add_property_values, remove_property_values, rename_property |
+| `tasks` | list_tasks | set_task_state |
+| `templates` | list_templates | apply_template, insert_template |
+| `files` | list_files, list_folders | move_file |
+| `vault` | get_vault_stats, list_vault_issues | — |
+| `bulk` | — | bulk_edit |
+
+`get_config` is groupless and **always exposed** — it reports the active
+policy (`tools` section), so an agent can discover why a tool is absent.
+
+Examples:
+
+```bash
+OBSIDIAN_TOOLS="all"                              # everything
+OBSIDIAN_TOOLS="-templates,-tasks"                # reads minus templates/tasks
+OBSIDIAN_TOOLS="reads,tasks.write,sections.write" # read all, write tasks+sections
+OBSIDIAN_TOOLS="all,-bulk,-delete_note"           # everything but the scary ones
+OBSIDIAN_TOOLS="search,notes.read"                # minimal search-and-read agent
+```
+
+**Fail-loud:** an unknown selector, a policy that selects no tools, or the
+retired `OBSIDIAN_ALLOW_WRITES` variable being set at all aborts startup with
+a message listing the valid vocabulary (or the migration hint). A valid slice
+that selects nothing (`links.write` — links has no write tools) is allowed.
+Excluded tools are absent from `list_tools` (that is the token saving) and,
+as defense in depth, calling one is rejected with the current policy named.
+Write/read classification derives from `isWriteTool` (`src/tools/write.ts`) —
+one source of truth. Implemented in `src/tools/tool-policy.ts`.
 
 ### Git guard (`OBSIDIAN_GIT_AUTOCOMMIT`)
 
@@ -594,6 +651,7 @@ npm run query -- resolve "Alpha Project"                # title/alias/basename -
 npm run query -- stats                                  # Whole-vault statistics
 npm run query -- config                                 # Whole server config
 npm run query -- config template                        # Just the template section
+npm run query -- config tools                           # Active tool policy (exposed/excluded)
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
 npm run query -- vault-issues broken_anchors --limit 50    # Resolved-note, dead-heading anchors, by source
@@ -613,7 +671,7 @@ npm run query -- tasks                                   # All checkbox tasks
 npm run query -- tasks --folder projects --status open   # Open tasks in projects/
 npm run query -- tasks --tag work --status open in_progress  # Outstanding work tasks
 
-# Write examples (the query CLI is not gated by OBSIDIAN_ALLOW_WRITES)
+# Write examples (the query CLI is not gated by OBSIDIAN_TOOLS)
 npm run query -- write "inbox/idea" "# Idea\n\nbody"    # Create a note
 npm run query -- write "inbox/idea" --file draft.md -o  # Overwrite from a file
 npm run query -- append "daily/2026-07-22" "more text"  # Append to a note

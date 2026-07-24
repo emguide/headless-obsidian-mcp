@@ -52,7 +52,6 @@ import {
   renameNoteProperty,
   renameSectionInVault,
   setTaskState,
-  isWriteTool,
   WriteNoteParams,
   AppendNoteParams,
   PrependNoteParams,
@@ -86,13 +85,31 @@ import {
   ListTasksParams,
   SetTaskStateParams,
 } from "./types.js";
-import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
+import { TOOLS_ENV } from "./tools/env-flags.js";
+import {
+  DEFAULT_POLICY,
+  GATED_TOOL_NAMES,
+  resolveToolPolicy,
+  ToolPolicy,
+} from "./tools/tool-policy.js";
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH;
 if (!VAULT_PATH) {
   console.error("Error: OBSIDIAN_VAULT_PATH environment variable is required");
   process.exit(1);
 }
+
+// Resolve the OBSIDIAN_TOOLS policy once, fail-loud: a typo'd selector or the
+// retired OBSIDIAN_ALLOW_WRITES switch kills startup rather than silently
+// exposing the wrong tool surface.
+let TOOL_POLICY: ToolPolicy;
+try {
+  TOOL_POLICY = resolveToolPolicy();
+} catch (error) {
+  console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
+const EXPOSED_TOOLS = TOOL_POLICY.exposed;
 
 const server = new Server(
   {
@@ -109,12 +126,12 @@ const server = new Server(
       "Headless MCP server for an Obsidian vault. All paths (notes, files, folders) are relative to the vault root; on notes the .md extension is optional.\n\n" +
       "Pagination convention: every list-style tool (the list_* tools plus search_notes_ranked, find_by_tag, query_notes, and get_related_notes) returns { results, returned, skipped, omitted, truncated } — a window [offset, offset + limit) over the full result set. limit defaults to 100 (0 = unbounded); offset defaults to 0, and skipping past the end returns an empty result, not an error. skipped counts rows dropped before the window by offset, omitted counts rows dropped after it by limit, so total = skipped + returned + omitted; truncated (omitted > 0) means a next page exists. search_notes paginates over matching files with the parallel names files_skipped / files_omitted. Deviations are noted on the tool itself.\n\n" +
       "Filter convention: every note-selecting tool accepts the same optional candidate filters — folder (path prefix), tags (with match: 'any' default | 'all'), and where (frontmatter conditions, same syntax as query_notes). search_notes, search_notes_ranked, list_notes, list_recent_notes, find_by_tag, query_notes, list_tasks, and get_related_notes all share this vocabulary, so a scoped question ('active notes in projects/ tagged #work') needs no client-side join. On a tool whose primary filter is tags (find_by_tag) or where (query_notes), match governs that primary filter and the secondary filter applies with its default (tags: any, where: all).\n\n" +
-      "Link-integrity convention: every content-writing tool (write_note, append_note, prepend_note, patch_note, add_section, append_to_section, replace_section, set_task_state) returns, alongside its normal fields, unresolved_links (wikilink targets in the resulting note that resolve to no vault note) and broken_anchors ([[note#heading]] links whose note resolves but whose heading anchor matches nothing, as { target, anchor }). Both are report-only — the write is never blocked or modified, exactly like delete_note's dangled_backlinks — so an agent learns immediately when a write introduces a broken [[wikilink]] instead of discovering it later via list_vault_issues. Empty arrays mean the write left the graph intact.",
+      "Link-integrity convention: every content-writing tool (write_note, append_note, prepend_note, patch_note, add_section, append_to_section, replace_section, set_task_state) returns, alongside its normal fields, unresolved_links (wikilink targets in the resulting note that resolve to no vault note) and broken_anchors ([[note#heading]] links whose note resolves but whose heading anchor matches nothing, as { target, anchor }). Both are report-only — the write is never blocked or modified, exactly like delete_note's dangled_backlinks — so an agent learns immediately when a write introduces a broken [[wikilink]] instead of discovering it later via list_vault_issues. Empty arrays mean the write left the graph intact.\n\n" +
+      "Tool exposure is operator-configured (OBSIDIAN_TOOLS): this server may expose a subset of the full tool surface. get_config's tools section reports the active policy and the exposed/excluded tool names.",
   }
 );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const tools = [
+const TOOL_DEFINITIONS = [
       {
         name: "search_notes",
         description: "Search notes with ripgrep, optionally scoped by folder, tags, or a frontmatter where filter (index-resolved candidates, then rg over just those notes). Paginates over matching files: returns { results, truncated, files_returned, files_skipped, files_omitted, matches_capped_in }.",
@@ -284,13 +301,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_config",
-        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, writes: { writes_enabled, git_autocommit }, vault: { path } }. Optional section narrows the result to one unwrapped section. template.folder is null when no template folder is configured (does not error). Read-only; never gated by OBSIDIAN_ALLOW_WRITES — this is how you discover whether writes are enabled.",
+        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, writes: { writes_enabled, git_autocommit }, vault: { path }, tools: { policy, exposed, excluded } }. Optional section narrows the result to one unwrapped section. template.folder is null when no template folder is configured (does not error). writes_enabled means at least one write tool is exposed. Read-only; never excluded by OBSIDIAN_TOOLS — this is how you discover the active tool policy.",
         inputSchema: {
           type: "object",
           properties: {
             section: {
               type: "string",
-              enum: ["template", "writes", "vault"],
+              enum: ["template", "writes", "vault", "tools"],
               description: "Return just this section, unwrapped. Omit for the whole config object."
             }
           }
@@ -893,21 +910,41 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       }
     ];
 
-  // Expose the write tools only when writing is enabled; stay read-only otherwise.
-  return {
-    tools: writesEnabled() ? tools : tools.filter((tool) => !isWriteTool(tool.name)),
-  };
-});
+// The taxonomy and the definitions must never drift: every defined tool is
+// classified (or is the always-on get_config), every classified tool is defined.
+{
+  const defined = new Set(TOOL_DEFINITIONS.map((tool) => tool.name));
+  for (const tool of TOOL_DEFINITIONS) {
+    if (tool.name !== "get_config" && !GATED_TOOL_NAMES.has(tool.name)) {
+      console.error(`Error: tool "${tool.name}" has no tool-policy group`);
+      process.exit(1);
+    }
+  }
+  for (const name of GATED_TOOL_NAMES) {
+    if (!defined.has(name)) {
+      console.error(`Error: tool-policy classifies "${name}" but the server does not define it`);
+      process.exit(1);
+    }
+  }
+}
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: TOOL_DEFINITIONS.filter((tool) => EXPOSED_TOOLS.has(tool.name)),
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    // Gate every mutating tool behind the write master switch (defense in depth:
-    // the tool is also hidden from list_tools when writes are disabled).
-    if (isWriteTool(name) && !writesEnabled()) {
+    // Defense in depth: excluded tools are absent from list_tools, but a stale
+    // client may still call one. Unknown names fall through to the default case.
+    if (GATED_TOOL_NAMES.has(name) && !EXPOSED_TOOLS.has(name)) {
       throw new Error(
-        `Writing is disabled. Set ${ALLOW_WRITES_ENV}=1 (or true/yes/on) to enable the write tools.`
+        `Tool "${name}" is excluded by ${TOOLS_ENV} (current policy: ${
+          TOOL_POLICY.policy === null
+            ? `unset — default "${DEFAULT_POLICY}"`
+            : JSON.stringify(TOOL_POLICY.policy)
+        }).`
       );
     }
 

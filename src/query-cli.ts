@@ -536,8 +536,8 @@ program
 
 program
   .command("config")
-  .description("Report the server's own configuration (template folder + formats, write flags, vault path)")
-  .argument("[section]", "Narrow to one section: template | writes | vault")
+  .description("Report the server's own configuration (template folder + formats, write status, vault path, tool policy)")
+  .argument("[section]", "Narrow to one section: template | writes | vault | tools")
   .action(async (section: string | undefined, _options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     await queryTool("get_config", { ...(section && { section }) }, verbose);

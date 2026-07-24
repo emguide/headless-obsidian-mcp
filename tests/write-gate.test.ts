@@ -1,33 +1,21 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { writesEnabled, ALLOW_WRITES_ENV, gitGuardEnabled, GIT_AUTOCOMMIT_ENV } from "../src/tools/env-flags.js";
+import { gitGuardEnabled, GIT_AUTOCOMMIT_ENV } from "../src/tools/env-flags.js";
 import { isWriteTool, WRITE_TOOL_NAMES } from "../src/tools/write.js";
 
 afterEach(() => {
-  delete process.env[ALLOW_WRITES_ENV];
   delete process.env[GIT_AUTOCOMMIT_ENV];
 });
 
-test("writes are disabled by default", () => {
-  delete process.env[ALLOW_WRITES_ENV];
-  assert.equal(writesEnabled(), false);
-});
-
-test("writesEnabled accepts the documented truthy values", () => {
+test("git guard flag accepts the documented truthy values", () => {
   for (const value of ["1", "true", "TRUE", "yes", "on", " on "]) {
-    process.env[ALLOW_WRITES_ENV] = value;
-    assert.equal(writesEnabled(), true, `expected ${JSON.stringify(value)} to enable writes`);
+    process.env[GIT_AUTOCOMMIT_ENV] = value;
+    assert.equal(gitGuardEnabled(), true, `expected ${JSON.stringify(value)} to enable the guard`);
   }
   for (const value of ["0", "false", "no", "off", ""]) {
-    process.env[ALLOW_WRITES_ENV] = value;
-    assert.equal(writesEnabled(), false, `expected ${JSON.stringify(value)} to keep writes off`);
+    process.env[GIT_AUTOCOMMIT_ENV] = value;
+    assert.equal(gitGuardEnabled(), false, `expected ${JSON.stringify(value)} to keep the guard off`);
   }
-});
-
-test("git guard flag is independent of the write flag", () => {
-  process.env[GIT_AUTOCOMMIT_ENV] = "yes";
-  assert.equal(gitGuardEnabled(), true);
-  assert.equal(writesEnabled(), false);
 });
 
 test("every mutating tool is classified as a write tool", () => {
@@ -44,9 +32,9 @@ test("read tools are not classified as write tools", () => {
 });
 
 test("get_config is never write-gated (isWriteTool returns false)", () => {
-  // Regression guard: get_config must NEVER be write-gated, regardless of
-  // OBSIDIAN_ALLOW_WRITES. It must always be in list_tools and always
-  // dispatchable. This invariant is load-bearing for server availability.
+  // Regression guard: get_config must NEVER be write-gated or policy-excluded.
+  // It must always be in list_tools and always dispatchable. This invariant is
+  // load-bearing for server availability.
   assert.equal(isWriteTool("get_config"), false, "get_config should not be a write tool");
   assert.ok(!WRITE_TOOL_NAMES.has("get_config"), "get_config should not be in WRITE_TOOL_NAMES");
 

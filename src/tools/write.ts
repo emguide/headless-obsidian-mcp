@@ -31,8 +31,9 @@ import {
 } from "./note-document.js";
 
 /**
- * Names of every tool that mutates the vault. Used by the server to gate the
- * write surface behind OBSIDIAN_ALLOW_WRITES.
+ * Names of every tool that mutates the vault. Backs the reads/writes
+ * meta-groups of the OBSIDIAN_TOOLS policy (tool-policy.ts) and the derived
+ * writes_enabled config field.
  */
 export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "write_note",
