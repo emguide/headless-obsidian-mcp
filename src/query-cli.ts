@@ -78,7 +78,7 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
     } else if (toolName === "list_notes") {
       result = await listNotes(VAULT_PATH!, args);
     } else if (toolName === "get_links") {
-      result = await getLinks(VAULT_PATH!, args.path);
+      result = await getLinks(VAULT_PATH!, args.path, { include_context: args.include_context });
     } else if (toolName === "get_outline") {
       result = await getOutline(VAULT_PATH!, args.path);
     } else if (toolName === "read_section") {
@@ -116,7 +116,10 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
     } else if (toolName === "prepend_note") {
       result = await prependNote(VAULT_PATH!, args);
     } else if (toolName === "delete_note") {
-      result = await deleteNote(VAULT_PATH!, args.path, { permanent: args.permanent });
+      result = await deleteNote(VAULT_PATH!, args.path, {
+        permanent: args.permanent,
+        include_context: args.include_context,
+      });
     } else if (toolName === "move_note") {
       result = await moveNote(VAULT_PATH!, args);
     } else if (toolName === "move_file") {
@@ -373,9 +376,14 @@ program
   .command("links")
   .description("Show outbound links, unresolved links, and backlinks for a note")
   .argument("<path>", "Relative note path")
-  .action(async (path: string, _options: any, command: Command) => {
+  .option("-c, --include-context", "Include the source line(s) containing each link")
+  .action(async (path: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
-    await queryTool("get_links", { path }, verbose);
+    await queryTool(
+      "get_links",
+      { path, ...(options.includeContext && { include_context: true }) },
+      verbose
+    );
   });
 
 program
@@ -560,12 +568,14 @@ program
   .description("List orphans or unresolved_links")
   .option("-l, --limit <n>", "Maximum number of rows to return")
   .option("-o, --offset <n>", "Rows/groups to skip before the window (pagination)")
+  .option("-c, --include-context", "Include the source line(s) containing each broken reference (not valid for orphans)")
   .action(async (kind: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     const args = {
       kind,
       ...(options.limit !== undefined && { limit: parseInt(options.limit, 10) }),
       ...(options.offset !== undefined && { offset: parseInt(options.offset, 10) }),
+      ...(options.includeContext && { include_context: true }),
     };
     await queryTool("list_vault_issues", args, verbose);
   });
@@ -650,9 +660,18 @@ program
   .description("Delete a note (trash-safe by default; --permanent to unlink)")
   .argument("<path>", "Relative note path")
   .option("-p, --permanent", "Permanently delete instead of moving to .trash")
+  .option("-c, --include-context", "Include the source line(s) in each dangled backlink")
   .action(async (path: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
-    await queryTool("delete_note", { path, ...(options.permanent && { permanent: true }) }, verbose);
+    await queryTool(
+      "delete_note",
+      {
+        path,
+        ...(options.permanent && { permanent: true }),
+        ...(options.includeContext && { include_context: true }),
+      },
+      verbose
+    );
   });
 
 program

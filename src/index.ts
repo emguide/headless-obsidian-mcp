@@ -128,6 +128,8 @@ const server = new Server(
       "Pagination convention: every list-style tool (the list_* tools plus search_notes_ranked, find_by_tag, query_notes, and get_related_notes) returns { results, returned, skipped, omitted, truncated } — a window [offset, offset + limit) over the full result set. limit defaults to 100 (0 = unbounded); offset defaults to 0, and skipping past the end returns an empty result, not an error. skipped counts rows dropped before the window by offset, omitted counts rows dropped after it by limit, so total = skipped + returned + omitted; truncated (omitted > 0) means a next page exists. search_notes paginates over matching files with the parallel names files_skipped / files_omitted. Deviations are noted on the tool itself.\n\n" +
       "Filter convention: every note-selecting tool accepts the same optional candidate filters — folder (path prefix), tags (with match: 'any' default | 'all'), and where (frontmatter conditions, same syntax as query_notes). search_notes, search_notes_ranked, list_notes, list_recent_notes, find_by_tag, query_notes, list_tasks, and get_related_notes all share this vocabulary, so a scoped question ('active notes in projects/ tagged #work') needs no client-side join. On a tool whose primary filter is tags (find_by_tag) or where (query_notes), match governs that primary filter and the secondary filter applies with its default (tags: any, where: all).\n\n" +
       "Link-integrity convention: every content-writing tool (write_note, append_note, prepend_note, patch_note, add_section, append_to_section, replace_section, set_task_state) returns, alongside its normal fields, unresolved_links (wikilink targets in the resulting note that resolve to no vault note) and broken_anchors ([[note#heading]] links whose note resolves but whose heading anchor matches nothing, as { target, anchor }). Both are report-only — the write is never blocked or modified, exactly like delete_note's dangled_backlinks — so an agent learns immediately when a write introduces a broken [[wikilink]] instead of discovering it later via list_vault_issues. Empty arrays mean the write left the graph intact.\n\n" +
+      "Link-context convention: get_links, delete_note, and list_vault_issues (kinds unresolved_links/broken_anchors) accept opt-in include_context: true, decorating each reported link row with context — the source line(s) containing that link, as { line, text } pairs. line is 1-based and body-relative (frontmatter stripped, the same convention as get_outline/list_tasks); text is the line verbatim, so it can be fed straight into patch_note's find. Context is computed by call-time file reads (bounded by the returned window on list_vault_issues), so leave the flag off when you only need the paths.\n\n" +
+      "Not-found convention: a missing-note error may append up to 3 'Did you mean' candidate paths, matched by resolve_note's exact semantics (case-insensitive title/alias/basename — never fuzzy). Suggestions are advisory: the tool never substitutes a candidate for the requested path.\n\n" +
       "Tool exposure is operator-configured (OBSIDIAN_TOOLS): this server may expose a subset of the full tool surface. get_config's tools section reports the active policy and the exposed/excluded tool names.",
   }
 );
@@ -316,13 +318,17 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "get_links",
-        description: "Resolve the Obsidian link graph for a note: outbound [[wikilinks]] resolved to real notes, links that resolve to nothing, and backlinks (other notes that link to this one). Use it to traverse related knowledge.",
+        description: "Resolve the Obsidian link graph for a note: outbound [[wikilinks]] resolved to real notes, links that resolve to nothing, and backlinks (other notes that link to this one). Use it to traverse related knowledge. With include_context: true, every row gains the linking line(s) — 'who references this note, and why' in one call (see the link-context convention).",
         inputSchema: {
           type: "object",
           properties: {
             path: {
               type: "string",
               description: "Note path (.md optional)"
+            },
+            include_context: {
+              type: "boolean",
+              description: "Decorate every link row with the source line(s) containing it, as { line, text }. Call-time file reads — leave off (default) when only the paths are needed."
             }
           },
           required: ["path"]
@@ -604,6 +610,10 @@ const TOOL_DEFINITIONS = [
             offset: {
               type: "number",
               description: "Rows/groups to skip, for pagination (default 0)."
+            },
+            include_context: {
+              type: "boolean",
+              description: "For kinds unresolved_links/broken_anchors: decorate each target with the source line(s) containing it, as { line, text } (call-time reads over the returned window only). Errors on kind orphans."
             }
           },
           required: ["kind"]
@@ -651,12 +661,13 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "delete_note",
-        description: "Delete a note. Trash-safe by default (moved to .trash, recoverable); pass permanent:true to unlink. Returns { path, deleted, trashed, trash_path?, dangled_backlinks } where dangled_backlinks lists the notes that linked to the deleted note and now have a broken [[wikilink]].",
+        description: "Delete a note. Trash-safe by default (moved to .trash, recoverable); pass permanent:true to unlink. Returns { path, deleted, trashed, trash_path?, dangled_backlinks } where dangled_backlinks lists the notes that linked to the deleted note and now have a broken [[wikilink]]. With include_context: true, each dangled backlink gains the linking line(s), so the broken references can be fixed without re-reading each source.",
         inputSchema: {
           type: "object",
           properties: {
             path: { type: "string", description: "Note path (.md optional)" },
-            permanent: { type: "boolean", description: "Permanently delete instead of moving to .trash (default: false)" }
+            permanent: { type: "boolean", description: "Permanently delete instead of moving to .trash (default: false)" },
+            include_context: { type: "boolean", description: "Decorate each dangled backlink with the source line(s) linking to the deleted note, as { line, text } (default: false)" }
           },
           required: ["path"]
         }
@@ -1035,11 +1046,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_links": {
-        const { path } = args as unknown as { path: string };
+        const { path, include_context } = args as unknown as { path: string; include_context?: boolean };
         if (!path || typeof path !== "string") {
           throw new Error("A note path is required for get_links");
         }
-        const results = await getLinks(VAULT_PATH, path);
+        const results = await getLinks(VAULT_PATH, path, { include_context });
         return {
           content: [{ type: "text", text: JSON.stringify(results) }]
         };
@@ -1172,11 +1183,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "delete_note": {
-        const { path, permanent } = args as unknown as { path: string; permanent?: boolean };
+        const { path, permanent, include_context } = args as unknown as { path: string; permanent?: boolean; include_context?: boolean };
         if (!path || typeof path !== "string") {
           throw new Error("A note path is required for delete_note");
         }
-        const result = await deleteNote(VAULT_PATH, path, { permanent });
+        const result = await deleteNote(VAULT_PATH, path, { permanent, include_context });
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

@@ -13,7 +13,9 @@ import {
 } from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
 import { linkHealthOf, LinkHealth } from "./link-health.js";
-import { SetTaskStateParams, WritableTaskStatus } from "../types.js";
+import { backlinkContext } from "./link-context.js";
+import { noteNotFoundError } from "./not-found.js";
+import { SetTaskStateParams, WritableTaskStatus, LinkContextLine } from "../types.js";
 import {
   NoteDocument,
   frontmatterTagList,
@@ -133,7 +135,7 @@ async function readRaw(vaultPath: string, notePath: string): Promise<string> {
   try {
     return await readFile(fullPath, "utf-8");
   } catch {
-    throw new Error(`Note not found: ${canonicalName(notePath)}`);
+    throw await noteNotFoundError(vaultPath, notePath);
   }
 }
 
@@ -248,7 +250,7 @@ export async function appendNote(
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (!existed) {
-    if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
+    if (!create) throw await noteNotFoundError(vaultPath, path);
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
     await commitWrite(vaultPath, path, created);
@@ -283,7 +285,7 @@ export async function prependNote(
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (!existed) {
-    if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
+    if (!create) throw await noteNotFoundError(vaultPath, path);
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
     await commitWrite(vaultPath, path, created);
@@ -303,6 +305,12 @@ export async function prependNote(
 export interface DeleteNoteOptions {
   /** Permanently unlink the file instead of moving it to the vault's .trash. */
   permanent?: boolean;
+  /**
+   * Decorate each dangled backlink with the source line(s) linking to the
+   * deleted note (call-time reads against the pre-delete index, where the
+   * note still resolves). Opt-in; without it the rows stay bare paths.
+   */
+  include_context?: boolean;
 }
 
 /**
@@ -314,23 +322,28 @@ export interface DeleteNoteOptions {
 export async function deleteNote(
   vaultPath: string,
   notePath: string,
-  { permanent = false }: DeleteNoteOptions = {}
+  { permanent = false, include_context = false }: DeleteNoteOptions = {}
 ): Promise<{
   path: string;
   deleted: boolean;
   trashed: boolean;
   trash_path?: string;
-  dangled_backlinks: string[];
+  dangled_backlinks: string[] | Array<{ path: string; context: LinkContextLine[] }>;
 }> {
   const fullPath = resolveNotePath(vaultPath, notePath);
   if (!(await fileExists(fullPath))) {
-    throw new Error(`Note not found: ${canonicalName(notePath)}`);
+    throw await noteNotFoundError(vaultPath, notePath);
   }
 
   // Capture backlinks from the pre-delete index before touching the filesystem,
-  // so the caller learns which notes now contain a broken [[wikilink]].
+  // so the caller learns which notes now contain a broken [[wikilink]]. Context
+  // must be resolved against this pre-delete index too: after the delete the
+  // note no longer resolves, so its backlink lines could not be identified.
   const index = await getIndex(vaultPath);
-  const dangled_backlinks = index.backlinks(canonicalName(notePath));
+  const backlinkPaths = index.backlinks(canonicalName(notePath));
+  const dangled_backlinks = include_context
+    ? await backlinkContext(index, backlinkPaths, canonicalName(notePath))
+    : backlinkPaths;
 
   await snapshotBeforeWrite(vaultPath);
 
@@ -396,7 +409,7 @@ export async function moveNote(
     throw new Error("Source and destination are the same note");
   }
   if (!(await fileExists(fromFull))) {
-    throw new Error(`Note not found: ${fromCanon}`);
+    throw await noteNotFoundError(vaultPath, from);
   }
   const destExisted = await fileExists(toFull);
   if (destExisted && !overwrite) {

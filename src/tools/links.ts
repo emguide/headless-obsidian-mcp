@@ -1,6 +1,17 @@
 import { resolveNotePath, assertVaultPath } from "./vault.js";
 import { getIndex } from "./vault-index.js";
-import { LinksResult } from "../types.js";
+import { noteNotFoundMessage } from "./not-found.js";
+import { LinksResult, LinksResultWithContext } from "../types.js";
+import { scanLinkLines, linkContext, resolvesTo, backlinkContext } from "./link-context.js";
+
+export interface GetLinksOptions {
+  /**
+   * Decorate every link row with the source line(s) containing it (call-time
+   * file reads; see link-context.ts). Opt-in so a heavily-backlinked hub note
+   * stays cheap by default.
+   */
+  include_context?: boolean;
+}
 
 /**
  * Compute the link graph for a single note: outbound wikilinks resolved to
@@ -12,7 +23,17 @@ import { LinksResult } from "../types.js";
 export async function getLinks(
   vaultPath: string,
   notePath: string
-): Promise<LinksResult> {
+): Promise<LinksResult>;
+export async function getLinks(
+  vaultPath: string,
+  notePath: string,
+  options: GetLinksOptions
+): Promise<LinksResult | LinksResultWithContext>;
+export async function getLinks(
+  vaultPath: string,
+  notePath: string,
+  options: GetLinksOptions = {}
+): Promise<LinksResult | LinksResultWithContext> {
   assertVaultPath(vaultPath);
   if (!notePath || typeof notePath !== "string") {
     throw new Error("A note path is required for get_links");
@@ -29,7 +50,9 @@ export async function getLinks(
   const self = index.resolve(noteName) ?? noteName;
   const entry = index.getEntry(self);
   if (!entry) {
-    throw new Error(`Note not found or not readable: ${notePath}`);
+    throw new Error(
+      noteNotFoundMessage(index, notePath, "Note not found or not readable")
+    );
   }
 
   const outbound: Array<{ target: string; path: string }> = [];
@@ -47,10 +70,31 @@ export async function getLinks(
     }
   }
 
+  const backlinks = index.backlinks(self);
+
+  if (!options.include_context) {
+    return {
+      note: self,
+      outbound_links: outbound,
+      unresolved_links: unresolved,
+      backlinks,
+    };
+  }
+
+  // Outbound and unresolved context comes from one scan of the inspected note;
+  // backlink context reads each source note once.
+  const scannedSelf = await scanLinkLines(entry.fullPath);
   return {
     note: self,
-    outbound_links: outbound,
-    unresolved_links: unresolved,
-    backlinks: index.backlinks(self),
+    outbound_links: outbound.map(({ target, path }) => ({
+      target,
+      path,
+      context: linkContext(scannedSelf, resolvesTo(index, self, path)),
+    })),
+    unresolved_links: unresolved.map((target) => ({
+      target,
+      context: linkContext(scannedSelf, (ref) => ref.target === target),
+    })),
+    backlinks: await backlinkContext(index, backlinks, self),
   };
 }
