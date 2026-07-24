@@ -18,6 +18,18 @@ before(async () => {
       path: "tricky.md",
       content: "---\nk: v\n---   \n- [ ] tricky task\n",
     },
+    {
+      // Frontmatter-only note whose closing fence has no trailing newline:
+      // the unterminated fence line still belongs to the frontmatter block.
+      path: "fmonly.md",
+      content: "---\nk: v\n---",
+    },
+    {
+      // BOM before the first heading, no frontmatter: gray-matter strips the
+      // BOM from content, but that must not count as a frontmatter line.
+      path: "bom.md",
+      content: "﻿# H\nbody\n",
+    },
   ]);
 });
 after(async () => {
@@ -32,6 +44,18 @@ test("bodyBegin counts the frontmatter block's raw lines", async () => {
 test("bodyBegin is 0 for a note without frontmatter", async () => {
   const index = await getIndex(fx.vaultPath);
   assert.equal(index.getEntry("plain")?.bodyBegin, 0);
+});
+
+test("bodyBegin covers an unterminated closing fence in a frontmatter-only note", async () => {
+  const index = await getIndex(fx.vaultPath);
+  // All 3 raw lines are frontmatter, so every possible hit must map to null
+  // (raw line <= bodyBegin), including one on the fence line itself.
+  assert.equal(index.getEntry("fmonly")?.bodyBegin, 3);
+});
+
+test("a stripped BOM does not count as a frontmatter line", async () => {
+  const index = await getIndex(fx.vaultPath);
+  assert.equal(index.getEntry("bom")?.bodyBegin, 0);
 });
 
 test("bodyBegin agrees with the index's own task line on a trailing-space fence", async () => {

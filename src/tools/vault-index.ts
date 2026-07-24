@@ -332,7 +332,15 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
     // line math stays consistent even on fences NoteDocument would swallow
     // differently. Relies on parsed.content being a suffix of raw (the same
     // invariant set_task_state's byte-preserving reattach uses).
-    bodyBegin = raw.slice(0, raw.length - parsed.content.length).split("\n").length - 1;
+    const fmPrefix = raw.slice(0, raw.length - parsed.content.length);
+    bodyBegin = fmPrefix.split("\n").length - 1;
+    // A frontmatter-only note whose closing fence lacks a trailing newline
+    // leaves the fence line unterminated: it is still a frontmatter line.
+    // Gated on empty content — a stripped BOM also leaves a newline-less
+    // prefix, but there the body follows on the same line count.
+    if (parsed.content === "" && fmPrefix !== "" && !fmPrefix.endsWith("\n")) {
+      bodyBegin += 1;
+    }
     frontmatter = parsed.data as Record<string, unknown>;
     tags = collectTags(frontmatter, parsed.content);
     linkTargets = extractLinkTargets(parsed.content);
