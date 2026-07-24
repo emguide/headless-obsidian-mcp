@@ -25,6 +25,7 @@ import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
 import { listFolders } from "./tools/folders.js";
 import { listTemplates, applyTemplate, insertTemplate } from "./tools/templates.js";
+import { resolveServerConfig, selectConfigSection } from "./tools/config.js";
 import {
   listProperties,
   getPropertyValues,
@@ -274,6 +275,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             limit: { type: "number", description: "Maximum number of templates to return (default 100; 0 = unbounded)" },
             offset: { type: "number", description: "Rows to skip, for pagination (default 0)." }
+          }
+        }
+      },
+      {
+        name: "get_config",
+        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, writes: { writes_enabled, git_autocommit }, vault: { path } }. Optional section narrows the result to one unwrapped section. template.folder is null when no template folder is configured (does not error). Read-only; never gated by OBSIDIAN_ALLOW_WRITES — this is how you discover whether writes are enabled.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            section: {
+              type: "string",
+              enum: ["template", "writes", "vault"],
+              description: "Return just this section, unwrapped. Omit for the whole config object."
+            }
           }
         }
       },
@@ -916,6 +931,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       case "list_templates": {
         const result = await listTemplates(VAULT_PATH, (args ?? {}) as { limit?: number; offset?: number });
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "get_config": {
+        const { section } = (args ?? {}) as { section?: string };
+        const config = await resolveServerConfig(VAULT_PATH);
+        const result = selectConfigSection(config, section);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 
