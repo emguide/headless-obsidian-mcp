@@ -44,6 +44,13 @@ export interface SearchResult {
   path: string;
   matches: Array<{
     line_number: number;
+    /**
+     * 1-based body-relative line (frontmatter stripped) — the same convention
+     * as get_outline/list_tasks/set_task_state, so a grep hit can be handed
+     * straight to the task/section surface. Null when the hit falls inside
+     * the frontmatter block (or the file is unknown to the index).
+     */
+    body_line: number | null;
     content: string;
     context_before: string[];
     context_after: string[];
