@@ -21,6 +21,7 @@ import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
 import { getFrontmatter } from "./tools/frontmatter.js";
 import { resolveNote } from "./tools/resolve.js";
+import { resolveDailyNote } from "./tools/daily-notes.js";
 import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
@@ -301,13 +302,13 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "get_config",
-        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, writes: { writes_enabled, git_autocommit }, vault: { path }, tools: { policy, exposed, excluded } }. Optional section narrows the result to one unwrapped section. template.folder is null when no template folder is configured (does not error). writes_enabled means at least one write tool is exposed. Read-only; never excluded by OBSIDIAN_TOOLS — this is how you discover the active tool policy.",
+        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, daily: { folder, format, template }, writes: { writes_enabled, git_autocommit }, vault: { path }, tools: { policy, exposed, excluded } }. Optional section narrows the result to one unwrapped section. template.folder and daily.folder are null when unconfigured (does not error). writes_enabled means at least one write tool is exposed. Read-only; never excluded by OBSIDIAN_TOOLS — this is how you discover the active tool policy.",
         inputSchema: {
           type: "object",
           properties: {
             section: {
               type: "string",
-              enum: ["template", "writes", "vault", "tools"],
+              enum: ["template", "daily", "writes", "vault", "tools"],
               description: "Return just this section, unwrapped. Omit for the whole config object."
             }
           }
@@ -510,6 +511,19 @@ const TOOL_DEFINITIONS = [
             }
           },
           required: ["query"]
+        }
+      },
+      {
+        name: "resolve_daily_note",
+        description: "Map a calendar date to its canonical daily-note path, using the Daily Notes core plugin's own configuration (.obsidian/daily-notes.json: folder, format, template; OBSIDIAN_DAILY_FOLDER overrides the folder). Returns { date, path, exists, template }: date is the resolved ISO day, path the canonical note path (no .md; slashes in the configured format nest folders, as in Obsidian), exists whether the note is on disk, template the configured daily template path or null. Read-only — existing tools do the rest: apply_template (which accepts the returned template path) or write_note to create it, append_note/append_to_section to log into it, read_notes/read_section to read it. Errors when daily notes are not configured. Note: {{date}}/{{time}} in an applied template expand with the current moment, not the resolved day — exact Obsidian parity for today, a known caveat when creating past/future notes.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            date: {
+              type: "string",
+              description: "\"YYYY-MM-DD\", or \"today\" (default) | \"yesterday\" | \"tomorrow\""
+            }
+          }
         }
       },
       {
@@ -1104,6 +1118,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error("A query is required for resolve_note");
         }
         const result = await resolveNote(VAULT_PATH, query);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "resolve_daily_note": {
+        const result = await resolveDailyNote(VAULT_PATH, (args ?? {}) as { date?: string });
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

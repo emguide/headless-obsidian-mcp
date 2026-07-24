@@ -1,4 +1,5 @@
 import { resolveTemplateConfig } from "./templates.js";
+import { resolveDailyConfig, DEFAULT_DAILY_FORMAT } from "./daily-notes.js";
 import { gitGuardEnabled } from "./env-flags.js";
 import { GATED_TOOL_NAMES, resolveToolPolicy } from "./tool-policy.js";
 import { isWriteTool } from "./write.js";
@@ -15,6 +16,17 @@ export interface ServerConfig {
     date_format: string;
     /** Effective format for a bare {{time}} (never undefined). */
     time_format: string;
+  };
+  daily: {
+    /**
+     * Resolved daily-notes folder ("" = vault root), or null when daily notes
+     * are not configured at all.
+     */
+    folder: string | null;
+    /** Effective daily filename format (never undefined). */
+    format: string;
+    /** Configured daily template (vault-relative, no .md), or null. */
+    template: string | null;
   };
   writes: {
     writes_enabled: boolean;
@@ -35,7 +47,7 @@ export interface ServerConfig {
 
 export type ConfigSection = keyof ServerConfig;
 
-const SECTIONS: ConfigSection[] = ["template", "writes", "vault", "tools"];
+const SECTIONS: ConfigSection[] = ["template", "daily", "writes", "vault", "tools"];
 
 /**
  * Assemble the server's own configuration. Unlike the template tools, an
@@ -57,10 +69,23 @@ export async function resolveServerConfig(
     /* no template folder configured — folder stays null, formats stay default */
   }
 
+  let daily: ServerConfig["daily"] = {
+    folder: null,
+    format: DEFAULT_DAILY_FORMAT,
+    template: null,
+  };
+  try {
+    const cfg = await resolveDailyConfig(vaultPath);
+    daily = { folder: cfg.folder, format: cfg.format, template: cfg.template };
+  } catch {
+    /* daily notes not configured — folder stays null */
+  }
+
   const { policy, exposed } = resolveToolPolicy();
 
   return {
     template: { folder, date_format: dateFormat, time_format: timeFormat },
+    daily,
     writes: {
       writes_enabled: [...exposed].some((name) => isWriteTool(name)),
       git_autocommit: gitGuardEnabled(),

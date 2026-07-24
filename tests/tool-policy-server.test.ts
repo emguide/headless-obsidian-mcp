@@ -69,7 +69,7 @@ test("default exposure is the read surface plus get_config", async () => {
   const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
   try {
     const names = await toolNames(fx.vaultPath, {});
-    assert.equal(names.length, 24);
+    assert.equal(names.length, 25);
     assert.ok(names.includes("get_config"));
     assert.ok(names.includes("search_notes"));
     assert.ok(!names.includes("write_note"));
@@ -79,11 +79,11 @@ test("default exposure is the read surface plus get_config", async () => {
   }
 });
 
-test("OBSIDIAN_TOOLS=all exposes all 45 tools", async () => {
+test("OBSIDIAN_TOOLS=all exposes all 46 tools", async () => {
   const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
   try {
     const names = await toolNames(fx.vaultPath, { OBSIDIAN_TOOLS: "all" });
-    assert.equal(names.length, 45);
+    assert.equal(names.length, 46);
     assert.ok(names.includes("bulk_edit"));
   } finally {
     await fx.cleanup();
@@ -97,7 +97,7 @@ test("negative-first policy trims the read surface without exposing writes", asy
     assert.ok(!names.includes("list_templates"));
     assert.ok(!names.includes("list_tasks"));
     assert.ok(!names.includes("write_note"));
-    assert.equal(names.length, 22);
+    assert.equal(names.length, 23);
   } finally {
     await fx.cleanup();
   }
@@ -109,7 +109,7 @@ test("mode-slice policy exposes selected writes only", async () => {
     const names = await toolNames(fx.vaultPath, { OBSIDIAN_TOOLS: "reads,tasks.write" });
     assert.ok(names.includes("set_task_state"));
     assert.ok(!names.includes("write_note"));
-    assert.equal(names.length, 25);
+    assert.equal(names.length, 26);
   } finally {
     await fx.cleanup();
   }

@@ -18,8 +18,8 @@ afterEach(() => {
 
 // --- taxonomy ---
 
-test("taxonomy covers exactly the 44 gated tools; get_config is groupless", () => {
-  assert.equal(GATED_TOOL_NAMES.size, 44);
+test("taxonomy covers exactly the 45 gated tools; get_config is groupless", () => {
+  assert.equal(GATED_TOOL_NAMES.size, 45);
   assert.ok(!GATED_TOOL_NAMES.has("get_config"));
   // every write tool is classified
   for (const name of WRITE_TOOL_NAMES) {
@@ -33,7 +33,7 @@ test("taxonomy matches the spec, tool by tool", () => {
     // search
     "search_notes", "search_notes_ranked",
     // notes
-    "read_notes", "list_notes", "list_recent_notes", "resolve_note",
+    "read_notes", "list_notes", "list_recent_notes", "resolve_note", "resolve_daily_note",
     "write_note", "append_note", "prepend_note", "patch_note", "delete_note", "move_note",
     // sections
     "get_outline", "read_section",
@@ -69,12 +69,12 @@ test("unset policy (null) defaults to reads + get_config", () => {
   for (const name of WRITE_TOOL_NAMES) {
     assert.ok(!exposed.has(name), `${name} must not be exposed by default`);
   }
-  assert.equal(exposed.size, 24); // 23 gated reads + get_config
+  assert.equal(exposed.size, 25); // 24 gated reads + get_config
 });
 
 test("'all' exposes every tool", () => {
   const exposed = evaluatePolicy("all");
-  assert.equal(exposed.size, 45);
+  assert.equal(exposed.size, 46);
 });
 
 test("'writes' exposes exactly the write tools plus get_config", () => {
@@ -130,7 +130,7 @@ test("individual tool tokens add and subtract", () => {
 
 test("a valid but empty slice (links.write) is allowed and adds nothing", () => {
   const exposed = evaluatePolicy("reads,links.write");
-  assert.equal(exposed.size, 24);
+  assert.equal(exposed.size, 25);
 });
 
 test("get_config is always exposed and cannot be excluded", () => {
@@ -164,12 +164,12 @@ test("resolveToolPolicy reads the env var and reports the raw policy", () => {
   delete process.env[TOOLS_ENV];
   const unset = resolveToolPolicy();
   assert.equal(unset.policy, null);
-  assert.equal(unset.exposed.size, 24);
+  assert.equal(unset.exposed.size, 25);
 
   process.env[TOOLS_ENV] = "all";
   const all = resolveToolPolicy();
   assert.equal(all.policy, "all");
-  assert.equal(all.exposed.size, 45);
+  assert.equal(all.exposed.size, 46);
 });
 
 test("retired OBSIDIAN_ALLOW_WRITES fails loud with a migration hint", () => {

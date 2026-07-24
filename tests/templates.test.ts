@@ -205,3 +205,78 @@ test("insertTemplate section=missing without create_section fails loud", async (
     await fx.cleanup();
   }
 });
+
+test("applyTemplate accepts a vault-relative template path outside the template folder", async () => {
+  const fx = await vaultWithTemplates();
+  try {
+    await writeFile(
+      join(fx.vaultPath, "notes", "Elsewhere.md"),
+      "# {{title}}\nFrom outside the folder.\n",
+      "utf-8"
+    );
+    const res = await applyTemplate(fx.vaultPath, {
+      template: "notes/Elsewhere",
+      path: "journal/out",
+    });
+    assert.equal(res.created, true);
+    const body = await readFile(join(fx.vaultPath, "journal/out.md"), "utf-8");
+    assert.match(body, /# out/);
+    assert.match(body, /From outside the folder/);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("applyTemplate works with no template folder configured when given a vault path", async () => {
+  const fx = await makeVault([
+    { path: "meta/Daily.md", content: "# {{title}}\n{{date:YYYY}}\n" },
+  ]);
+  try {
+    const res = await applyTemplate(fx.vaultPath, {
+      template: "meta/Daily",
+      path: "daily/2026-07-22",
+    });
+    assert.equal(res.created, true);
+    const body = await readFile(join(fx.vaultPath, "daily/2026-07-22.md"), "utf-8");
+    assert.match(body, /# 2026-07-22/);
+    assert.match(body, /\b\d{4}\b/);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("a template-folder name still wins over a vault-relative path", async () => {
+  const fx = await vaultWithTemplates();
+  try {
+    // A root-level note with the same name as a folder template.
+    await writeFile(join(fx.vaultPath, "Daily.md"), "ROOT NOTE\n", "utf-8");
+    const { raw } = await readTemplate(fx.vaultPath, "Daily");
+    assert.match(raw, /# \{\{title\}\}/);
+    assert.doesNotMatch(raw, /ROOT NOTE/);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("a not-found template still fails loud listing available templates", async () => {
+  const fx = await vaultWithTemplates();
+  try {
+    await assert.rejects(
+      () => readTemplate(fx.vaultPath, "Nope"),
+      /Template not found: Nope.*Daily.*Meeting/s
+    );
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("a traversal-escaping template path is rejected, not read", async () => {
+  const fx = await vaultWithTemplates();
+  try {
+    await assert.rejects(() =>
+      readTemplate(fx.vaultPath, "../../etc/passwd")
+    );
+  } finally {
+    await fx.cleanup();
+  }
+});
