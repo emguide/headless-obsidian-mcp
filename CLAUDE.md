@@ -63,6 +63,26 @@ The report covers the whole resulting note (not just the changed span), and
 empty arrays mean the write left the graph intact. Stated once in the server's
 MCP `instructions`; write-tool descriptions carry only a short pointer.
 
+**Not-found suggestions (shared).** Every path-addressed tool that errors on a
+missing note appends up to 3 did-you-mean candidates to the error message —
+`Note not found: projects/alfa. Did you mean: projects/alpha?` — via a shared
+builder (`src/tools/not-found.ts`). Candidates reuse `resolve_note`'s exact
+matching (case-insensitive title/alias/basename equality against the shared
+index, `VaultIndex.resolveName`), so the common near-misses — wrong case,
+wrong or missing folder prefix, title instead of basename — are caught with
+**no fuzzy semantics**: a pure spelling typo with no exact-match identity gets
+the bare message unchanged. The whole failed path is tried as a name first,
+then its last segment when it carries a folder prefix; the failed path itself
+is never suggested back. **Report-only** (fail-loud intact): errors stay
+errors, and a candidate is never silently substituted for the requested path.
+Covered sites: the write funnel's not-found paths (`patch_note`, `delete_note`,
+`move_note` source, `append_note`/`prepend_note` without `create`, and every
+`editNote`-based tool), the single-note readers (`get_frontmatter`,
+`get_property`, `get_outline`, `get_links`, `read_section`,
+`get_related_notes`), and `read_notes`' per-path `errors` entries (missing
+files only — a too-large file gets no suggestions). `move_file` is excluded
+(attachments are not indexed).
+
 **Pagination (`offset`).** Every envelope-returning tool (all the list-style
 tools plus `search_notes` and `search_notes_ranked`) accepts an optional
 `offset` (default `0`): the rows are a window `[offset, offset + limit)` over the

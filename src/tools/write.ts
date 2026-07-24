@@ -13,6 +13,7 @@ import {
 } from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
 import { linkHealthOf, LinkHealth } from "./link-health.js";
+import { noteNotFoundError } from "./not-found.js";
 import { SetTaskStateParams, WritableTaskStatus } from "../types.js";
 import {
   NoteDocument,
@@ -133,7 +134,7 @@ async function readRaw(vaultPath: string, notePath: string): Promise<string> {
   try {
     return await readFile(fullPath, "utf-8");
   } catch {
-    throw new Error(`Note not found: ${canonicalName(notePath)}`);
+    throw await noteNotFoundError(vaultPath, notePath);
   }
 }
 
@@ -248,7 +249,7 @@ export async function appendNote(
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (!existed) {
-    if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
+    if (!create) throw await noteNotFoundError(vaultPath, path);
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
     await commitWrite(vaultPath, path, created);
@@ -283,7 +284,7 @@ export async function prependNote(
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (!existed) {
-    if (!create) throw new Error(`Note not found: ${canonicalName(path)}`);
+    if (!create) throw await noteNotFoundError(vaultPath, path);
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
     await commitWrite(vaultPath, path, created);
@@ -324,7 +325,7 @@ export async function deleteNote(
 }> {
   const fullPath = resolveNotePath(vaultPath, notePath);
   if (!(await fileExists(fullPath))) {
-    throw new Error(`Note not found: ${canonicalName(notePath)}`);
+    throw await noteNotFoundError(vaultPath, notePath);
   }
 
   // Capture backlinks from the pre-delete index before touching the filesystem,
@@ -396,7 +397,7 @@ export async function moveNote(
     throw new Error("Source and destination are the same note");
   }
   if (!(await fileExists(fromFull))) {
-    throw new Error(`Note not found: ${fromCanon}`);
+    throw await noteNotFoundError(vaultPath, from);
   }
   const destExisted = await fileExists(toFull);
   if (destExisted && !overwrite) {

@@ -1,5 +1,6 @@
 import { resolveNotePath, headingPaths } from "./vault.js";
 import { getIndex } from "./vault-index.js";
+import { noteNotFoundMessage } from "./not-found.js";
 import { OutlineResult } from "../types.js";
 
 /**
@@ -23,7 +24,9 @@ export async function getOutline(
   const self = index.resolve(noteName) ?? noteName;
   const entry = index.getEntry(self);
   if (!entry) {
-    throw new Error(`Note not found or not readable: ${notePath}`);
+    throw new Error(
+      noteNotFoundMessage(index, notePath, "Note not found or not readable")
+    );
   }
 
   const paths = headingPaths(entry.headings);

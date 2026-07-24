@@ -3,6 +3,8 @@ import { join, resolve, relative } from "node:path";
 import matter from "gray-matter";
 import { Note, NoteMetadata, ReadNotesResult } from "../types.js";
 import { collectTags } from "./vault.js";
+import { getIndex, VaultIndex } from "./vault-index.js";
+import { noteNotFoundMessage } from "./not-found.js";
 
 export async function readNotes(vaultPath: string, notePaths: string[]): Promise<ReadNotesResult> {
   // Input validation
@@ -21,6 +23,9 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
   const notes: Note[] = [];
   const errors: Array<{ path: string; error: string }> = [];
   const resolvedVaultPath = resolve(vaultPath);
+  // Fetched lazily on the first missing note and reused for the whole batch,
+  // so did-you-mean enrichment costs at most one index refresh per call.
+  let index: VaultIndex | null = null;
 
   for (const notePath of notePaths) {
     try {
@@ -69,7 +74,18 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
       if (message.includes('path traversal')) {
         throw error;
       }
-      errors.push({ path: notePath, error: `Note not found or not readable: ${notePath}` });
+      let errorMessage = `Note not found or not readable: ${notePath}`;
+      // Only a genuinely missing file gets did-you-mean candidates; a
+      // too-large or unreadable file is a different failure, not a near-miss.
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        try {
+          index ??= await getIndex(vaultPath);
+          errorMessage = noteNotFoundMessage(index, notePath, 'Note not found or not readable');
+        } catch {
+          // Index unavailable - keep the bare message.
+        }
+      }
+      errors.push({ path: notePath, error: errorMessage });
     }
   }
 
