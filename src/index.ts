@@ -15,6 +15,7 @@ import { listNotes } from "./tools/list.js";
 import { getLinks } from "./tools/links.js";
 import { getOutline } from "./tools/outline.js";
 import { readSection } from "./tools/section.js";
+import { listTasks } from "./tools/tasks.js";
 import { listTags, findByTag } from "./tools/tags.js";
 import { listRecentNotes } from "./tools/recent.js";
 import { getRelatedNotes } from "./tools/related.js";
@@ -48,6 +49,7 @@ import {
   removeNotePropertyValues,
   renameNoteProperty,
   renameSectionInVault,
+  setTaskState,
   isWriteTool,
   WriteNoteParams,
   AppendNoteParams,
@@ -79,6 +81,8 @@ import {
   ListVaultIssuesParams,
   ListFilesParams,
   ListFoldersParams,
+  ListTasksParams,
+  SetTaskStateParams,
 } from "./types.js";
 import { ALLOW_WRITES_ENV, writesEnabled } from "./tools/env-flags.js";
 
@@ -102,8 +106,8 @@ const server = new Server(
     instructions:
       "Headless MCP server for an Obsidian vault. All paths (notes, files, folders) are relative to the vault root; on notes the .md extension is optional.\n\n" +
       "Pagination convention: every list-style tool (the list_* tools plus search_notes_ranked, find_by_tag, query_notes, and get_related_notes) returns { results, returned, skipped, omitted, truncated } — a window [offset, offset + limit) over the full result set. limit defaults to 100 (0 = unbounded); offset defaults to 0, and skipping past the end returns an empty result, not an error. skipped counts rows dropped before the window by offset, omitted counts rows dropped after it by limit, so total = skipped + returned + omitted; truncated (omitted > 0) means a next page exists. search_notes paginates over matching files with the parallel names files_skipped / files_omitted. Deviations are noted on the tool itself.\n\n" +
-      "Filter convention: every note-selecting tool accepts the same optional candidate filters — folder (path prefix), tags (with match: 'any' default | 'all'), and where (frontmatter conditions, same syntax as query_notes). search_notes, search_notes_ranked, list_notes, list_recent_notes, find_by_tag, query_notes, and get_related_notes all share this vocabulary, so a scoped question ('active notes in projects/ tagged #work') needs no client-side join. On a tool whose primary filter is tags (find_by_tag) or where (query_notes), match governs that primary filter and the secondary filter applies with its default (tags: any, where: all).\n\n" +
-      "Link-integrity convention: every content-writing tool (write_note, append_note, prepend_note, patch_note, add_section, append_to_section, replace_section) returns, alongside its normal fields, unresolved_links (wikilink targets in the resulting note that resolve to no vault note) and broken_anchors ([[note#heading]] links whose note resolves but whose heading anchor matches nothing, as { target, anchor }). Both are report-only — the write is never blocked or modified, exactly like delete_note's dangled_backlinks — so an agent learns immediately when a write introduces a broken [[wikilink]] instead of discovering it later via list_vault_issues. Empty arrays mean the write left the graph intact.",
+      "Filter convention: every note-selecting tool accepts the same optional candidate filters — folder (path prefix), tags (with match: 'any' default | 'all'), and where (frontmatter conditions, same syntax as query_notes). search_notes, search_notes_ranked, list_notes, list_recent_notes, find_by_tag, query_notes, list_tasks, and get_related_notes all share this vocabulary, so a scoped question ('active notes in projects/ tagged #work') needs no client-side join. On a tool whose primary filter is tags (find_by_tag) or where (query_notes), match governs that primary filter and the secondary filter applies with its default (tags: any, where: all).\n\n" +
+      "Link-integrity convention: every content-writing tool (write_note, append_note, prepend_note, patch_note, add_section, append_to_section, replace_section, set_task_state) returns, alongside its normal fields, unresolved_links (wikilink targets in the resulting note that resolve to no vault note) and broken_anchors ([[note#heading]] links whose note resolves but whose heading anchor matches nothing, as { target, anchor }). Both are report-only — the write is never blocked or modified, exactly like delete_note's dangled_backlinks — so an agent learns immediately when a write introduces a broken [[wikilink]] instead of discovering it later via list_vault_issues. Empty arrays mean the write left the graph intact.",
   }
 );
 
@@ -314,6 +318,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["path", "section"]
         }
+      },
+      {
+        name: "list_tasks",
+        description: "List checkbox tasks (- [ ] ...) across the vault as structured rows (path, text, status, raw marker, 1-based line, enclosing heading-path). status is a named state: open|done|in_progress|cancelled|forwarded|other. Index-backed. Scope with folder/tags/where/match and an optional status filter (any of the listed statuses).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            folder: { type: "string", description: "Restrict to notes under this folder." },
+            tags: { type: "array", items: { type: "string" }, description: "Restrict to notes carrying these tags (leading '#' optional)." },
+            match: { type: "string", enum: ["any", "all"], description: "Semantics of tags: 'any' (default) or 'all'." },
+            where: { type: "object", description: "Restrict to notes whose frontmatter satisfies these conditions (query_notes syntax)." },
+            status: {
+              type: "array",
+              items: { type: "string", enum: ["open", "done", "in_progress", "cancelled", "forwarded", "other"] },
+              description: "Restrict to tasks in any of these statuses; omitted = all.",
+            },
+            limit: { type: "number", description: "Maximum number of tasks to return (default 100; 0 = unbounded)." },
+            offset: { type: "number", description: "Rows to skip, for pagination (default 0)." },
+          },
+        },
       },
       {
         name: "list_tags",
@@ -635,6 +659,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: "set_task_state",
+        description: "Set one checkbox task's state in a note, rewriting only its marker (- [ ] -> - [x]). Address by exact task text (unique-or-fail, like patch_note) with an optional 1-based `line` tiebreak, or by `line` alone. status: open|done|in_progress|cancelled|forwarded (not 'other'). Reports unresolved_links/broken_anchors for the resulting note (link-integrity convention).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Note path (.md optional)." },
+            text: { type: "string", description: "Exact task text (the part after the checkbox)." },
+            line: { type: "number", description: "1-based line tiebreak / positional address." },
+            status: {
+              type: "string",
+              enum: ["open", "done", "in_progress", "cancelled", "forwarded"],
+              description: "Target state.",
+            },
+          },
+          required: ["path", "status"],
+        },
+      },
+      {
         name: "add_tag",
         description: "Add one or more tags to a note's frontmatter without rewriting the note. Existing tags are not duplicated. Returns the resulting tag list.",
         inputSchema: {
@@ -911,6 +953,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "list_tasks": {
+        const results = await listTasks(VAULT_PATH, (args ?? {}) as ListTasksParams);
+        return { content: [{ type: "text", text: JSON.stringify(results) }] };
+      }
+
       case "list_tags": {
         const results = await listTags(VAULT_PATH, (args?.offset as number | undefined));
         return {
@@ -1028,6 +1075,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "patch_note": {
         const result = await patchNote(VAULT_PATH, (args ?? {}) as unknown as PatchNoteParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "set_task_state": {
+        const result = await setTaskState(VAULT_PATH, args as unknown as SetTaskStateParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

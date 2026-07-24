@@ -42,3 +42,8 @@ test("read tools are not classified as write tools", () => {
     assert.equal(isWriteTool(name), false, `${name} should not be a write tool`);
   }
 });
+
+test("set_task_state is a gated write tool", () => {
+  assert.equal(WRITE_TOOL_NAMES.has("set_task_state"), true);
+  assert.equal(isWriteTool("set_task_state"), true);
+});
