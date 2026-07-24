@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { relative } from "node:path";
 import { SearchNotesParams, SearchResult, SearchNotesResponse } from "../types.js";
-import { getIndex } from "./vault-index.js";
+import { getIndex, type VaultIndex } from "./vault-index.js";
 import type { Condition } from "./property-match.js";
 import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
 
@@ -96,11 +96,12 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
 
   const hasFilter = folder !== undefined || tags !== undefined || where !== undefined;
   let candidatePaths: string[] | null = null; // null = whole-vault (no filter)
+  let index: VaultIndex | null = null; // kept for the body_line pass below
 
   if (hasFilter) {
     validateCandidateFilter({ tags, where, match });
 
-    const index = await getIndex(vaultPath);
+    index = await getIndex(vaultPath);
     const matched = resolveCandidates(index, {
       folder,
       tags,
@@ -219,6 +220,7 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
         }
         currentMatches.push({
           line_number: parsed.data.line_number,
+          body_line: null, // annotated from the index after collection
           content: parsed.data.lines.text,
           context_before: [],
           context_after: []
@@ -248,6 +250,22 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
   }
 
   flushCurrent();
+
+  // Bridge ripgrep's file-absolute line numbers to the body-relative
+  // convention of get_outline/list_tasks/set_task_state: body_line =
+  // line_number - bodyBegin (the note's frontmatter raw-line count, from the
+  // same gray-matter parse those tools read). Hits inside the frontmatter
+  // block — and files the index doesn't know — stay null.
+  if (results.length > 0) {
+    const idx = index ?? (await getIndex(vaultPath));
+    for (const file of results) {
+      const bodyBegin = idx.getEntry(file.path)?.bodyBegin;
+      if (bodyBegin === undefined) continue;
+      for (const m of file.matches) {
+        m.body_line = m.line_number > bodyBegin ? m.line_number - bodyBegin : null;
+      }
+    }
+  }
 
   return {
     results,
