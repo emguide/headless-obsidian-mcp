@@ -154,12 +154,15 @@ describe("enriched not-found errors across tools", () => {
       () => prependNote(fx.vaultPath, { path: "archive/alpha", content: "x" }),
       HINT
     );
-    // deleteNote/moveNote are untouched by writer-name-resolution (out of
-    // scope for this task) and still address by literal path only, so a bare
-    // basename still errors with a hint here.
-    await assert.rejects(() => deleteNote(fx.vaultPath, "alpha"), HINT);
+    // deleteNote/moveNote (source) now ALSO resolve a bare/wrong-case name
+    // (writer-name-resolution task 4), so — like the patch/append/prepend
+    // calls above — a slash-qualified miss is used here to still exercise the
+    // not-found+hint path without actually deleting/moving the shared
+    // "projects/alpha" fixture note that later tests in this describe block
+    // depend on.
+    await assert.rejects(() => deleteNote(fx.vaultPath, "archive/alpha"), HINT);
     await assert.rejects(
-      () => moveNote(fx.vaultPath, { from: "alpha", to: "elsewhere/alpha" }),
+      () => moveNote(fx.vaultPath, { from: "archive/alpha", to: "elsewhere/alpha" }),
       HINT
     );
   });

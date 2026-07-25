@@ -337,9 +337,10 @@ export async function deleteNote(
   trash_path?: string;
   dangled_backlinks: string[] | Array<{ path: string; context: LinkContextLine[] }>;
 }> {
-  const fullPath = resolveNotePath(vaultPath, notePath);
+  const resolved = await resolveWriteTargetAsync(vaultPath, notePath);
+  const fullPath = resolveNotePath(vaultPath, resolved);
   if (!(await fileExists(fullPath))) {
-    throw await noteNotFoundError(vaultPath, notePath);
+    throw await noteNotFoundError(vaultPath, resolved);
   }
 
   // Capture backlinks from the pre-delete index before touching the filesystem,
@@ -347,22 +348,22 @@ export async function deleteNote(
   // must be resolved against this pre-delete index too: after the delete the
   // note no longer resolves, so its backlink lines could not be identified.
   const index = await getIndex(vaultPath);
-  const backlinkPaths = index.backlinks(canonicalName(notePath));
+  const backlinkPaths = index.backlinks(canonicalName(resolved));
   const dangled_backlinks = include_context
-    ? await backlinkContext(index, backlinkPaths, canonicalName(notePath))
+    ? await backlinkContext(index, backlinkPaths, canonicalName(resolved))
     : backlinkPaths;
 
   await snapshotBeforeWrite(vaultPath);
 
   if (permanent) {
     await unlink(fullPath);
-    return { path: canonicalName(notePath), deleted: true, trashed: false, dangled_backlinks };
+    return { path: canonicalName(resolved), deleted: true, trashed: false, dangled_backlinks };
   }
 
   // Move into `.trash`, preserving the note's relative path. If a note of the
   // same name was trashed before, disambiguate with a numeric suffix rather
   // than clobbering the earlier copy.
-  const canon = canonicalName(notePath);
+  const canon = canonicalName(resolved);
   let trashRel = join(".trash", `${canon}.md`);
   let trashFull = resolveVaultFile(vaultPath, trashRel);
   for (let n = 1; await fileExists(trashFull); n++) {
@@ -408,15 +409,21 @@ export async function moveNote(
   updated_notes: number;
   updated_links: number;
 }> {
-  const fromFull = resolveNotePath(vaultPath, from);
+  // Resolve the source name (bare/wrong-case), failing loud on ambiguity. This
+  // supersedes the previous silent shortest-path pick that the later
+  // index.resolve(fromCanon) (kept below, for backlink keying) used to make.
+  // The destination `to` stays literal — it addresses a create target, never
+  // an existing note to redirect onto.
+  const fromResolved = await resolveWriteTargetAsync(vaultPath, from);
+  const fromFull = resolveNotePath(vaultPath, fromResolved);
   const toFull = resolveNotePath(vaultPath, to);
-  const fromCanon = canonicalName(from);
+  const fromCanon = canonicalName(fromResolved);
   const toCanon = canonicalName(to);
   if (fromCanon === toCanon) {
     throw new Error("Source and destination are the same note");
   }
   if (!(await fileExists(fromFull))) {
-    throw await noteNotFoundError(vaultPath, from);
+    throw await noteNotFoundError(vaultPath, fromResolved);
   }
   const destExisted = await fileExists(toFull);
   if (destExisted && !overwrite) {
@@ -429,7 +436,8 @@ export async function moveNote(
   let backlinks: string[] = [];
   if (update_links) {
     const index = await getIndex(vaultPath);
-    backlinks = index.backlinks(fromCanon);
+    const resolvedFrom = index.resolve(fromCanon) ?? fromCanon; // now a case-exact hit
+    backlinks = index.backlinks(resolvedFrom);
   }
 
   await snapshotBeforeWrite(vaultPath);
@@ -600,7 +608,8 @@ export async function renameSectionInVault(
     throw new Error("to must be a non-empty string");
   }
 
-  const canon = canonicalName(path);
+  const resolvedPath = await resolveWriteTargetAsync(vaultPath, path);
+  const canon = canonicalName(resolvedPath);
 
   // Capture backlinks + resolve the canonical note path from the pre-write index.
   // Also gates the self-anchor rewrite below: when update_anchors is false,
@@ -626,7 +635,7 @@ export async function renameSectionInVault(
   };
 
   // Rename the local heading (fails loud before any snapshot on missing/ambiguous).
-  const raw = await readRaw(vaultPath, path);
+  const raw = await readRaw(vaultPath, resolvedPath);
   const doc = NoteDocument.parse(raw);
   const oldHeading = renameSection(doc, from, to);
 
@@ -655,7 +664,7 @@ export async function renameSectionInVault(
   }
 
   await snapshotBeforeWrite(vaultPath);
-  await writeResolved(vaultPath, path, selfRewritten);
+  await writeResolved(vaultPath, resolvedPath, selfRewritten);
 
   let updatedNotes = 0;
   // Self-anchor rewrites count toward updated_links (inbound-anchor-equivalent
@@ -729,8 +738,9 @@ export async function setTaskState(
     throw new Error("line must be a positive integer (1-based)");
   }
 
-  const canon = canonicalName(path);
-  const raw = await readRaw(vaultPath, path);
+  const resolved = await resolveWriteTargetAsync(vaultPath, path);
+  const canon = canonicalName(resolved);
+  const raw = await readRaw(vaultPath, resolved);
   // parseTasks/`.line` operate on the frontmatter-stripped body, so both the
   // parse and the line-array edit below must use gray-matter's `body` — never
   // `raw`, and never NoteDocument's body — to match list_tasks/get_outline
@@ -771,7 +781,7 @@ export async function setTaskState(
 
   // No-op when already in the requested state — skip the write and snapshot.
   if (target.marker === marker) {
-    const health = await linkHealthAfterWrite(vaultPath, path, raw);
+    const health = await linkHealthAfterWrite(vaultPath, resolved, raw);
     return {
       path: canon,
       line: oneBasedLine,
@@ -795,8 +805,8 @@ export async function setTaskState(
   const block = raw.slice(0, raw.length - body.length);
   const next = block + newBody;
 
-  await commitWrite(vaultPath, path, next);
-  const health = await linkHealthAfterWrite(vaultPath, path, next);
+  await commitWrite(vaultPath, resolved, next);
+  const health = await linkHealthAfterWrite(vaultPath, resolved, next);
   return {
     path: canon,
     line: oneBasedLine,

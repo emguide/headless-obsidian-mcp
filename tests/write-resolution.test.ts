@@ -13,6 +13,10 @@ import {
   appendNote,
   prependNote,
   writeNote,
+  deleteNote,
+  moveNote,
+  setTaskState,
+  renameSectionInVault,
 } from "../src/tools/write.js";
 import { getFrontmatter } from "../src/tools/frontmatter.js";
 import { readRaw } from "../src/tools/write.js";
@@ -184,5 +188,64 @@ describe("edit-existing writers resolve bare/wrong-case names", () => {
     });
     assert.equal(res.path, "alpha");
     assert.equal(res.created, true);
+  });
+});
+
+function taskNotes() {
+  return [
+    { path: "projects/alpha.md", content: "# Alpha\n\n- [ ] ship it\n" },
+    { path: "daily/log.md", content: "# Daily log" },
+    { path: "projects/log.md", content: "# Project log" },
+    { path: "solo.md", content: "# Solo\n\n## Old Heading\ntext\n" },
+  ];
+}
+
+describe("direct-resolveNotePath writers resolve names", () => {
+  let fx: Fixture;
+  before(async () => { fx = await makeVault(taskNotes()); });
+  after(() => fx.cleanup());
+
+  test("delete_note resolves a bare basename", async () => {
+    const res = await deleteNote(fx.vaultPath, "solo");
+    assert.equal(res.path, "solo");
+    assert.equal(res.deleted, true);
+  });
+
+  test("set_task_state resolves a wrong-case path", async () => {
+    const res = await setTaskState(fx.vaultPath, {
+      path: "Projects/Alpha", text: "ship it", status: "done",
+    });
+    assert.equal(res.path, "projects/alpha");
+    assert.equal(res.marker, "x");
+  });
+
+  test("move_note ambiguous `from` fails loud (hardening)", async () => {
+    await assert.rejects(
+      () => moveNote(fx.vaultPath, { from: "log", to: "archive/log" }),
+      /Ambiguous note name: log/
+    );
+  });
+
+  test("rename_section ambiguous `path` fails loud (hardening)", async () => {
+    await assert.rejects(
+      () => renameSectionInVault(fx.vaultPath, {
+        path: "log", from: "X", to: "Y",
+      }),
+      /Ambiguous note name: log/
+    );
+  });
+});
+
+describe("move_note resolves bare from (isolated fixture)", () => {
+  let fx: Fixture;
+  before(async () => {
+    fx = await makeVault([{ path: "projects/alpha.md", content: "# Alpha" }]);
+  });
+  after(() => fx.cleanup());
+
+  test("bare `from` moves the folder note", async () => {
+    const res = await moveNote(fx.vaultPath, { from: "alpha", to: "archive/alpha" });
+    assert.equal(res.from, "projects/alpha");
+    assert.equal(res.to, "archive/alpha");
   });
 });
