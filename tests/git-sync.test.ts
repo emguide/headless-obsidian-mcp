@@ -1,10 +1,42 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   resolveGitSyncMode,
   gitSyncInterval,
   gitRemote,
 } from "../src/tools/env-flags.js";
+import {
+  git,
+  isGitRepo,
+  commitAfterWrite,
+  syncOnce,
+} from "../src/tools/git-sync.js";
+
+const execFileAsync = promisify(execFile);
+async function g(dir: string, ...args: string[]) {
+  await execFileAsync("git", ["-C", dir, ...args]);
+}
+
+/** A bare "remote" plus a working clone wired to it, with identity configured. */
+async function makeRemoteAndClone() {
+  const base = await mkdtemp(join(tmpdir(), "gitsync-"));
+  const remote = join(base, "remote.git");
+  const work = join(base, "work");
+  await execFileAsync("git", ["init", "-q", "--bare", remote]);
+  await execFileAsync("git", ["clone", "-q", remote, work]);
+  await g(work, "config", "user.email", "t@example.com");
+  await g(work, "config", "user.name", "T");
+  await writeFile(join(work, "seed.md"), "# Seed\n");
+  await g(work, "add", "-A");
+  await g(work, "commit", "-q", "-m", "seed");
+  await g(work, "push", "-q", "origin", "HEAD");
+  return { base, remote, work, cleanup: () => rm(base, { recursive: true, force: true }) };
+}
 
 test("mode: unset env → off, no warning", () => {
   const { mode, warning } = resolveGitSyncMode({});
@@ -53,4 +85,74 @@ test("interval: default 300, parsed, floored at 1", () => {
 test("remote: default origin, override respected", () => {
   assert.equal(gitRemote({}), "origin");
   assert.equal(gitRemote({ OBSIDIAN_GIT_REMOTE: "backup" }), "backup");
+});
+
+test("commitAfterWrite (mode off): no commit", async (t) => {
+  const fx = await makeRemoteAndClone();
+  t.after(fx.cleanup);
+  delete process.env.OBSIDIAN_GIT_SYNC;
+  const before = (await execFileAsync("git", ["-C", fx.work, "rev-list", "--count", "HEAD"])).stdout.trim();
+  await writeFile(join(fx.work, "a.md"), "hi\n");
+  await commitAfterWrite(fx.work, "write_note: a");
+  const after = (await execFileAsync("git", ["-C", fx.work, "rev-list", "--count", "HEAD"])).stdout.trim();
+  assert.equal(after, before, "off mode makes no commit");
+});
+
+test("commitAfterWrite (mode commit): commits the change with the message", async (t) => {
+  const fx = await makeRemoteAndClone();
+  t.after(fx.cleanup);
+  process.env.OBSIDIAN_GIT_SYNC = "commit";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  await writeFile(join(fx.work, "a.md"), "hi\n");
+  await commitAfterWrite(fx.work, "write_note: a (created)");
+  const log = (await execFileAsync("git", ["-C", fx.work, "log", "-1", "--pretty=%s"])).stdout.trim();
+  assert.equal(log, "write_note: a (created)");
+  const status = (await execFileAsync("git", ["-C", fx.work, "status", "--porcelain"])).stdout.trim();
+  assert.equal(status, "", "working tree clean after commit");
+});
+
+test("commitAfterWrite (mode commit): no staged changes → no commit, no throw", async (t) => {
+  const fx = await makeRemoteAndClone();
+  t.after(fx.cleanup);
+  process.env.OBSIDIAN_GIT_SYNC = "commit";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  const before = (await execFileAsync("git", ["-C", fx.work, "rev-list", "--count", "HEAD"])).stdout.trim();
+  await commitAfterWrite(fx.work, "noop");
+  const after = (await execFileAsync("git", ["-C", fx.work, "rev-list", "--count", "HEAD"])).stdout.trim();
+  assert.equal(after, before);
+});
+
+test("commitAfterWrite: enabled but not a repo → fail-closed throw", async (t) => {
+  const base = await mkdtemp(join(tmpdir(), "gitsync-norepo-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  process.env.OBSIDIAN_GIT_SYNC = "commit";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  await assert.rejects(() => commitAfterWrite(base, "x"), /not a git repository/);
+});
+
+test("syncOnce: fast-forward pull brings remote commits, push sends local", async (t) => {
+  const fx = await makeRemoteAndClone();
+  t.after(fx.cleanup);
+  // Second clone advances the remote.
+  const work2 = join(fx.base, "work2");
+  await execFileAsync("git", ["clone", "-q", fx.remote, work2]);
+  await g(work2, "config", "user.email", "t2@example.com");
+  await g(work2, "config", "user.name", "T2");
+  await writeFile(join(work2, "b.md"), "# B\n");
+  await g(work2, "add", "-A");
+  await g(work2, "commit", "-q", "-m", "add b");
+  await g(work2, "push", "-q", "origin", "HEAD");
+  // Local clone makes its own commit, then syncs.
+  process.env.OBSIDIAN_GIT_SYNC = "every-write";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  await writeFile(join(fx.work, "c.md"), "# C\n");
+  await g(fx.work, "add", "-A");
+  await g(fx.work, "commit", "-q", "-m", "add c");
+  const result = await syncOnce(fx.work);
+  assert.equal(result.conflicts.length, 0);
+  assert.equal(await readFile(join(fx.work, "b.md"), "utf-8"), "# B\n", "pulled b");
+  // Remote now has c (verify via a fresh clone).
+  const verify = join(fx.base, "verify");
+  await execFileAsync("git", ["clone", "-q", fx.remote, verify]);
+  assert.equal(await readFile(join(verify, "c.md"), "utf-8"), "# C\n", "pushed c");
 });
