@@ -8,9 +8,11 @@ import {
   BrokenAnchorGroup,
   UnresolvedLinkGroupWithContext,
   BrokenAnchorGroupWithContext,
+  ConflictNoteRow,
 } from "../types.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
 import { scanLinkLines, linkContext, ScannedLinkLine } from "./link-context.js";
+import { isConflictCopy, parseConflictCopy } from "./git-sync.js";
 
 /** Default cap on `list_vault_issues` so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
@@ -44,25 +46,38 @@ export async function listVaultIssues(
   | ListResponse<BrokenAnchorGroup>
   | ListResponse<UnresolvedLinkGroupWithContext>
   | ListResponse<BrokenAnchorGroupWithContext>
+  | ListResponse<ConflictNoteRow>
 > {
   assertVaultPath(vaultPath);
   const { kind, limit, offset, include_context } = params;
-  if (kind !== "orphans" && kind !== "unresolved_links" && kind !== "broken_anchors") {
-    throw new Error('kind must be "orphans", "unresolved_links", or "broken_anchors"');
+  if (kind !== "orphans" && kind !== "unresolved_links" && kind !== "broken_anchors" && kind !== "conflicts") {
+    throw new Error('kind must be "orphans", "unresolved_links", "broken_anchors", or "conflicts"');
   }
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
     throw new Error("limit must be a positive integer");
   }
   assertNonNegativeInt(offset, "offset");
-  if (include_context && kind === "orphans") {
+  if (include_context && (kind === "orphans" || kind === "conflicts")) {
     throw new Error(
-      'include_context is only valid for kinds "unresolved_links" and "broken_anchors" — orphans have no links to contextualize'
+      'include_context is only valid for kinds "unresolved_links" and "broken_anchors"'
     );
   }
 
   const effectiveLimit = limit === undefined ? DEFAULT_LIMIT : limit;
 
   const index = await getIndex(vaultPath);
+
+  if (kind === "conflicts") {
+    const rows: ConflictNoteRow[] = index
+      .getEntries()
+      .filter((e) => isConflictCopy(e.path))
+      .map((e) => ({
+        path: e.path,
+        original: parseConflictCopy(e.path)!.original,
+        created: new Date(e.mtimeMs).toISOString(),
+      }));
+    return toListResponse(rows, effectiveLimit === 0 ? undefined : effectiveLimit, offset);
+  }
 
   if (kind === "orphans") {
     const orphans = index.getEntries().filter(

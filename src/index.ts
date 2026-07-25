@@ -594,13 +594,13 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "list_vault_issues",
-        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links); kind:'broken_anchors' returns, grouped by source note, the [[note#heading]] anchors that resolve to a note but not to any heading in it. Index-backed. For the grouped kinds, limit/offset count groups (source notes), not individual targets.",
+        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links); kind:'broken_anchors' returns, grouped by source note, the [[note#heading]] anchors that resolve to a note but not to any heading in it; kind:'conflicts' returns the unreconciled conflict copies (notes named \"… (conflicted YYYY-MM-DD HHMMSS)\") each paired with the original note they diverged from. Index-backed. For the grouped kinds, limit/offset count groups (source notes), not individual targets.",
         inputSchema: {
           type: "object",
           properties: {
             kind: {
               type: "string",
-              enum: ["orphans", "unresolved_links", "broken_anchors"],
+              enum: ["orphans", "unresolved_links", "broken_anchors", "conflicts"],
               description: "Which issue list to return."
             },
             limit: {

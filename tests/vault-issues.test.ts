@@ -126,3 +126,33 @@ test("unresolved_links: limit truncates by GROUP count, not target count", async
     await fx3.cleanup();
   }
 });
+
+test("conflicts kind: lists conflict copies paired with their original", async () => {
+  const notes: FixtureNote[] = [
+    { path: "projects/alpha.md", content: "# Alpha\n" },
+    { path: "projects/alpha (conflicted 2026-07-24 143022).md", content: "# Alpha local\n" },
+    { path: "notes/plain.md", content: "# Plain\n" },
+  ];
+  const fx4 = await makeVault(notes);
+  try {
+    const res = await listVaultIssues(fx4.vaultPath, { kind: "conflicts" });
+    assert.equal(res.results.length, 1);
+    assert.equal(res.results[0].path, "projects/alpha (conflicted 2026-07-24 143022)");
+    assert.equal(res.results[0].original, "projects/alpha");
+    assert.match(res.results[0].created, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await fx4.cleanup();
+  }
+});
+
+test("conflicts kind: include_context is rejected (no links to contextualize)", async () => {
+  const fx5 = await makeVault([{ path: "a.md", content: "# A\n" }]);
+  try {
+    await assert.rejects(
+      () => listVaultIssues(fx5.vaultPath, { kind: "conflicts", include_context: true }),
+      /include_context/
+    );
+  } finally {
+    await fx5.cleanup();
+  }
+});
