@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="Headless Obsidian MCP" width="140">
+</p>
+
 # Headless Obsidian MCP
 
 An [MCP](https://modelcontextprotocol.io) server that gives AI assistants full access to an Obsidian vault — search, the link graph, tags, and structure-aware editing — without needing a running copy of Obsidian.  Ideal for a headless server running your Hermes or OpenClaw agents.
