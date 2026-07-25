@@ -160,7 +160,7 @@ individual tool descriptions state only their deviations from it.
   - `where` (optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
 - **Output**: `{ results, truncated, files_returned, files_skipped, files_omitted, matches_capped_in }` — `results` is the array of matches (file paths without .md, plus context lines), bounded by the caps above; each match carries `line_number` (file-absolute) and `body_line` (1-based body-relative, frontmatter stripped — the same convention as `get_outline`/`list_tasks`/`set_task_state`, so a grep hit feeds `set_task_state` directly; `null` for hits inside the frontmatter block or in a file the index does not track); `files_skipped` is the number of matching files skipped before the window by `offset`, `files_omitted` the number dropped after it by `limit`; the fields report what was dropped so a truncated result isn't mistaken for a complete one (skipping forward via `offset` does not set `truncated`).
 - **Filtering**: When `folder`/`tags`/`where` are given, the candidate note set is resolved from the shared index first, then ripgrep runs only over those files (chunked to stay under `ARG_MAX` on large vaults) instead of scanning the whole vault. A filter that matches zero notes short-circuits to an empty result without invoking ripgrep at all.
-- **Security**: Protected against flag injection and regex DoS attacks
+- **Security**: Protected against flag injection (pattern is passed after `--`). Regex DoS is a non-issue by construction: ripgrep's default engine is linear-time (no backtracking), and a pattern exceeding its compile-time size limit fails loudly.
 
 ### search_notes_ranked
 - **Purpose**: Full-text search ranked by BM25 relevance — the most relevant notes first, rather than every literal match. Complements `search_notes` (which is literal/regex and unranked).
@@ -456,7 +456,7 @@ change a tag or a section without reading and rewriting the whole note.
 - **Purpose**: Append text under an existing heading (before the next heading), leaving the rest of the note untouched. `create: true` creates the section if missing.
 - **Input**: `path` (required), `heading` (required — a bare heading or a `" > "`-joined heading-path), `content` (required), `create` (optional)
 - **Output**: `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only.
-- **Addressing**: Same fail-loud scheme as `read_section` — an ambiguous bare `heading` (repeated in the note) errors, listing the candidate full heading-paths so you can retry with the exact one (`Projects > Log`) and edit the right section. `create` only recovers a *missing* section; an ambiguous one is never silently created.
+- **Addressing**: Same fail-loud scheme as `read_section` — an ambiguous bare `heading` (repeated in the note) errors, listing the candidate full heading-paths so you can retry with the exact one (`Projects > Log`) and edit the right section. `create` recovers a *missing bare* heading only; an ambiguous one is never silently created, and a *heading-path* (`Projects > Log`) with no existing target **fails loud** — a heading-path addresses a section inside existing structure and cannot be created (which parent, what level?), so it is refused rather than written as a literal `## Projects > Log` heading.
 
 ### replace_section
 - **Purpose**: Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
@@ -568,7 +568,9 @@ keep precedence, so existing behavior is unchanged.
   `position` (required — `"append"` | `"prepend"` | `"section"`), `section`
   (required iff `position` is `"section"` — bare heading or `" > "`-joined
   heading-path), `create_section` (optional, default `false` — create the
-  section if missing; an ambiguous section is never silently created).
+  section if missing; an ambiguous section is never silently created, and a
+  *heading-path* with no existing target fails loud, inheriting
+  `append_to_section`'s create-guard).
 - **Output**: `{ path, position, unresolved_links, broken_anchors }` — link
   health for the resulting note (report-only). Section addressing and fail-loud
   ambiguity match `append_to_section`. Frontmatter in the expanded template is

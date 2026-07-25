@@ -1,5 +1,11 @@
 import matter from "gray-matter";
-import { parseHeadings, headingPaths, frontmatterTagList, resolveSectionIndex } from "./vault.js";
+import {
+  parseHeadings,
+  headingPaths,
+  frontmatterTagList,
+  resolveSectionIndex,
+  isHeadingPath,
+} from "./vault.js";
 
 // Re-exported so existing importers (write.ts) keep their `./note-document.js`
 // import path; the single definition lives in vault.js.
@@ -458,6 +464,18 @@ export function appendToSection(
     // A missing section is recoverable when `create` is set; an ambiguous one is
     // never silently created — re-throw so the caller disambiguates.
     if (create && err instanceof Error && /not found/.test(err.message)) {
+      // A heading-path (`Projects > Log`) addresses a section inside existing
+      // structure; with that structure absent there is no well-defined heading
+      // to create (which parent? what level?). Refuse rather than fabricate a
+      // literal-text `## Projects > Log` heading — matching the fail-loud
+      // philosophy the rest of section addressing already follows.
+      if (isHeadingPath(heading)) {
+        throw new Error(
+          `Cannot create section "${heading.trim()}": a heading-path addresses a ` +
+            `section inside existing structure and cannot be created. Create the ` +
+            `section with a bare heading, or create the parent first.`
+        );
+      }
       addSection(doc, heading, content);
       return;
     }

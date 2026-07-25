@@ -782,9 +782,9 @@ Append text under an existing heading (before the next heading), leaving the res
 - `path` (string, required): Relative note path
 - `heading` (string, required): Section to append to — a bare heading or a `" > "`-joined heading-path (e.g. `Projects > Log`)
 - `content` (string, required): Text to append
-- `create` (boolean, optional): Create the section if missing (default: false)
+- `create` (boolean, optional): Create the section if missing (default: false) — recovers a *missing bare* heading only
 
-Addressing mirrors `read_section`'s fail-loud scheme: an ambiguous bare `heading` (one that repeats in the note) errors, listing the candidate full heading-paths so you can retry with the exact one and edit the right section. `create` only recovers a *missing* section; an ambiguous one is never silently created.
+Addressing mirrors `read_section`'s fail-loud scheme: an ambiguous bare `heading` (one that repeats in the note) errors, listing the candidate full heading-paths so you can retry with the exact one and edit the right section. `create` recovers a *missing bare* heading only; an ambiguous one is never silently created, and a *heading-path* (`Projects > Log`) with no existing target **fails loud** — a heading-path addresses a section inside existing structure and cannot be created, so it is refused rather than written as a literal `## Projects > Log` heading. (`insert_template`'s `create_section` inherits this guard.)
 
 **Returns:** `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)).
 

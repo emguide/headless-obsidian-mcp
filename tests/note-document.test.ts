@@ -9,6 +9,7 @@ import {
   appendToSection,
   replaceSection,
 } from "../src/tools/note-document.js";
+import { isHeadingPath } from "../src/tools/vault.js";
 
 const SAMPLE = [
   "---",
@@ -107,6 +108,21 @@ test("appendToSection resolves a heading-path to the exact (non-first) section",
   // The new line lands under Projects > Log, not the first Alpha > Log.
   assert.match(out, /projects log\n\nnew line/);
   assert.doesNotMatch(out, /alpha log\n\nnew line/);
+});
+
+test("appendToSection with create refuses a heading-path (never creates literal '> ' text)", () => {
+  const doc = NoteDocument.parse(SAMPLE);
+  assert.throws(
+    () => appendToSection(doc, "Projects > Log", "x", true),
+    /Cannot create section "Projects > Log".*cannot be created/s
+  );
+  // The note is left untouched — no literal "## Projects > Log" heading landed.
+  assert.doesNotMatch(doc.serialize(), /Projects > Log/);
+});
+
+test("isHeadingPath distinguishes a heading-path from a bare heading", () => {
+  assert.equal(isHeadingPath("Projects > Log"), true);
+  assert.equal(isHeadingPath("Log"), false);
 });
 
 test("replaceSection errors on an ambiguous bare heading", () => {

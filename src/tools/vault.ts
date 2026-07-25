@@ -336,6 +336,17 @@ export function headingPaths(headings: ParsedHeading[]): string[] {
   });
 }
 
+/**
+ * Whether a section address is a `" > "`-joined heading-path (`Projects > Log`)
+ * rather than a bare heading (`Log`). The single definition of "is this a path?"
+ * shared by section resolution (`resolveSection`, `readSection`) and the
+ * create-guard in `appendToSection` — a heading-path names a location inside
+ * existing structure and so can be addressed but never created.
+ */
+export function isHeadingPath(section: string): boolean {
+  return section.includes(">");
+}
+
 export function firstHeading(content: string): string | undefined {
   return parseHeadings(content)[0]?.text;
 }
@@ -360,7 +371,7 @@ export function resolveSectionIndex(
   notFoundSuffix = ""
 ): number {
   const wanted = section.trim();
-  const isPath = wanted.includes(">");
+  const isPath = isHeadingPath(wanted);
   const norm = (p: string): string =>
     p
       .split(">")
