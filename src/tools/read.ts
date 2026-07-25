@@ -49,7 +49,7 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
       // no separator, so a legitimate note whose name merely contains ".." (an
       // ellipsis title like "And then...") was misclassified as an attack and,
       // since traversal fails the whole batch, poisoned every other path.
-      const fullPath = resolveNotePath(vaultPath, canonical);
+      const fullPath = await resolveNotePath(vaultPath, canonical);
 
       // Check file size before reading (max 10MB)
       const fileInfo = await stat(fullPath);

@@ -22,7 +22,7 @@ export async function getFrontmatter(
   }
   const index = await getIndex(vaultPath);
   const canonical = resolveNoteName(index, notePath);
-  const fullPath = resolveNotePath(vaultPath, canonical);
+  const fullPath = await resolveNotePath(vaultPath, canonical);
   let raw: string;
   try {
     raw = await readFile(fullPath, "utf-8");

@@ -17,7 +17,7 @@ export async function getOutline(
   if (!notePath || typeof notePath !== "string") {
     throw new Error("A note path is required for get_outline");
   }
-  resolveNotePath(vaultPath, notePath); // guards against path traversal
+  await resolveNotePath(vaultPath, notePath); // guards against path traversal
 
   const index = await getIndex(vaultPath);
   const noteName = notePath.replace(/\.md$/, "");

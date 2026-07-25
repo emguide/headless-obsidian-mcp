@@ -506,6 +506,15 @@ change a tag or a section without reading and rewriting the whole note.
 - **Git**: One `afterWrite` commit for the whole batch, not one per note — `assertSyncableBeforeWrite` guards once up front, then every note in the batch is written (via `writeResolved`) and the batch is committed once at the end, so a partial batch still reviews and reverts as a single diff.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
+**Path guard (shared)**: `resolveNotePath` / `resolveVaultFile`
+(`src/tools/vault.ts`) reject `..` traversal *and* any path that leaves the
+vault through a **symlink** — the deepest existing ancestor of the target is
+resolved with `realpath` and must stay under the vault's own realpath. A
+lexical check alone could not see this: a symlink `secret.md -> /etc/passwd`
+contains no `..`, so readers returned the target's contents and writers
+clobbered it. Both guards are async for this reason. A traversal attempt errors
+the whole call (it is never reported per-path the way a missing note is).
+
 **Structure notes**: Body-only edits (sections) preserve the frontmatter block
 byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML block in
 canonical form (block-style lists) but leave the body untouched. Headings inside

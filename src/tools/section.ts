@@ -31,7 +31,7 @@ export async function readSection(
 
   const index = await getIndex(vaultPath);
   const canonical = resolveNoteName(index, notePath);
-  const fullPath = resolveNotePath(vaultPath, canonical); // guards traversal
+  const fullPath = await resolveNotePath(vaultPath, canonical); // guards traversal
   let info;
   try {
     info = await stat(fullPath);

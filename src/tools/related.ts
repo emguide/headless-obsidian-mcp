@@ -70,7 +70,7 @@ export async function getRelatedNotes(
   validateCandidateFilter({ tags, where, match });
 
   // Validate the path (guards against traversal escapes) before touching the index.
-  resolveNotePath(vaultPath, path);
+  await resolveNotePath(vaultPath, path);
 
   const index = await getIndex(vaultPath);
   const self = index.resolve(path.replace(/\.md$/i, "")) ?? path.replace(/\.md$/i, "");

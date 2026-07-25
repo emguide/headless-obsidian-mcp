@@ -1,5 +1,5 @@
-import { readdir, stat } from "node:fs/promises";
-import { join, resolve, relative, sep } from "node:path";
+import { readdir, stat, realpath } from "node:fs/promises";
+import { join, resolve, relative, sep, dirname, isAbsolute } from "node:path";
 import { ParsedHeading, ParsedTask, TaskStatus, WritableTaskStatus } from "../types.js";
 
 /**
@@ -38,7 +38,10 @@ export function assertVaultPath(vaultPath: string): void {
  * guarding against path-traversal escapes. Mirrors the checks used by
  * read_notes so every tool that resolves a path behaves identically.
  */
-export function resolveNotePath(vaultPath: string, notePath: string): string {
+export async function resolveNotePath(
+  vaultPath: string,
+  notePath: string
+): Promise<string> {
   if (!notePath || typeof notePath !== "string") {
     throw new Error("Note path must be a non-empty string");
   }
@@ -49,7 +52,70 @@ export function resolveNotePath(vaultPath: string, notePath: string): string {
   if (relativePath.startsWith("..") || relativePath.includes(".." + sep)) {
     throw new Error("Invalid note path: path traversal not allowed");
   }
+  await assertNoSymlinkEscape(resolvedVault, fullPath, "note");
   return fullPath;
+}
+
+/** Cache of vault root -> its realpath; the root does not move mid-process. */
+const realVaultCache = new Map<string, string>();
+
+async function realVaultRoot(resolvedVault: string): Promise<string> {
+  const cached = realVaultCache.get(resolvedVault);
+  if (cached !== undefined) return cached;
+  let real: string;
+  try {
+    real = await realpath(resolvedVault);
+  } catch {
+    // Vault root missing or unreadable: nothing to resolve against, so leave
+    // the lexical guard as the only check rather than failing every call.
+    real = resolvedVault;
+  }
+  realVaultCache.set(resolvedVault, real);
+  return real;
+}
+
+/**
+ * Reject a path that leaves the vault through a symlink.
+ *
+ * The lexical checks above normalize `..` away, but they only ever see the
+ * requested name — a symlink `secret.md -> /etc/passwd` inside the vault has no
+ * `..` in it, so `relative()` sees `secret.md` and the guard passed. Readers
+ * then returned the target's contents and writers clobbered it, defeating the
+ * path-traversal guarantee the tools advertise.
+ *
+ * Resolve the deepest existing ancestor of the target (the target itself when
+ * it exists) and require it to stay under the vault's own realpath. The
+ * not-yet-existing remainder cannot contain a symlink, and its `..` segments
+ * were already rejected, so checking that ancestor is sufficient.
+ */
+async function assertNoSymlinkEscape(
+  resolvedVault: string,
+  fullPath: string,
+  kind: "note" | "file"
+): Promise<void> {
+  const realRoot = await realVaultRoot(resolvedVault);
+
+  let probe = fullPath;
+  for (;;) {
+    try {
+      const real = await realpath(probe);
+      const rel = relative(realRoot, real);
+      if (rel !== "" && (rel.startsWith("..") || rel.includes(".." + sep) || isAbsolute(rel))) {
+        throw new Error(
+          `Invalid ${kind} path: path traversal not allowed (symlink escapes the vault)`
+        );
+      }
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("path traversal not allowed")) {
+        throw err;
+      }
+      // Does not exist yet — check its parent instead.
+      const parent = dirname(probe);
+      if (parent === probe) return; // reached the filesystem root
+      probe = parent;
+    }
+  }
 }
 
 /**
@@ -67,7 +133,10 @@ export function canonicalName(notePath: string): string {
  * {@link resolveNotePath} this does not append a `.md` suffix, so it is used for
  * attachments and for the `.trash` folder when trashing a note.
  */
-export function resolveVaultFile(vaultPath: string, filePath: string): string {
+export async function resolveVaultFile(
+  vaultPath: string,
+  filePath: string
+): Promise<string> {
   if (!filePath || typeof filePath !== "string") {
     throw new Error("File path must be a non-empty string");
   }
@@ -77,6 +146,7 @@ export function resolveVaultFile(vaultPath: string, filePath: string): string {
   if (relativePath.startsWith("..") || relativePath.includes(".." + sep)) {
     throw new Error("Invalid file path: path traversal not allowed");
   }
+  await assertNoSymlinkEscape(resolvedVault, fullPath, "file");
   return fullPath;
 }
 

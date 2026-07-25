@@ -99,7 +99,7 @@ async function templateFiles(
   // relative to the template folder (empty at the root); it becomes both the
   // reported `name` (minus .md) and the tail of the vault-relative `path`.
   const walk = async (rel: string): Promise<void> => {
-    const dirFull = resolveVaultFile(vaultPath, rel ? `${folder}/${rel}` : folder);
+    const dirFull = await resolveVaultFile(vaultPath, rel ? `${folder}/${rel}` : folder);
     let entries: Dirent[] = [];
     try {
       entries = await readdir(dirFull, { withFileTypes: true });
@@ -173,7 +173,7 @@ export async function readTemplate(
   if (cfg) {
     const rel = `${cfg.folder}/${base}.md`;
     try {
-      const raw = await readFile(resolveVaultFile(vaultPath, rel), "utf-8");
+      const raw = await readFile(await resolveVaultFile(vaultPath, rel), "utf-8");
       return { path: rel, raw };
     } catch {
       /* not in the template folder — try the vault-relative fallback */
@@ -181,7 +181,7 @@ export async function readTemplate(
   }
   const rel = `${base}.md`;
   try {
-    const raw = await readFile(resolveVaultFile(vaultPath, rel), "utf-8");
+    const raw = await readFile(await resolveVaultFile(vaultPath, rel), "utf-8");
     return { path: rel, raw };
   } catch {
     const avail = cfg

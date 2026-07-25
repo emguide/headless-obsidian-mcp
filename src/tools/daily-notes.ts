@@ -126,7 +126,7 @@ export async function resolveDailyNote(
   const day = parseDate(params.date, now);
   const rendered = day.format(cfg.format);
   const path = cfg.folder ? `${cfg.folder}/${rendered}` : rendered;
-  const fullPath = resolveNotePath(vaultPath, path);
+  const fullPath = await resolveNotePath(vaultPath, path);
 
   let exists = false;
   try {

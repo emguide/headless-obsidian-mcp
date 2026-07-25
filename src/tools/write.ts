@@ -83,7 +83,7 @@ export async function writeResolved(
   notePath: string,
   content: string
 ): Promise<void> {
-  const fullPath = resolveNotePath(vaultPath, notePath);
+  const fullPath = await resolveNotePath(vaultPath, notePath);
   await mkdir(dirname(fullPath), { recursive: true });
   await writeFile(fullPath, content, "utf-8");
 }
@@ -168,7 +168,7 @@ async function linkHealthAfterWrite(
 /** Read an existing note's raw text, or throw a friendly not-found error. */
 export async function readRaw(vaultPath: string, notePath: string): Promise<string> {
   const resolved = await resolveWriteTargetAsync(vaultPath, notePath);
-  const fullPath = resolveNotePath(vaultPath, resolved);
+  const fullPath = await resolveNotePath(vaultPath, resolved);
   try {
     return await readFile(fullPath, "utf-8");
   } catch {
@@ -265,7 +265,7 @@ export async function writeNote(
     finalContent = content;
   }
 
-  const fullPath = resolveNotePath(vaultPath, path);
+  const fullPath = await resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   if (existed && !overwrite) {
     throw new Error(
@@ -294,7 +294,7 @@ export async function appendNote(
   { path, content, create = false }: AppendNoteParams
 ): Promise<{ path: string; created: boolean } & LinkHealth> {
   if (typeof content !== "string") throw new Error("content must be a string");
-  const fullPath = resolveNotePath(vaultPath, path);
+  const fullPath = await resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   // `create:true` always targets the literal path — a bare/wrong-case name
   // must never be redirected onto a different note when the intent is to
@@ -333,7 +333,7 @@ export async function prependNote(
   { path, content, create = false }: PrependNoteParams
 ): Promise<{ path: string; created: boolean } & LinkHealth> {
   if (typeof content !== "string") throw new Error("content must be a string");
-  const fullPath = resolveNotePath(vaultPath, path);
+  const fullPath = await resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
   // See appendNote: create:true always targets the literal path (never
   // redirected onto a different note); only the existing-note branch resolves.
@@ -384,7 +384,7 @@ export async function deleteNote(
   dangled_backlinks: string[] | Array<{ path: string; context: LinkContextLine[] }>;
 }> {
   const resolved = await resolveWriteTargetAsync(vaultPath, notePath);
-  const fullPath = resolveNotePath(vaultPath, resolved);
+  const fullPath = await resolveNotePath(vaultPath, resolved);
   if (!(await fileExists(fullPath))) {
     throw await noteNotFoundError(vaultPath, resolved);
   }
@@ -412,10 +412,10 @@ export async function deleteNote(
   // than clobbering the earlier copy.
   const canon = canonicalName(resolved);
   let trashRel = join(".trash", `${canon}.md`);
-  let trashFull = resolveVaultFile(vaultPath, trashRel);
+  let trashFull = await resolveVaultFile(vaultPath, trashRel);
   for (let n = 1; await fileExists(trashFull); n++) {
     trashRel = join(".trash", `${canon}-${n}.md`);
-    trashFull = resolveVaultFile(vaultPath, trashRel);
+    trashFull = await resolveVaultFile(vaultPath, trashRel);
   }
   await mkdir(dirname(trashFull), { recursive: true });
   await rename(fullPath, trashFull);
@@ -463,8 +463,8 @@ export async function moveNote(
   // The destination `to` stays literal — it addresses a create target, never
   // an existing note to redirect onto.
   const fromResolved = await resolveWriteTargetAsync(vaultPath, from);
-  const fromFull = resolveNotePath(vaultPath, fromResolved);
-  const toFull = resolveNotePath(vaultPath, to);
+  const fromFull = await resolveNotePath(vaultPath, fromResolved);
+  const toFull = await resolveNotePath(vaultPath, to);
   const fromCanon = canonicalName(fromResolved);
   const toCanon = canonicalName(to);
   if (fromCanon === toCanon) {
@@ -506,7 +506,7 @@ export async function moveNote(
     for (const backlink of backlinks) {
       let raw: string;
       try {
-        raw = await readFile(resolveNotePath(vaultPath, backlink), "utf-8");
+        raw = await readFile(await resolveNotePath(vaultPath, backlink), "utf-8");
       } catch {
         continue; // Backlink note vanished between index and now - skip.
       }
@@ -557,8 +557,8 @@ export async function moveFile(
   vaultPath: string,
   { from, to, overwrite = false }: MoveFileParams
 ): Promise<{ from: string; to: string; overwritten: boolean }> {
-  const fromFull = resolveVaultFile(vaultPath, from);
-  const toFull = resolveVaultFile(vaultPath, to);
+  const fromFull = await resolveVaultFile(vaultPath, from);
+  const toFull = await resolveVaultFile(vaultPath, to);
   if (normalizeFilePath(from) === normalizeFilePath(to)) {
     throw new Error("Source and destination are the same file");
   }
@@ -731,7 +731,7 @@ export async function renameSectionInVault(
     for (const backlink of backlinks) {
       let btext: string;
       try {
-        btext = await readFile(resolveNotePath(vaultPath, backlink), "utf-8");
+        btext = await readFile(await resolveNotePath(vaultPath, backlink), "utf-8");
       } catch {
         continue;
       }
