@@ -206,6 +206,32 @@ test("insertTemplate section=missing without create_section fails loud", async (
   }
 });
 
+test("insertTemplate create_section refuses a heading-path (inherits the create guard)", async () => {
+  const fx = await vaultWithTemplates();
+  try {
+    await applyTemplate(fx.vaultPath, {
+      template: "Daily",
+      path: "notes/log4",
+    });
+    await assert.rejects(
+      () =>
+        insertTemplate(fx.vaultPath, {
+          template: "Daily",
+          path: "notes/log4",
+          position: "section",
+          section: "Projects > Log",
+          create_section: true,
+        }),
+      /Cannot create section "Projects > Log".*cannot be created/s
+    );
+    // No literal "## Projects > Log" heading was written to the note.
+    const body = await readFile(join(fx.vaultPath, "notes/log4.md"), "utf-8");
+    assert.doesNotMatch(body, /Projects > Log/);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test("applyTemplate accepts a vault-relative template path outside the template folder", async () => {
   const fx = await vaultWithTemplates();
   try {

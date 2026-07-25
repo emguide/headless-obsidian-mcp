@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import matter from "gray-matter";
-import { resolveNotePath, parseHeadings, headingPaths } from "./vault.js";
+import { resolveNotePath, parseHeadings, headingPaths, isHeadingPath } from "./vault.js";
 import { getIndex } from "./vault-index.js";
 import { noteNotFoundError, resolveNoteName } from "./not-found.js";
 import { ReadSectionParams, SectionResult } from "../types.js";
@@ -53,7 +53,7 @@ export async function readSection(
   const paths = headingPaths(headings);
 
   const wanted = section.trim();
-  const isPath = wanted.includes(">");
+  const isPath = isHeadingPath(wanted);
   const norm = (p: string): string =>
     p
       .split(">")
