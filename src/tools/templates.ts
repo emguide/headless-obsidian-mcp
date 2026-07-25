@@ -13,6 +13,7 @@ import {
   appendNoteSection,
 } from "./write.js";
 import { LinkHealth } from "./link-health.js";
+import { resolveWriteTargetAsync } from "./not-found.js";
 
 /** Env override for the template folder; wins over `.obsidian/templates.json`. */
 export const TEMPLATE_FOLDER_ENV = "OBSIDIAN_TEMPLATE_FOLDER";
@@ -274,19 +275,27 @@ export async function insertTemplate(
       'insert_template position "section" requires a section heading.'
     );
   }
-  const content = await expandTemplateFor(vaultPath, template, path);
+  // Resolve the target note's name up front (bare basename / wrong-case),
+  // like every edit-existing write tool. insert_template always targets an
+  // EXISTING note, so resolution is always appropriate — and it must happen
+  // before expandTemplateFor so `{{title}}` renders the canonical basename
+  // (`Projects/Alpha` → alpha), not the raw input casing. The delegates below
+  // resolve again idempotently; passing the already-resolved path keeps that a
+  // no-op and keeps their echoed `r.path` consistent with the title.
+  const resolvedInput = await resolveWriteTargetAsync(vaultPath, path);
+  const content = await expandTemplateFor(vaultPath, template, resolvedInput);
 
   let health: LinkHealth;
-  let resolvedPath = path.replace(/\.md$/, "");
+  let resolvedPath = resolvedInput;
   if (position === "append") {
-    const r = await appendNote(vaultPath, { path, content });
+    const r = await appendNote(vaultPath, { path: resolvedInput, content });
     health = {
       unresolved_links: r.unresolved_links,
       broken_anchors: r.broken_anchors,
     };
     resolvedPath = r.path;
   } else if (position === "prepend") {
-    const r = await prependNote(vaultPath, { path, content });
+    const r = await prependNote(vaultPath, { path: resolvedInput, content });
     health = {
       unresolved_links: r.unresolved_links,
       broken_anchors: r.broken_anchors,
@@ -294,7 +303,7 @@ export async function insertTemplate(
     resolvedPath = r.path;
   } else {
     const r = await appendNoteSection(vaultPath, {
-      path,
+      path: resolvedInput,
       heading: section!,
       content,
       create: create_section,

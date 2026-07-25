@@ -280,9 +280,13 @@ describe("insert_template echoes the resolved path", () => {
   let fx: Fixture;
   before(async () => {
     fx = await makeVault([{ path: "projects/alpha.md", content: "# Alpha\n" }]);
-    // A template folder + template so insert has something to expand.
+    // A template folder + templates so insert has something to expand.
     await writeNote(fx.vaultPath, {
       path: ".obsidian-templates/T", content: "inserted line",
+    });
+    // A {{title}}-bearing template to prove title renders the canonical basename.
+    await writeNote(fx.vaultPath, {
+      path: ".obsidian-templates/Titled", content: "title is {{title}}",
     });
     process.env.OBSIDIAN_TEMPLATE_FOLDER = ".obsidian-templates";
   });
@@ -296,6 +300,17 @@ describe("insert_template echoes the resolved path", () => {
       template: "T", path: "alpha", position: "append",
     });
     assert.equal(res.path, "projects/alpha");
+  });
+
+  test("{{title}} renders the canonical basename on a wrong-case insert", async () => {
+    // Insert via a wrong-case name; {{title}} must render the on-disk basename
+    // (`alpha`), not the raw input casing (`Alpha`).
+    await insertTemplate(fx.vaultPath, {
+      template: "Titled", path: "Projects/Alpha", position: "append",
+    });
+    const raw = await readRaw(fx.vaultPath, "projects/alpha");
+    assert.match(raw, /title is alpha\b/);
+    assert.doesNotMatch(raw, /title is Alpha\b/);
   });
 });
 
