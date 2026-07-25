@@ -12,6 +12,7 @@ import {
   removeTag,
   setNoteFrontmatter,
   addNoteSection,
+  appendNoteSection,
   replaceNoteSection,
 } from "../src/tools/write.js";
 import { makeVault, Fixture } from "./fixtures.js";
@@ -93,6 +94,18 @@ test("structure tools round-trip through the filesystem", async () => {
   assert.match(out, /status: done/);
   assert.match(out, /## Log\nline two/);
   assert.match(out, /## Refs\nsee also/);
+});
+
+test("write-side section errors name the note, matching read_section", async () => {
+  await writeNote(fx.vaultPath, { path: "sect-err", content: "# S\n\n## Log\n\nbody\n" });
+  await assert.rejects(
+    () => appendNoteSection(fx.vaultPath, { path: "sect-err", heading: "Nope", content: "x" }),
+    /Section "Nope" not found in sect-err/
+  );
+  await assert.rejects(
+    () => replaceNoteSection(fx.vaultPath, { path: "sect-err", heading: "Nope", content: "x" }),
+    /Section "Nope" not found in sect-err/
+  );
 });
 
 /* ------------------------------------------------------------- git guard -- */

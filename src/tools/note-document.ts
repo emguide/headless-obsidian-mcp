@@ -5,6 +5,7 @@ import {
   frontmatterTagList,
   resolveSectionIndex,
   isHeadingPath,
+  SectionAmbiguousError,
 } from "./vault.js";
 
 // Re-exported so existing importers (write.ts) keep their `./note-document.js`
@@ -377,11 +378,22 @@ function locateSectionAtLevel(
  * heading throws an ambiguity error listing the candidate full paths, so a
  * wrong-section write fails loudly rather than silently editing the first match.
  * A heading-path matches the fully-qualified path exactly. Throws if not found.
+ * `notePath`, when given, is appended to a not-found message the same way
+ * `read_section` does (` in <note>`), so write-side errors name the note too.
  */
-function resolveSection(lines: string[], section: string): LocatedSection {
+function resolveSection(
+  lines: string[],
+  section: string,
+  notePath?: string
+): LocatedSection {
   const headings = findHeadings(lines);
   const paths = headingPaths(headings);
-  const idx = resolveSectionIndex(headings, paths, section);
+  const idx = resolveSectionIndex(
+    headings,
+    paths,
+    section,
+    notePath ? ` in ${notePath}` : ""
+  );
   return sectionBounds(headings, idx, lines.length);
 }
 
@@ -413,7 +425,8 @@ export function addSection(
   heading: string,
   content: string,
   level = 2,
-  after?: string
+  after?: string,
+  notePath?: string
 ): void {
   if (level < 1 || level > 6) throw new Error("Heading level must be 1-6");
   const { lines, trailingNewline } = splitBody(doc.body);
@@ -429,7 +442,7 @@ export function addSection(
   let head: string[];
   let tail: string[];
   if (after) {
-    const target = resolveSection(lines, after);
+    const target = resolveSection(lines, after, notePath);
     head = lines.slice(0, trimTrailingBlanks(lines, target.bodyEnd, target.bodyStart));
     tail = lines.slice(target.bodyEnd);
   } else {
@@ -454,16 +467,19 @@ export function appendToSection(
   doc: NoteDocument,
   heading: string,
   content: string,
-  create = false
+  create = false,
+  notePath?: string
 ): void {
   const { lines, trailingNewline } = splitBody(doc.body);
   let target: LocatedSection;
   try {
-    target = resolveSection(lines, heading);
+    target = resolveSection(lines, heading, notePath);
   } catch (err) {
-    // A missing section is recoverable when `create` is set; an ambiguous one is
-    // never silently created — re-throw so the caller disambiguates.
-    if (create && err instanceof Error && /not found/.test(err.message)) {
+    // A missing section is recoverable when `create` is set; an ambiguous one
+    // (SectionAmbiguousError) is never silently created — re-throw so the
+    // caller disambiguates. Checked by type, not message text, so a wording
+    // change to the not-found message can never misroute this branch.
+    if (create && !(err instanceof SectionAmbiguousError)) {
       // A heading-path (`Projects > Log`) addresses a section inside existing
       // structure; with that structure absent there is no well-defined heading
       // to create (which parent? what level?). Refuse rather than fabricate a
@@ -476,7 +492,7 @@ export function appendToSection(
             `section with a bare heading, or create the parent first.`
         );
       }
-      addSection(doc, heading, content);
+      addSection(doc, heading, content, undefined, undefined, notePath);
       return;
     }
     throw err;
@@ -497,10 +513,11 @@ export function appendToSection(
 export function replaceSection(
   doc: NoteDocument,
   heading: string,
-  content: string
+  content: string,
+  notePath?: string
 ): void {
   const { lines, trailingNewline } = splitBody(doc.body);
-  const target = resolveSection(lines, heading);
+  const target = resolveSection(lines, heading, notePath);
 
   const before = lines.slice(0, target.bodyStart);
   const rest = lines.slice(target.bodyEnd);
@@ -517,9 +534,14 @@ export function replaceSection(
  * ambiguity behavior as {@link replaceSection}. Returns the old bare heading text
  * (the leaf of the resolved path) so callers can rewrite inbound `#anchor` links.
  */
-export function renameSection(doc: NoteDocument, from: string, to: string): string {
+export function renameSection(
+  doc: NoteDocument,
+  from: string,
+  to: string,
+  notePath?: string
+): string {
   const { lines, trailingNewline } = splitBody(doc.body);
-  const target = resolveSection(lines, from);
+  const target = resolveSection(lines, from, notePath);
   const headingLine = target.heading.line;
   const oldText = target.heading.text;
   const hashes = "#".repeat(target.heading.level);

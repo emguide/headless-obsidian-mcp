@@ -9,7 +9,7 @@ import {
   appendToSection,
   replaceSection,
 } from "../src/tools/note-document.js";
-import { isHeadingPath } from "../src/tools/vault.js";
+import { isHeadingPath, SectionAmbiguousError } from "../src/tools/vault.js";
 
 const SAMPLE = [
   "---",
@@ -99,6 +99,29 @@ test("appendToSection errors on an ambiguous bare heading, listing candidates", 
     () => appendToSection(doc, "Log", "x"),
     /Ambiguous section "Log".*Alpha > Log.*Projects > Log/s
   );
+});
+
+test("appendToSection with create still fails loud on an ambiguous bare heading", () => {
+  const doc = NoteDocument.parse(DUP);
+  assert.throws(() => appendToSection(doc, "Log", "x", true), SectionAmbiguousError);
+  const out = doc.serialize();
+  assert.equal((out.match(/^## Log$/gm) ?? []).length, 2);
+});
+
+test("appendToSection's create-vs-ambiguous branch is unaffected by not-found wording", () => {
+  // The distinction is a type check (instanceof SectionAmbiguousError), not a
+  // string match against the not-found message, so rewording the plain
+  // not-found Error (thrown by resolveSectionIndex for a genuinely missing
+  // section) can never flip this branch's behavior.
+  const missing = (() => {
+    try {
+      appendToSection(NoteDocument.parse(SAMPLE), "Zzz", "x", false);
+    } catch (err) {
+      return err;
+    }
+  })();
+  assert.ok(missing instanceof Error);
+  assert.ok(!(missing instanceof SectionAmbiguousError));
 });
 
 test("appendToSection resolves a heading-path to the exact (non-first) section", () => {
