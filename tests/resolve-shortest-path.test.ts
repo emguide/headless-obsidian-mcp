@@ -100,6 +100,17 @@ test("full-path targets resolve to exactly that note", async () => {
   assert.equal(index.resolve("projects/web/api"), "projects/web/api");
 });
 
+test("a slash-qualified target that does not exist is unresolved (no basename fallback)", async () => {
+  // Obsidian treats [[wrong-folder/api]] as a path-qualified link: if that
+  // exact path has no note, it is UNRESOLVED — the shortest-path basename
+  // fallback applies only to bare basenames. Falling back here would both hide
+  // a genuinely broken link and desync move_note's rewrite predicate, which
+  // only rewrites basename references when the target has no slash.
+  const index = await getIndex(fx.vaultPath);
+  assert.equal(index.resolve("wrong-folder/api"), null);
+  assert.equal(index.resolve("projects/does-not-exist"), null);
+});
+
 test("backlink graph routes every bare [[api]] to the root note", async () => {
   // End-to-end: since [[api]] resolves vault-wide to root api, every consumer
   // backlinks the root note, and the deeper api notes get none of them.

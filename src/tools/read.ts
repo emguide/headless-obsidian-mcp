@@ -4,7 +4,7 @@ import matter from "gray-matter";
 import { Note, NoteMetadata, ReadNotesResult } from "../types.js";
 import { collectTags } from "./vault.js";
 import { getIndex, VaultIndex } from "./vault-index.js";
-import { noteNotFoundMessage } from "./not-found.js";
+import { noteNotFoundMessage, resolveNoteName } from "./not-found.js";
 
 export async function readNotes(vaultPath: string, notePaths: string[]): Promise<ReadNotesResult> {
   // Input validation
@@ -23,9 +23,16 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
   const notes: Note[] = [];
   const errors: Array<{ path: string; error: string }> = [];
   const resolvedVaultPath = resolve(vaultPath);
-  // Fetched lazily on the first missing note and reused for the whole batch,
-  // so did-you-mean enrichment costs at most one index refresh per call.
+  // Built once up front: read_notes now addresses notes the same way the
+  // index-backed readers do (a bare basename or wrong-case name resolves via
+  // resolveNoteName), and the same index enriches missing-note errors with
+  // did-you-mean candidates.
   let index: VaultIndex | null = null;
+  try {
+    index = await getIndex(vaultPath);
+  } catch {
+    // Index unavailable - fall back to literal paths and bare error messages.
+  }
 
   for (const notePath of notePaths) {
     try {
@@ -34,8 +41,13 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
         throw new Error('Note path must be a non-empty string');
       }
 
+      // Resolve the human-facing name to a canonical vault path (index-backed,
+      // case-insensitive, bare-basename fallback); falls back to the literal
+      // path when the index is unavailable or the name does not resolve.
+      const canonical = index ? resolveNoteName(index, notePath) : notePath.replace(/\.md$/, '');
+
       // Prevent path traversal by validating the resolved path
-      const fileName = `${notePath}${notePath.endsWith('.md') ? '' : '.md'}`;
+      const fileName = `${canonical}${canonical.endsWith('.md') ? '' : '.md'}`;
       const fullPath = resolve(join(vaultPath, fileName));
 
       // Ensure the resolved path is within the vault directory
@@ -56,7 +68,7 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
 
       const tags = collectTags(frontmatter, markdownContent);
 
-      const path = notePath.replace(/\.md$/, '');
+      const path = canonical.replace(/\.md$/, '');
 
       notes.push({
         path,
@@ -77,13 +89,9 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
       let errorMessage = `Note not found or not readable: ${notePath}`;
       // Only a genuinely missing file gets did-you-mean candidates; a
       // too-large or unreadable file is a different failure, not a near-miss.
-      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-        try {
-          index ??= await getIndex(vaultPath);
-          errorMessage = noteNotFoundMessage(index, notePath, 'Note not found or not readable');
-        } catch {
-          // Index unavailable - keep the bare message.
-        }
+      // (The index was built up front; if it was unavailable, keep the bare message.)
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT' && index) {
+        errorMessage = noteNotFoundMessage(index, notePath, 'Note not found or not readable');
       }
       errors.push({ path: notePath, error: errorMessage });
     }
