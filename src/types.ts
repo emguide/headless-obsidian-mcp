@@ -289,6 +289,8 @@ export interface VaultStats {
   notes_with_links: number;
   /** Notes with no inbound and no outbound resolved links. */
   orphan_notes: number;
+  /** Notes that are unreconciled git-sync conflict copies. */
+  conflict_notes: number;
   /** Most recent note modification time (ISO 8601), or null for an empty vault. */
   last_modified: string | null;
   /** Oldest note modification time (ISO 8601), or null for an empty vault. */
@@ -297,7 +299,7 @@ export interface VaultStats {
 
 /** Parameters for list_vault_issues. */
 export interface ListVaultIssuesParams {
-  kind: "orphans" | "unresolved_links" | "broken_anchors";
+  kind: "orphans" | "unresolved_links" | "broken_anchors" | "conflicts";
   /** Cap on the number of returned rows/headers. */
   limit?: number;
   /** Rows/groups to skip before the window, for pagination. Default 0. */
@@ -307,6 +309,16 @@ export interface ListVaultIssuesParams {
    * file reads over the returned window only). Errors on kind "orphans".
    */
   include_context?: boolean;
+}
+
+/** A conflict-copy note paired with its original. */
+export interface ConflictNoteRow {
+  /** The conflict copy's note path (no .md). */
+  path: string;
+  /** The canonical note it diverged from. */
+  original: string;
+  /** ISO timestamp of the copy (from its file mtime). */
+  created: string;
 }
 
 /** Unresolved outbound links from one source note. */

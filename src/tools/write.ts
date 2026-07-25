@@ -12,7 +12,8 @@ import {
   canonicalName,
   WRITABLE_TASK_STATUSES,
 } from "./vault.js";
-import { snapshotBeforeWrite } from "./git-guard.js";
+import { commitAfterWrite, commitAndSync, isGitRepo } from "./git-sync.js";
+import { resolveGitSyncMode, GIT_SYNC_ENV } from "./env-flags.js";
 import { linkHealthOf, LinkHealth } from "./link-health.js";
 import { backlinkContext } from "./link-context.js";
 import { noteNotFoundError } from "./not-found.js";
@@ -88,19 +89,58 @@ export async function writeResolved(
 }
 
 /**
- * The single funnel every mutation passes through: take the pre-write git
- * snapshot (fail-closed when enabled), then resolve + path-guard the target and
- * write the file. Centralizing this keeps the safety guarantees in one place.
- * Operations that touch several files (e.g. move_note updating backlinks) take
- * the snapshot once and then call {@link writeResolved} directly.
+ * Fail-closed BEFORE any filesystem change: when git sync is enabled and the
+ * vault is not a usable repo, refuse the write up front so nothing lands on
+ * disk (preserving the old guard's "nothing written" guarantee).
+ */
+export async function assertSyncableBeforeWrite(vaultPath: string): Promise<void> {
+  const { mode } = resolveGitSyncMode();
+  if (mode === "off") return;
+  if (!(await isGitRepo(vaultPath))) {
+    throw new Error(
+      `${GIT_SYNC_ENV} is enabled but '${vaultPath}' is not a git repository. ` +
+        `Refusing to write without a commit.`
+    );
+  }
+}
+
+/**
+ * The post-write funnel: commit the change with a tool-derived message, then
+ * (every-write mode only) pull+push. Timer mode commits only — the background
+ * timer performs the remote sync.
+ *
+ * In every-write mode the commit and the pull/push run under a SINGLE held git
+ * lock via {@link commitAndSync}, so a background timer tick (or a concurrent
+ * write) can never slip between this write's commit and its push. Timer mode
+ * takes the lock only for the commit (the timer owns remote sync).
+ */
+export async function afterWrite(vaultPath: string, message: string): Promise<void> {
+  if (resolveGitSyncMode().mode === "every-write") {
+    await commitAndSync(vaultPath, message);
+  } else {
+    await commitAfterWrite(vaultPath, message);
+  }
+}
+
+/**
+ * The single funnel every mutation passes through: fail-closed BEFORE any
+ * filesystem change when git sync is enabled but unusable, then resolve +
+ * path-guard the target, write the file, and commit the change with a
+ * tool-derived message. Centralizing this keeps the safety guarantees in one
+ * place. Operations that touch several files (e.g. move_note updating
+ * backlinks) call {@link assertSyncableBeforeWrite} once up front, do their
+ * file operations via {@link writeResolved} directly, then call
+ * {@link afterWrite} once at the end.
  */
 async function commitWrite(
   vaultPath: string,
   notePath: string,
-  content: string
+  content: string,
+  message: string
 ): Promise<void> {
-  await snapshotBeforeWrite(vaultPath);
+  await assertSyncableBeforeWrite(vaultPath);
   await writeResolved(vaultPath, notePath, content);
+  await afterWrite(vaultPath, message);
 }
 
 /**
@@ -146,14 +186,15 @@ export async function readRaw(vaultPath: string, notePath: string): Promise<stri
 async function editNote(
   vaultPath: string,
   notePath: string,
-  mutate: (doc: NoteDocument) => boolean | void
+  mutate: (doc: NoteDocument) => boolean | void,
+  message: string
 ): Promise<{ changed: boolean; content: string }> {
   const raw = await readRaw(vaultPath, notePath);
   const doc = NoteDocument.parse(raw);
   const changed = mutate(doc);
   if (changed === false) return { changed: false, content: raw };
   const content = doc.serialize();
-  await commitWrite(vaultPath, notePath, content);
+  await commitWrite(vaultPath, notePath, content, message);
   return { changed: true, content };
 }
 
@@ -226,7 +267,12 @@ export async function writeNote(
       `Note already exists: ${canonicalName(path)}. Pass overwrite:true to replace it.`
     );
   }
-  await commitWrite(vaultPath, path, finalContent);
+  await commitWrite(
+    vaultPath,
+    path,
+    finalContent,
+    `write_note: ${canonicalName(path)} (${existed ? "overwritten" : "created"})`
+  );
   const health = await linkHealthAfterWrite(vaultPath, path, finalContent);
   return { path: canonicalName(path), created: !existed, ...health };
 }
@@ -249,14 +295,14 @@ export async function appendNote(
     if (!create) throw await noteNotFoundError(vaultPath, path);
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
-    await commitWrite(vaultPath, path, created);
+    await commitWrite(vaultPath, path, created, `append_note: ${canonicalName(path)}`);
     const health = await linkHealthAfterWrite(vaultPath, path, created);
     return { path: canonicalName(path), created: true, ...health };
   }
   const raw = await readRaw(vaultPath, path);
   const separator = raw.length === 0 || raw.endsWith("\n") ? "" : "\n";
   const next = raw + separator + content + (content.endsWith("\n") ? "" : "\n");
-  await commitWrite(vaultPath, path, next);
+  await commitWrite(vaultPath, path, next, `append_note: ${canonicalName(path)}`);
   const health = await linkHealthAfterWrite(vaultPath, path, next);
   return { path: canonicalName(path), created: false, ...health };
 }
@@ -284,7 +330,7 @@ export async function prependNote(
     if (!create) throw await noteNotFoundError(vaultPath, path);
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
-    await commitWrite(vaultPath, path, created);
+    await commitWrite(vaultPath, path, created, `prepend_note: ${canonicalName(path)}`);
     const health = await linkHealthAfterWrite(vaultPath, path, created);
     return { path: canonicalName(path), created: true, ...health };
   }
@@ -293,7 +339,7 @@ export async function prependNote(
   const insert = content.endsWith("\n") ? content : content + "\n";
   doc.body = insert + doc.body;
   const next = doc.serialize();
-  await commitWrite(vaultPath, path, next);
+  await commitWrite(vaultPath, path, next, `prepend_note: ${canonicalName(path)}`);
   const health = await linkHealthAfterWrite(vaultPath, path, next);
   return { path: canonicalName(path), created: false, ...health };
 }
@@ -341,10 +387,11 @@ export async function deleteNote(
     ? await backlinkContext(index, backlinkPaths, canonicalName(notePath))
     : backlinkPaths;
 
-  await snapshotBeforeWrite(vaultPath);
+  await assertSyncableBeforeWrite(vaultPath);
 
   if (permanent) {
     await unlink(fullPath);
+    await afterWrite(vaultPath, `delete_note: ${canonicalName(notePath)} (permanent)`);
     return { path: canonicalName(notePath), deleted: true, trashed: false, dangled_backlinks };
   }
 
@@ -360,6 +407,7 @@ export async function deleteNote(
   }
   await mkdir(dirname(trashFull), { recursive: true });
   await rename(fullPath, trashFull);
+  await afterWrite(vaultPath, `delete_note: ${canon} (trashed)`);
   return {
     path: canon,
     deleted: true,
@@ -421,7 +469,7 @@ export async function moveNote(
     backlinks = index.backlinks(fromCanon);
   }
 
-  await snapshotBeforeWrite(vaultPath);
+  await assertSyncableBeforeWrite(vaultPath);
   await mkdir(dirname(toFull), { recursive: true });
   await rename(fromFull, toFull);
 
@@ -451,6 +499,8 @@ export async function moveNote(
       }
     }
   }
+
+  await afterWrite(vaultPath, `move_note: ${fromCanon} → ${toCanon}`);
 
   return {
     from: fromCanon,
@@ -497,9 +547,10 @@ export async function moveFile(
       `File already exists: ${normalizeFilePath(to)}. Pass overwrite:true to replace it.`
     );
   }
-  await snapshotBeforeWrite(vaultPath);
+  await assertSyncableBeforeWrite(vaultPath);
   await mkdir(dirname(toFull), { recursive: true });
   await rename(fromFull, toFull);
+  await afterWrite(vaultPath, `move_file: ${normalizeFilePath(from)} → ${normalizeFilePath(to)}`);
   return {
     from: normalizeFilePath(from),
     to: normalizeFilePath(to),
@@ -551,7 +602,7 @@ export async function patchNote(
 
   const replacements = all ? occurrences : 1;
   const next = parts.join(replace);
-  await commitWrite(vaultPath, path, next);
+  await commitWrite(vaultPath, path, next, `patch_note: ${canonicalName(path)}`);
   const health = await linkHealthAfterWrite(vaultPath, path, next);
   return { path: canonicalName(path), replacements, ...health };
 }
@@ -642,7 +693,7 @@ export async function renameSectionInVault(
     selfChanged = rewritten.changed;
   }
 
-  await snapshotBeforeWrite(vaultPath);
+  await assertSyncableBeforeWrite(vaultPath);
   await writeResolved(vaultPath, path, selfRewritten);
 
   let updatedNotes = 0;
@@ -673,6 +724,8 @@ export async function renameSectionInVault(
       }
     }
   }
+
+  await afterWrite(vaultPath, `rename_section: ${canon} (${oldHeading} → ${to.trim()})`);
 
   return { path: canon, from: oldHeading, to: to.trim(), updated_notes: updatedNotes, updated_links: updatedLinks };
 }
@@ -783,7 +836,7 @@ export async function setTaskState(
   const block = raw.slice(0, raw.length - body.length);
   const next = block + newBody;
 
-  await commitWrite(vaultPath, path, next);
+  await commitWrite(vaultPath, path, next, `set_task_state: ${canon} (${status})`);
   const health = await linkHealthAfterWrite(vaultPath, path, next);
   return {
     path: canon,
@@ -811,11 +864,16 @@ export async function addTag(
     throw new Error("tags must be a non-empty array");
   }
   let resultTags: string[] = [];
-  await editNote(vaultPath, path, (doc) => {
-    const next = addTags(doc, tags);
-    resultTags = next ?? frontmatterTagList(doc.data);
-    return next != null;
-  });
+  await editNote(
+    vaultPath,
+    path,
+    (doc) => {
+      const next = addTags(doc, tags);
+      resultTags = next ?? frontmatterTagList(doc.data);
+      return next != null;
+    },
+    `add_tag: ${canonicalName(path)}`
+  );
   return { path: canonicalName(path), tags: resultTags };
 }
 
@@ -827,11 +885,16 @@ export async function removeTag(
     throw new Error("tags must be a non-empty array");
   }
   let resultTags: string[] = [];
-  await editNote(vaultPath, path, (doc) => {
-    const next = removeTags(doc, tags);
-    resultTags = next ?? frontmatterTagList(doc.data);
-    return next != null;
-  });
+  await editNote(
+    vaultPath,
+    path,
+    (doc) => {
+      const next = removeTags(doc, tags);
+      resultTags = next ?? frontmatterTagList(doc.data);
+      return next != null;
+    },
+    `remove_tag: ${canonicalName(path)}`
+  );
   return { path: canonicalName(path), tags: resultTags };
 }
 
@@ -848,8 +911,11 @@ export async function setNoteFrontmatter(
   { path, set, unset }: SetFrontmatterParams
 ): Promise<{ path: string; changed: boolean }> {
   if (!set && !unset) throw new Error("Provide `set` and/or `unset`");
-  const { changed } = await editNote(vaultPath, path, (doc) =>
-    setFrontmatter(doc, set, unset)
+  const { changed } = await editNote(
+    vaultPath,
+    path,
+    (doc) => setFrontmatter(doc, set, unset),
+    `set_frontmatter: ${canonicalName(path)}`
   );
   return { path: canonicalName(path), changed };
 }
@@ -871,12 +937,17 @@ export async function addNotePropertyValues(
     throw new Error("values must be a non-empty array");
   }
   let result: unknown[] = [];
-  await editNote(vaultPath, path, (doc) => {
-    const next = addPropertyValues(doc, key, values);
-    const current = doc.data[key];
-    result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
-    return next != null;
-  });
+  await editNote(
+    vaultPath,
+    path,
+    (doc) => {
+      const next = addPropertyValues(doc, key, values);
+      const current = doc.data[key];
+      result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
+      return next != null;
+    },
+    `add_property_values: ${canonicalName(path)}`
+  );
   return { path: canonicalName(path), key, values: result };
 }
 
@@ -889,12 +960,17 @@ export async function removeNotePropertyValues(
     throw new Error("values must be a non-empty array");
   }
   let result: unknown[] = [];
-  await editNote(vaultPath, path, (doc) => {
-    const next = removePropertyValues(doc, key, values);
-    const current = doc.data[key];
-    result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
-    return next != null;
-  });
+  await editNote(
+    vaultPath,
+    path,
+    (doc) => {
+      const next = removePropertyValues(doc, key, values);
+      const current = doc.data[key];
+      result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
+      return next != null;
+    },
+    `remove_property_values: ${canonicalName(path)}`
+  );
   return { path: canonicalName(path), key, values: result };
 }
 
@@ -910,7 +986,12 @@ export async function renameNoteProperty(
 ): Promise<{ path: string; from: string; to: string }> {
   if (!from || typeof from !== "string") throw new Error("from must be a non-empty string");
   if (!to || typeof to !== "string") throw new Error("to must be a non-empty string");
-  await editNote(vaultPath, path, (doc) => renameProperty(doc, from, to));
+  await editNote(
+    vaultPath,
+    path,
+    (doc) => renameProperty(doc, from, to),
+    `rename_property: ${canonicalName(path)}`
+  );
   return { path: canonicalName(path), from, to };
 }
 
@@ -928,8 +1009,11 @@ export async function addNoteSection(
   vaultPath: string,
   { path, heading, content, level, after }: AddSectionParams
 ): Promise<{ path: string; heading: string } & LinkHealth> {
-  const { content: written } = await editNote(vaultPath, path, (doc) =>
-    addSection(doc, heading, content ?? "", level ?? 2, after)
+  const { content: written } = await editNote(
+    vaultPath,
+    path,
+    (doc) => addSection(doc, heading, content ?? "", level ?? 2, after),
+    `add_section: ${canonicalName(path)}`
   );
   const health = await linkHealthAfterWrite(vaultPath, path, written);
   return { path: canonicalName(path), heading, ...health };
@@ -946,8 +1030,11 @@ export async function appendNoteSection(
   vaultPath: string,
   { path, heading, content, create }: SectionEditParams
 ): Promise<{ path: string; heading: string } & LinkHealth> {
-  const { content: written } = await editNote(vaultPath, path, (doc) =>
-    appendToSection(doc, heading, content ?? "", create ?? false)
+  const { content: written } = await editNote(
+    vaultPath,
+    path,
+    (doc) => appendToSection(doc, heading, content ?? "", create ?? false),
+    `append_to_section: ${canonicalName(path)}`
   );
   const health = await linkHealthAfterWrite(vaultPath, path, written);
   return { path: canonicalName(path), heading, ...health };
@@ -957,8 +1044,11 @@ export async function replaceNoteSection(
   vaultPath: string,
   { path, heading, content }: SectionEditParams
 ): Promise<{ path: string; heading: string } & LinkHealth> {
-  const { content: written } = await editNote(vaultPath, path, (doc) =>
-    replaceSection(doc, heading, content ?? "")
+  const { content: written } = await editNote(
+    vaultPath,
+    path,
+    (doc) => replaceSection(doc, heading, content ?? ""),
+    `replace_section: ${canonicalName(path)}`
   );
   const health = await linkHealthAfterWrite(vaultPath, path, written);
   return { path: canonicalName(path), heading, ...health };

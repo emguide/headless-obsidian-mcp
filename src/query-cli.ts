@@ -557,7 +557,7 @@ program
 program
   .command("config")
   .description("Report the server's own configuration (template folder + formats, daily notes, write status, vault path, tool policy)")
-  .argument("[section]", "Narrow to one section: template | daily | writes | vault | tools")
+  .argument("[section]", "Narrow to one section: template | daily | writes | sync | vault | tools")
   .action(async (section: string | undefined, _options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
     await queryTool("get_config", { ...(section && { section }) }, verbose);

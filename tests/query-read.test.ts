@@ -2,6 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { getFrontmatter } from "../src/tools/frontmatter.js";
 import { getVaultStats } from "../src/tools/stats.js";
+import { listVaultIssues } from "../src/tools/vault-issues.js";
 import { makeVault, Fixture, sampleNotes } from "./fixtures.js";
 
 /* ---------------------------------------------------------- frontmatter -- */
@@ -60,4 +61,17 @@ test("getVaultStats reports zeros and nulls for an empty vault", async () => {
   assert.equal(stats.last_modified, null);
   assert.equal(stats.first_modified, null);
   await empty.cleanup();
+});
+
+test("conflict_notes counts conflict copies (matches list_vault_issues conflicts)", async (t) => {
+  const fx2 = await makeVault([
+    { path: "a.md", content: "# A\n" },
+    { path: "a (conflicted 2026-07-24 143022).md", content: "# A local\n" },
+    { path: "b (conflicted 2026-07-24 150000).md", content: "# B local\n" },
+  ]);
+  t.after(() => fx2.cleanup());
+  const stats = await getVaultStats(fx2.vaultPath);
+  assert.equal(stats.conflict_notes, 2);
+  const issues = await listVaultIssues(fx2.vaultPath, { kind: "conflicts", limit: 0 });
+  assert.equal(issues.results.length, stats.conflict_notes);
 });

@@ -93,6 +93,8 @@ import {
   resolveToolPolicy,
   ToolPolicy,
 } from "./tools/tool-policy.js";
+import { resolveGitSyncMode } from "./tools/env-flags.js";
+import { startSyncTimer } from "./tools/sync-timer.js";
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH;
 if (!VAULT_PATH) {
@@ -112,6 +114,18 @@ try {
 }
 const EXPOSED_TOOLS = TOOL_POLICY.exposed;
 
+// Resolve the git-sync mode once, fail-loud: a typo'd OBSIDIAN_GIT_SYNC value
+// kills startup cleanly.
+try {
+  const { warning: syncWarning } = resolveGitSyncMode();
+  if (syncWarning) console.error(`Warning: ${syncWarning}`);
+  // Start the background sync loop (no-op unless mode is "timer").
+  startSyncTimer(VAULT_PATH);
+} catch (error) {
+  console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
+
 const server = new Server(
   {
     name: "headless-obsidian-mcp",
@@ -130,6 +144,7 @@ const server = new Server(
       "Link-integrity convention: every content-writing tool (write_note, append_note, prepend_note, patch_note, add_section, append_to_section, replace_section, set_task_state) returns, alongside its normal fields, unresolved_links (wikilink targets in the resulting note that resolve to no vault note) and broken_anchors ([[note#heading]] links whose note resolves but whose heading anchor matches nothing, as { target, anchor }). Both are report-only — the write is never blocked or modified, exactly like delete_note's dangled_backlinks — so an agent learns immediately when a write introduces a broken [[wikilink]] instead of discovering it later via list_vault_issues. Empty arrays mean the write left the graph intact.\n\n" +
       "Link-context convention: get_links, delete_note, and list_vault_issues (kinds unresolved_links/broken_anchors) accept opt-in include_context: true, decorating each reported link row with context — the source line(s) containing that link, as { line, text } pairs. line is 1-based and body-relative (frontmatter stripped, the same convention as get_outline/list_tasks); text is the line verbatim, so it can be fed straight into patch_note's find. Context is computed by call-time file reads (bounded by the returned window on list_vault_issues), so leave the flag off when you only need the paths.\n\n" +
       "Not-found convention: a missing-note error may append up to 3 'Did you mean' candidate paths, matched by resolve_note's exact semantics (case-insensitive title/alias/basename — never fuzzy). Suggestions are advisory: the tool never substitutes a candidate for the requested path.\n\n" +
+      "Git-sync convention: when OBSIDIAN_GIT_SYNC is enabled (commit | every-write | timer), every write is committed with a tool-derived message; every-write also pulls+pushes per write and timer syncs on a background interval. A pull conflict never blocks or discards — the local version is kept aside as a '<note> (conflicted YYYY-MM-DD HHMMSS)' copy and remote is taken as canonical. Discover unreconciled copies via list_vault_issues kind:'conflicts' (also counted by get_vault_stats.conflict_notes); the active mode and last sync state are in get_config's sync section.\n\n" +
       "Tool exposure is operator-configured (OBSIDIAN_TOOLS): this server may expose a subset of the full tool surface. get_config's tools section reports the active policy and the exposed/excluded tool names.",
   }
 );
@@ -304,13 +319,13 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "get_config",
-        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, daily: { folder, format, template }, writes: { writes_enabled, git_autocommit }, vault: { path }, tools: { policy, exposed, excluded } }. Optional section narrows the result to one unwrapped section. template.folder and daily.folder are null when unconfigured (does not error). writes_enabled means at least one write tool is exposed. Read-only; never excluded by OBSIDIAN_TOOLS — this is how you discover the active tool policy.",
+        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, daily: { folder, format, template }, writes: { writes_enabled, git_sync }, sync: { mode, interval, remote, last_sync, last_error }, vault: { path }, tools: { policy, exposed, excluded } }. Optional section narrows the result to one unwrapped section. template.folder and daily.folder are null when unconfigured (does not error). writes_enabled means at least one write tool is exposed. sync section reports the active git-sync mode and current state. Read-only; never excluded by OBSIDIAN_TOOLS — this is how you discover the active tool policy.",
         inputSchema: {
           type: "object",
           properties: {
             section: {
               type: "string",
-              enum: ["template", "daily", "writes", "vault", "tools"],
+              enum: ["template", "daily", "writes", "sync", "vault", "tools"],
               description: "Return just this section, unwrapped. Omit for the whole config object."
             }
           }
@@ -594,13 +609,13 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "list_vault_issues",
-        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links); kind:'broken_anchors' returns, grouped by source note, the [[note#heading]] anchors that resolve to a note but not to any heading in it. Index-backed. For the grouped kinds, limit/offset count groups (source notes), not individual targets.",
+        description: "List the vault-hygiene issues get_vault_stats only counts. kind:'orphans' returns note headers for notes with no inbound or outbound resolved links; kind:'unresolved_links' returns, grouped by source note, the wikilink targets that resolve to nothing (the notes with broken links); kind:'broken_anchors' returns, grouped by source note, the [[note#heading]] anchors that resolve to a note but not to any heading in it; kind:'conflicts' returns the unreconciled conflict copies (notes named \"… (conflicted YYYY-MM-DD HHMMSS)\") each paired with the original note they diverged from. Index-backed. For the grouped kinds, limit/offset count groups (source notes), not individual targets.",
         inputSchema: {
           type: "object",
           properties: {
             kind: {
               type: "string",
-              enum: ["orphans", "unresolved_links", "broken_anchors"],
+              enum: ["orphans", "unresolved_links", "broken_anchors", "conflicts"],
               description: "Which issue list to return."
             },
             limit: {

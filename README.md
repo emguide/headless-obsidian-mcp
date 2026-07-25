@@ -23,7 +23,7 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 - **Templates** (opt-in): Apply the vault's existing core Templates-plugin templates — discover them (`list_templates`), create a note from one (`apply_template`), or insert one into an existing note (`insert_template`), with faithful `{{title}}`/`{{date}}`/`{{time}}` and `{{date:FORMAT}}` substitution (Templater scripting is not supported)
 - **Daily notes**: Resolve "today"/"yesterday"/any date to its canonical daily-note path from the Daily Notes core plugin's own config (`resolve_daily_note`) — folder, date format, and template come from the vault, not from out-of-band knowledge
 - **Trash-safe delete**: Deletes move to the vault's `.trash` by default, so they're recoverable
-- **Git safety net**: Optionally snapshot the vault into a commit before every write (`OBSIDIAN_GIT_AUTOCOMMIT`)
+- **Git sync**: Optionally commit every write, and/or pull+push a remote per write or on a background timer (`OBSIDIAN_GIT_SYNC`), with non-destructive conflict handling
 - **Cross-platform**: Works on Windows, macOS, and Linux
 - **Frontmatter Support**: Extracts YAML frontmatter as structured metadata
 - **Tag Extraction**: Automatically identifies and extracts Obsidian tags
@@ -166,12 +166,14 @@ npm run query -- daily 2026-07-01
 npm run query -- config
 npm run query -- config template
 npm run query -- config daily
+npm run query -- config sync                             # Git-sync mode/interval/remote/last_sync/last_error
 
-# Vault hygiene: orphaned notes, broken wikilinks, and dead heading anchors (drill-down from stats)
+# Vault hygiene: orphaned notes, broken wikilinks, dead heading anchors, and unreconciled sync conflicts (drill-down from stats)
 npm run query -- vault-issues orphans
 npm run query -- vault-issues unresolved_links --limit 50
 npm run query -- vault-issues broken_anchors --limit 50
 npm run query -- vault-issues unresolved_links --include-context
+npm run query -- vault-issues conflicts
 
 # List non-markdown files (attachments/images), optionally scoped/filtered
 npm run query -- files --folder assets --extension png
@@ -249,8 +251,8 @@ npm run query -- delete "inbox/idea" --include-context
 # For content that begins with "-" (markdown lists), pipe it via stdin or --file:
 printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"
 
-# Snapshot the vault into a git commit before the write (see Configuration)
-OBSIDIAN_GIT_AUTOCOMMIT=1 npm run query -- add-tag "projects/alpha" review
+# Commit the write to git (see Configuration; legacy OBSIDIAN_GIT_AUTOCOMMIT=1 still works but maps to "commit")
+OBSIDIAN_GIT_SYNC=commit npm run query -- add-tag "projects/alpha" review
 
 # Use verbose mode to see the request being sent
 npm run query -- --verbose search "pattern"
@@ -499,24 +501,25 @@ Summarize the whole vault in a single call, derived entirely from the shared ind
 
 **Parameters:** none
 
-**Returns:** `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with neither inbound nor outbound resolved links; the time bounds are ISO timestamps (`null` for an empty vault).
+**Returns:** `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, conflict_notes, last_modified, first_modified }`. `orphan_notes` counts notes with neither inbound nor outbound resolved links; `conflict_notes` counts unreconciled git-sync conflict copies (see [Git sync](#git-sync-obsidian_git_sync)); the time bounds are ISO timestamps (`null` for an empty vault).
 
 ### list_vault_issues
 
 Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
 
 **Parameters:**
-- `kind` (string, required): `"orphans"`, `"unresolved_links"`, or `"broken_anchors"`
+- `kind` (string, required): `"orphans"`, `"unresolved_links"`, `"broken_anchors"`, or `"conflicts"`
 - `limit` (number, optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap)
 - `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-- `include_context` (boolean, optional): For the two link kinds, decorate each target with the source line(s) containing it — `{ target, context }` / `{ target, anchor, context }` — so you can see what the broken reference says before deciding how to fix it (see [Link context](#link-context); only the returned window is read). Errors on `kind: "orphans"`.
+- `include_context` (boolean, optional): For the two link kinds, decorate each target with the source line(s) containing it — `{ target, context }` / `{ target, anchor, context }` — so you can see what the broken reference says before deciding how to fix it (see [Link context](#link-context); only the returned window is read). Errors on `kind: "orphans"` and `kind: "conflicts"` (neither has links to contextualize).
 
 **Returns:** `{ results, returned, skipped, omitted, truncated }`. `results`' shape depends on `kind`:
 - `"orphans"`: Array of note headers (same shape as `list_notes`) — notes with no inbound and no outbound resolved links (the same predicate behind `get_vault_stats`'s `orphan_notes`)
 - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
 - `"broken_anchors"`: `[[note#heading]]` links whose target note resolves but whose heading anchor matches no heading in that note — the complement of `unresolved_links` ("note resolves, heading doesn't"). Array of `{ source, targets: [{ target, anchor }] }` grouped by source note; `returned`/`omitted`/`truncated` count groups (source notes), not individual anchors, same as `unresolved_links`. Block-ref anchors (`#^id`) and links to unresolved notes are excluded.
+- `"conflicts"`: Array of `{ path, original, created }` — unreconciled git-sync conflict copies. `path` is the copy note (`<note> (conflicted YYYY-MM-DD HHMMSS)`), `original` the canonical note path it diverged from, `created` the copy's file mtime (ISO). One row per copy.
 
-`returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`. For the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), the `orphans` `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count — a group-limited result naturally shows fewer. Index-backed.
+`returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`. For the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), the `orphans` `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count; `conflicts`' `results.length` equals `get_vault_stats`'s `conflict_notes`. A group-limited result naturally shows fewer. Index-backed.
 
 ### list_files
 
@@ -616,9 +619,9 @@ Missing config keys take Obsidian's own defaults (vault root, `YYYY-MM-DD`, no t
 Report the server's own configuration — how it is set up, not what is in the vault (that's `get_vault_stats`). Answers "where is the template folder?", "are writes enabled?", "which vault am I pointed at?" in one call.
 
 **Parameters:**
-- `section` (string, optional): `"template" | "daily" | "writes" | "vault" | "tools"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors, listing the valid ones.
+- `section` (string, optional): `"template" | "daily" | "writes" | "sync" | "vault" | "tools"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors, listing the valid ones.
 
-**Returns:** `{ template, daily, writes, vault, tools }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `daily` is `{ folder, format, template }` — the Daily Notes configuration `resolve_daily_note` runs on, reported leniently (`folder: null` when unconfigured, `""` when configured at the vault root). `writes` is `{ writes_enabled, git_autocommit }` — `writes_enabled` is derived (`true` iff the tool policy exposes at least one write tool); `git_autocommit` is the `OBSIDIAN_GIT_AUTOCOMMIT` flag state. `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents). `tools` is `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset) and the sorted exposed/excluded tool names.
+**Returns:** `{ template, daily, writes, sync, vault, tools }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `daily` is `{ folder, format, template }` — the Daily Notes configuration `resolve_daily_note` runs on, reported leniently (`folder: null` when unconfigured, `""` when configured at the vault root). `writes` is `{ writes_enabled, git_sync }` — `writes_enabled` is derived (`true` iff the tool policy exposes at least one write tool); `git_sync` is the active `OBSIDIAN_GIT_SYNC` mode (`"off" | "commit" | "every-write" | "timer"`). `sync` is `{ mode, interval, remote, last_sync, last_error }` — the effective sync mode, interval (seconds), and remote name, plus `last_sync`/`last_error`, which track only the **background timer's** own attempts (`timer` mode): the ISO timestamp of its last successful tick (`null` if none yet) and the message from its most recent failed tick (`null` if the last one succeeded or none has run). In `commit`/`every-write` mode both stay `null` — there's no background timer, and a failed `every-write` pull/push throws back to the write call instead (see [Git sync](#git-sync-obsidian_git_sync)). `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents). `tools` is `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset) and the sorted exposed/excluded tool names.
 
 Read-only and never excludable by `OBSIDIAN_TOOLS` — it's how an agent discovers the active tool policy, so it's always exposed.
 
@@ -939,18 +942,47 @@ message listing the valid vocabulary (or a migration hint — use
 policy gates the MCP server; the query CLI is the operator's own tool and is
 not affected by it.
 
-### Git safety net (`OBSIDIAN_GIT_AUTOCOMMIT`)
+### Git sync (`OBSIDIAN_GIT_SYNC`)
 
-Set `OBSIDIAN_GIT_AUTOCOMMIT` to a truthy value (`1`, `true`, `yes`, `on`) to
-snapshot the vault into a git commit **before every write**. The pre-existing
-state is committed (`git add -A && git commit`) so the agent's change lands as
-an isolated, revertible diff — the agent's own write is left **uncommitted** for
-you to review. A clean working tree is a no-op (nothing to snapshot).
+`OBSIDIAN_GIT_SYNC` selects one of four modes:
 
-The guard is **fail-closed**: when the flag is on but the snapshot can't be made
-(git isn't installed, the vault isn't a git repository, or the commit fails),
-the write is refused rather than proceeding without the safety net. Leave the
-variable unset to disable it entirely (writes then require no git).
+- `off` (default) — no git involvement.
+- `commit` — every write is committed (`git add -A && git commit`) right after
+  it lands, with a tool-derived commit message. No remote interaction. This is
+  the old "git safety net" behavior.
+- `every-write` — commits like `commit`, then also pulls (merge) and pushes the
+  configured remote after every write, so the vault stays in sync with a shared
+  remote continuously.
+- `timer` — commits like `commit`; pulling and pushing happens instead on a
+  background interval rather than per write.
+
+`OBSIDIAN_GIT_SYNC_INTERVAL` sets the `timer` interval in seconds (default
+`300`, floored at `1`); `OBSIDIAN_GIT_REMOTE` sets the remote to pull/push
+(default `origin`).
+
+The guard is **fail-closed**: in any mode other than `off`, a write is refused
+before touching the filesystem if the vault isn't a usable git repository, and
+the post-write commit throws if it fails — so a write never lands without its
+snapshot. The one exception is the background timer tick in `timer` mode: a
+failed scheduled pull/push is recorded in `get_config`'s `sync.last_error`
+rather than thrown, since there's no in-flight write for it to block.
+
+**Conflicts never block or discard.** When a pull (`every-write`'s per-write
+pull, or `timer`'s background tick) hits a real merge conflict, it's resolved
+automatically per file: if both sides modified the note, the local version is
+kept aside as a
+`<note> (conflicted YYYY-MM-DD HHMMSS)` copy and the canonical path takes the
+remote version; if the remote deleted it while you modified it locally, the
+same conflict-copy preserves your version and the canonical path is deleted;
+if you deleted it locally while the remote modified it, the remote version is
+simply restored (no copy — there was nothing local to preserve). Find
+unreconciled copies with `list_vault_issues kind:"conflicts"` or the
+`conflict_notes` count on `get_vault_stats`.
+
+Leave `OBSIDIAN_GIT_SYNC` unset (or `off`) to disable git involvement entirely.
+The legacy `OBSIDIAN_GIT_AUTOCOMMIT` flag still works — setting it truthy warns
+and maps to `OBSIDIAN_GIT_SYNC=commit` — but an explicit `OBSIDIAN_GIT_SYNC`
+always takes precedence.
 
 ## Claude Desktop Integration
 
@@ -993,7 +1025,7 @@ Replace the paths with:
 - `/path/to/headless-obsidian-mcp`: The absolute path to this project directory
 - `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
 
-To allow the agent to modify your vault, add `"OBSIDIAN_TOOLS": "all"` to the `env` block above (with the variable unset the server is read-only). Any selector policy works here — e.g. `"OBSIDIAN_TOOLS": "reads,tasks.write"` for a read-everything, write-only-tasks agent; see [Tool policy](#tool-policy-obsidian_tools). To also snapshot the vault into a git commit before every write, add `"OBSIDIAN_GIT_AUTOCOMMIT": "1"`.
+To allow the agent to modify your vault, add `"OBSIDIAN_TOOLS": "all"` to the `env` block above (with the variable unset the server is read-only). Any selector policy works here — e.g. `"OBSIDIAN_TOOLS": "reads,tasks.write"` for a read-everything, write-only-tasks agent; see [Tool policy](#tool-policy-obsidian_tools). To also commit every write to git (and optionally sync a remote), add `"OBSIDIAN_GIT_SYNC": "commit"` (or `"every-write"` / `"timer"`); see [Git sync](#git-sync-obsidian_git_sync).
 
 After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_config`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_templates`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`, `resolve_daily_note`). With write tools selected in `OBSIDIAN_TOOLS` it also provides them (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`, `apply_template`, `insert_template`).
 
