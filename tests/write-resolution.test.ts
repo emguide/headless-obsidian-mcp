@@ -20,6 +20,7 @@ import {
 } from "../src/tools/write.js";
 import { getFrontmatter } from "../src/tools/frontmatter.js";
 import { readRaw } from "../src/tools/write.js";
+import { bulkEdit } from "../src/tools/bulk.js";
 
 /** Vault with: a folder note, a root note, and two notes sharing a basename. */
 function notes() {
@@ -247,5 +248,29 @@ describe("move_note resolves bare from (isolated fixture)", () => {
     const res = await moveNote(fx.vaultPath, { from: "alpha", to: "archive/alpha" });
     assert.equal(res.from, "projects/alpha");
     assert.equal(res.to, "archive/alpha");
+  });
+});
+
+describe("bulk_edit resolves explicit paths", () => {
+  let fx: Fixture;
+  before(async () => {
+    fx = await makeVault([
+      { path: "projects/alpha.md", content: "# Alpha" },
+      { path: "daily/log.md", content: "# Daily" },
+      { path: "projects/log.md", content: "# Project" },
+    ]);
+  });
+  after(() => fx.cleanup());
+
+  test("bare path resolves; ambiguous path isolates to one failed row", async () => {
+    const res = await bulkEdit(fx.vaultPath, {
+      select: { paths: ["alpha", "log"] },
+      operations: [{ op: "add_tag", tags: ["z"] }],
+    });
+    const alpha = res.results!.find((r) => r.path.endsWith("alpha"))!;
+    const log = res.results!.find((r) => r.path === "log")!;
+    assert.equal(alpha.ok, true);
+    assert.equal(log.ok, false);
+    assert.match((log as any).error, /Ambiguous note name: log/);
   });
 });
