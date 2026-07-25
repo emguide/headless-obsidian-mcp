@@ -11,6 +11,7 @@ import {
   patchNote,
   setNoteFrontmatter,
   appendNote,
+  prependNote,
   writeNote,
 } from "../src/tools/write.js";
 import { getFrontmatter } from "../src/tools/frontmatter.js";
@@ -149,6 +150,24 @@ describe("edit-existing writers resolve bare/wrong-case names", () => {
     );
     const after = await readRaw(fx.vaultPath, "daily/log");
     assert.equal(after, before); // untouched
+  });
+
+  test("a genuinely missing name with no create still errors on patch/append/prepend", async () => {
+    // "nope" matches no note anywhere in the fixture (no slash, no basename
+    // match), so it stays unresolved and falls through to the literal
+    // not-found path — must ERROR, never silently redirect to some other note.
+    await assert.rejects(
+      () => patchNote(fx.vaultPath, { path: "nope", find: "x", replace: "y" }),
+      /Note not found/
+    );
+    await assert.rejects(
+      () => appendNote(fx.vaultPath, { path: "nope", content: "x" }),
+      /Note not found/
+    );
+    await assert.rejects(
+      () => prependNote(fx.vaultPath, { path: "nope", content: "x" }),
+      /Note not found/
+    );
   });
 
   test("append_note WITHOUT create resolves a bare name", async () => {
