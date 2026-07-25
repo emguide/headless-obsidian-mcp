@@ -202,12 +202,24 @@ export async function walkVault(
  * Extract inline Obsidian tags (`#tag`, including nested `#parent/child`).
  * Requires no whitespace after `#` so markdown headings (`# Heading`) are not
  * matched as tags.
+ *
+ * Tags inside fenced code blocks are ignored, matching Obsidian and the
+ * fence-aware {@link parseHeadings}/{@link parseTasks}/{@link extractLinkTargets}
+ * parsers: a note that merely *documents* tag syntax otherwise minted phantom
+ * vault tags that `list_tags` reported and `find_by_tag` matched on, with no
+ * edit outside the fence able to clear them.
  */
 export function extractInlineTags(content: string): string[] {
   const tags = new Set<string>();
+  const fences = fencedRanges(content);
   const regex = /(?:^|[^\w`])#([A-Za-z][\w-]*(?:\/[\w-]+)*)/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(content)) !== null) {
+    // Offset of the `#` itself, not of the (optional) preceding character the
+    // pattern consumes — and `lastIndexOf` because that character may itself
+    // be a `#` (`##tag`), while the captured tag never contains one.
+    const hashIndex = match.index + match[0].lastIndexOf("#");
+    if (insideFence(fences, hashIndex)) continue;
     tags.add(match[1]);
   }
   return [...tags];

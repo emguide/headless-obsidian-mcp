@@ -858,7 +858,19 @@ async function renameSectionInVaultImpl(
  * by slicing it off `raw` (gray-matter's stripped body is always a suffix of
  * `raw`), matching the body-only-edit convention used by the section tools.
  */
+/**
+ * Serialized against other writes to the same vault (see write-lock.ts): this
+ * operation reads the whole note, rewrites one marker character, and writes the
+ * whole note back — so a concurrent edit interleaving at the read would have its
+ * change silently discarded by whichever write landed second.
+ */
 export async function setTaskState(
+  ...args: Parameters<typeof setTaskStateImpl>
+): ReturnType<typeof setTaskStateImpl> {
+  return withVaultWriteLock(args[0], () => setTaskStateImpl(...args));
+}
+
+async function setTaskStateImpl(
   vaultPath: string,
   { path, text, line, status }: SetTaskStateParams
 ): Promise<{

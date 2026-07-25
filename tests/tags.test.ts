@@ -91,3 +91,48 @@ test("find_by_tag limit: 0 returns all matches unbounded", async () => {
   assert.equal(notes.omitted, 0);
   assert.equal(notes.truncated, false);
 });
+
+test("tags inside fenced code blocks are not vault tags", async () => {
+  // A note documenting tag syntax must not mint phantom vault tags — the same
+  // fence-awareness parseHeadings/parseTasks/extractLinkTargets already have.
+  const doc = await makeVault([
+    {
+      path: "syntax.md",
+      content: [
+        "# Tag syntax",
+        "",
+        "Real one: #realtag",
+        "",
+        "```md",
+        "Write a tag like #fencedtag or #nested/fenced",
+        "```",
+        "",
+        "~~~",
+        "#tildefenced",
+        "~~~",
+        "",
+      ].join("\n"),
+    },
+  ]);
+  try {
+    const map = Object.fromEntries(
+      (await listTags(doc.vaultPath)).results.map((t) => [t.tag, t.count])
+    );
+    assert.equal(map["realtag"], 1);
+    assert.equal(map["fencedtag"], undefined);
+    assert.equal(map["nested/fenced"], undefined);
+    assert.equal(map["tildefenced"], undefined);
+
+    // find_by_tag reads the same unified tag set, so it must agree.
+    assert.equal(
+      (await findByTag(doc.vaultPath, { tags: ["fencedtag"] })).results.length,
+      0
+    );
+    assert.equal(
+      (await findByTag(doc.vaultPath, { tags: ["realtag"] })).results.length,
+      1
+    );
+  } finally {
+    await doc.cleanup();
+  }
+});

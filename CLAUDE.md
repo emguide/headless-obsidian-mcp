@@ -267,6 +267,7 @@ individual tool descriptions state only their deviations from it.
 - **Input**:
   - `offset` (optional): Rows to skip before the window, for pagination (default `0`)
 - **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ tag, count }`, unifying inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
+- **Notes**: Inline `#tags` inside fenced code blocks are ignored, matching Obsidian and the fence-aware heading/task/wikilink parsers — a note that merely *documents* tag syntax creates no phantom vault tags. This is the shared `extractInlineTags` (`src/tools/vault.ts`), so every tag consumer (`list_tags`, `find_by_tag`, `read_notes`' `tags`, the `tags` candidate filter) agrees.
 
 ### find_by_tag
 - **Purpose**: High-precision retrieval by human curation.
@@ -517,7 +518,9 @@ contains no `..`, so readers returned the target's contents and writers
 clobbered it. Both guards are async for this reason. A traversal attempt errors
 the whole call (it is never reported per-path the way a missing note is).
 
-**Write serialization**: every read-modify-write span holds a per-vault lock
+**Write serialization**: every read-modify-write span — every write tool without
+exception, including the single-character `set_task_state`, which still rewrites
+the whole note — holds a per-vault lock
 (`withVaultWriteLock`, `src/tools/write-lock.ts`). Git operations were already
 serialized by `withGitLock`, but the file edit itself was not: two concurrent
 calls could each read a note, each mutate their own copy, and each write — the
