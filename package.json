@@ -18,6 +18,9 @@
     "query": "tsx src/query-cli.ts",
     "prepare": "tsc"
   },
+  "overrides": {
+    "@hono/node-server": "^2.0.5"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "commander": "^12.0.0",

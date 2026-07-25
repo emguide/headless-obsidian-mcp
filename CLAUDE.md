@@ -769,6 +769,18 @@ it truthy now warns and maps to `OBSIDIAN_GIT_SYNC=commit`. An explicit
 - dayjs (Moment-compatible date formatting for template placeholders)
 - Node's built-in `node:path`, `node:fs/promises`, and `node:child_process`
 
+### Dependency overrides
+
+`package.json` pins `@hono/node-server` to `^2.0.5` via `overrides`. The MCP SDK
+depends on `^1.19.9`, whose range cannot reach the fix for GHSA-frvp-7c67-39w9
+(a `serve-static` path traversal, Windows-only) — that landed in `2.0.5`, a major
+bump outside the SDK's caret. The SDK's only use of the package is
+`getRequestListener`, whose signature and `overrideGlobalObjects` option are
+unchanged in 2.x, and it is reached solely from `StreamableHTTPServerTransport`,
+which this stdio server never loads. Verified by a live HTTP round trip through
+that transport (SSE streaming included) plus the full suite. Drop the override
+once the SDK ships its own 2.x bump.
+
 ## Development
 
 - `npm run dev` or `mise run dev` - Run in watch mode (via tsx, no build step)
