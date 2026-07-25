@@ -130,7 +130,7 @@ async function linkHealthAfterWrite(
 }
 
 /** Read an existing note's raw text, or throw a friendly not-found error. */
-async function readRaw(vaultPath: string, notePath: string): Promise<string> {
+export async function readRaw(vaultPath: string, notePath: string): Promise<string> {
   const fullPath = resolveNotePath(vaultPath, notePath);
   try {
     return await readFile(fullPath, "utf-8");

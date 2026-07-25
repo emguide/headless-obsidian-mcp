@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import {
   NoteDocument,
   addTags,
@@ -11,8 +10,7 @@ import {
 import { getIndex } from "./vault-index.js";
 import { Condition } from "./property-match.js";
 import { resolveCandidates } from "./candidate-filter.js";
-import { resolveNotePath } from "./vault.js";
-import { writeResolved } from "./write.js";
+import { readRaw, writeResolved } from "./write.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
 
 export type BulkOperation =
@@ -214,7 +212,11 @@ export async function bulkEdit(
   const results: BulkNoteResult[] = [];
   for (const notePath of matched) {
     try {
-      const raw = await readFile(resolveNotePath(vaultPath, notePath), "utf-8");
+      // Read through the shared funnel helper so a missing note in the batch
+      // reports the polished "Note not found: x. Did you mean…?" message every
+      // other write path uses, instead of leaking a raw ENOENT with an absolute
+      // filesystem path.
+      const raw = await readRaw(vaultPath, notePath);
       const doc = NoteDocument.parse(raw);
       const changed = applyOperations(doc, operations);
       if (changed) await writeResolved(vaultPath, notePath, doc.serialize());

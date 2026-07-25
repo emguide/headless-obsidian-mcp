@@ -154,7 +154,12 @@ test("bulkEdit isolates a per-note failure and reports it", async () => {
   assert.equal(res.failed_count, 1);
   const bad = res.results!.find((r) => r.path === "does/not/exist");
   assert.equal(bad!.ok, false);
-  assert.match(bad!.error!, /not found|ENOENT/i);
+  // The per-note error funnels through the shared not-found builder: the
+  // polished "Note not found: <name>" message, never a raw ENOENT leaking the
+  // absolute filesystem path.
+  assert.match(bad!.error!, /Note not found: does\/not\/exist/);
+  assert.doesNotMatch(bad!.error!, /ENOENT/);
+  assert.doesNotMatch(bad!.error!, new RegExp(local.vaultPath));
   await local.cleanup();
 });
 
