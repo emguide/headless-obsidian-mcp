@@ -517,6 +517,16 @@ contains no `..`, so readers returned the target's contents and writers
 clobbered it. Both guards are async for this reason. A traversal attempt errors
 the whole call (it is never reported per-path the way a missing note is).
 
+**Write serialization**: every read-modify-write span holds a per-vault lock
+(`withVaultWriteLock`, `src/tools/write-lock.ts`). Git operations were already
+serialized by `withGitLock`, but the file edit itself was not: two concurrent
+calls could each read a note, each mutate their own copy, and each write — the
+second silently discarding the first (and two `write_note` calls could both
+pass the exists-check, defeating `overwrite:false`). The lock is per vault
+rather than per note because multi-note operations (`move_note`, `bulk_edit`,
+`rename_section`) span notes, and it is reentrant by async context so an outer
+operation can call inner helpers that take it again.
+
 **Structure notes**: Body-only edits (sections) preserve the frontmatter block
 byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML block in
 canonical form (block-style lists) but leave the body untouched. Headings inside

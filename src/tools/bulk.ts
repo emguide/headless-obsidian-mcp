@@ -11,6 +11,7 @@ import { getIndex } from "./vault-index.js";
 import { canonicalName } from "./vault.js";
 import { Condition } from "./property-match.js";
 import { resolveCandidates } from "./candidate-filter.js";
+import { withVaultWriteLock } from "./write-lock.js";
 import { assertNonNegativeInt } from "./list-response.js";
 import {
   readRaw,
@@ -200,7 +201,17 @@ export interface BulkEditResult {
  * note-by-note with per-note error isolation so one bad note never aborts the
  * rest of the batch.
  */
+/**
+ * Serialized against other writes to the same vault (see write-lock.ts):
+ * the batch reads every matched note before writing it back.
+ */
 export async function bulkEdit(
+  ...args: Parameters<typeof bulkEditImpl>
+): ReturnType<typeof bulkEditImpl> {
+  return withVaultWriteLock(args[0], () => bulkEditImpl(...args));
+}
+
+async function bulkEditImpl(
   vaultPath: string,
   params: BulkEditParams
 ): Promise<BulkEditResult> {

@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, unlink, rename, stat } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import { parseMatter, stringifyMatter } from "./matter-safe.js";
+import { withVaultWriteLock } from "./write-lock.js";
 import { getIndex } from "./vault-index.js";
 import {
   resolveNotePath,
@@ -193,14 +194,19 @@ async function editNote(
   mutate: (doc: NoteDocument, resolved: string) => boolean | void,
   message: (resolved: string) => string
 ): Promise<{ changed: boolean; content: string; path: string }> {
-  const resolved = await resolveWriteTargetAsync(vaultPath, notePath);
-  const raw = await readRaw(vaultPath, resolved);
-  const doc = NoteDocument.parse(raw);
-  const changed = mutate(doc, resolved);
-  if (changed === false) return { changed: false, content: raw, path: resolved };
-  const content = doc.serialize();
-  await commitWrite(vaultPath, resolved, content, message(resolved));
-  return { changed: true, content, path: resolved };
+  // Read, mutate and write as one critical section: a concurrent edit that
+  // interleaved here would have its change silently discarded by whichever
+  // write landed second.
+  return withVaultWriteLock(vaultPath, async () => {
+    const resolved = await resolveWriteTargetAsync(vaultPath, notePath);
+    const raw = await readRaw(vaultPath, resolved);
+    const doc = NoteDocument.parse(raw);
+    const changed = mutate(doc, resolved);
+    if (changed === false) return { changed: false, content: raw, path: resolved };
+    const content = doc.serialize();
+    await commitWrite(vaultPath, resolved, content, message(resolved));
+    return { changed: true, content, path: resolved };
+  });
 }
 
 /**
@@ -265,20 +271,28 @@ export async function writeNote(
     finalContent = content;
   }
 
-  const fullPath = await resolveNotePath(vaultPath, path);
-  const existed = await fileExists(fullPath);
-  if (existed && !overwrite) {
-    throw new Error(
-      `Note already exists: ${canonicalName(path)}. Pass overwrite:true to replace it.`
+  // Exists-check and write as one critical section: two concurrent creates
+  // could otherwise both see "missing" and the second clobber the first,
+  // despite overwrite:false promising to refuse exactly that.
+  const { existed, health } = await withVaultWriteLock(vaultPath, async () => {
+    const fullPath = await resolveNotePath(vaultPath, path);
+    const existedNow = await fileExists(fullPath);
+    if (existedNow && !overwrite) {
+      throw new Error(
+        `Note already exists: ${canonicalName(path)}. Pass overwrite:true to replace it.`
+      );
+    }
+    await commitWrite(
+      vaultPath,
+      path,
+      finalContent,
+      `write_note: ${canonicalName(path)} (${existedNow ? "overwritten" : "created"})`
     );
-  }
-  await commitWrite(
-    vaultPath,
-    path,
-    finalContent,
-    `write_note: ${canonicalName(path)} (${existed ? "overwritten" : "created"})`
-  );
-  const health = await linkHealthAfterWrite(vaultPath, path, finalContent);
+    return {
+      existed: existedNow,
+      health: await linkHealthAfterWrite(vaultPath, path, finalContent),
+    };
+  });
   return { path: canonicalName(path), created: !existed, ...health };
 }
 
@@ -294,26 +308,30 @@ export async function appendNote(
   { path, content, create = false }: AppendNoteParams
 ): Promise<{ path: string; created: boolean } & LinkHealth> {
   if (typeof content !== "string") throw new Error("content must be a string");
-  const fullPath = await resolveNotePath(vaultPath, path);
-  const existed = await fileExists(fullPath);
-  // `create:true` always targets the literal path — a bare/wrong-case name
-  // must never be redirected onto a different note when the intent is to
-  // create a brand new one. Only the non-create ("existing note") branch
-  // resolves, since only there is redirecting to the intended note correct.
-  if (!existed && create) {
-    validateContentFrontmatter(content);
-    const created = content.endsWith("\n") ? content : content + "\n";
-    await commitWrite(vaultPath, path, created, `append_note: ${canonicalName(path)}`);
-    const health = await linkHealthAfterWrite(vaultPath, path, created);
-    return { path: canonicalName(path), created: true, ...health };
-  }
-  const resolved = await resolveWriteTargetAsync(vaultPath, path);
-  const raw = await readRaw(vaultPath, resolved);
-  const separator = raw.length === 0 || raw.endsWith("\n") ? "" : "\n";
-  const next = raw + separator + content + (content.endsWith("\n") ? "" : "\n");
-  await commitWrite(vaultPath, resolved, next, `append_note: ${resolved}`);
-  const health = await linkHealthAfterWrite(vaultPath, resolved, next);
-  return { path: resolved, created: false, ...health };
+  // Read and append as one critical section (see write-lock.ts): a concurrent
+  // append that read the same `raw` would lose one of the two additions.
+  return withVaultWriteLock(vaultPath, async () => {
+    const fullPath = await resolveNotePath(vaultPath, path);
+    const existed = await fileExists(fullPath);
+    // `create:true` always targets the literal path — a bare/wrong-case name
+    // must never be redirected onto a different note when the intent is to
+    // create a brand new one. Only the non-create ("existing note") branch
+    // resolves, since only there is redirecting to the intended note correct.
+    if (!existed && create) {
+      validateContentFrontmatter(content);
+      const created = content.endsWith("\n") ? content : content + "\n";
+      await commitWrite(vaultPath, path, created, `append_note: ${canonicalName(path)}`);
+      const health = await linkHealthAfterWrite(vaultPath, path, created);
+      return { path: canonicalName(path), created: true, ...health };
+    }
+    const resolved = await resolveWriteTargetAsync(vaultPath, path);
+    const raw = await readRaw(vaultPath, resolved);
+    const separator = raw.length === 0 || raw.endsWith("\n") ? "" : "\n";
+    const next = raw + separator + content + (content.endsWith("\n") ? "" : "\n");
+    await commitWrite(vaultPath, resolved, next, `append_note: ${resolved}`);
+    const health = await linkHealthAfterWrite(vaultPath, resolved, next);
+    return { path: resolved, created: false, ...health };
+  });
 }
 
 export interface PrependNoteParams {
@@ -333,26 +351,29 @@ export async function prependNote(
   { path, content, create = false }: PrependNoteParams
 ): Promise<{ path: string; created: boolean } & LinkHealth> {
   if (typeof content !== "string") throw new Error("content must be a string");
-  const fullPath = await resolveNotePath(vaultPath, path);
-  const existed = await fileExists(fullPath);
-  // See appendNote: create:true always targets the literal path (never
-  // redirected onto a different note); only the existing-note branch resolves.
-  if (!existed && create) {
-    validateContentFrontmatter(content);
-    const created = content.endsWith("\n") ? content : content + "\n";
-    await commitWrite(vaultPath, path, created, `prepend_note: ${canonicalName(path)}`);
-    const health = await linkHealthAfterWrite(vaultPath, path, created);
-    return { path: canonicalName(path), created: true, ...health };
-  }
-  const resolved = await resolveWriteTargetAsync(vaultPath, path);
-  const raw = await readRaw(vaultPath, resolved);
-  const doc = NoteDocument.parse(raw);
-  const insert = content.endsWith("\n") ? content : content + "\n";
-  doc.body = insert + doc.body;
-  const next = doc.serialize();
-  await commitWrite(vaultPath, resolved, next, `prepend_note: ${resolved}`);
-  const health = await linkHealthAfterWrite(vaultPath, resolved, next);
-  return { path: resolved, created: false, ...health };
+  // Read and prepend as one critical section (see write-lock.ts).
+  return withVaultWriteLock(vaultPath, async () => {
+    const fullPath = await resolveNotePath(vaultPath, path);
+    const existed = await fileExists(fullPath);
+    // See appendNote: create:true always targets the literal path (never
+    // redirected onto a different note); only the existing-note branch resolves.
+    if (!existed && create) {
+      validateContentFrontmatter(content);
+      const created = content.endsWith("\n") ? content : content + "\n";
+      await commitWrite(vaultPath, path, created, `prepend_note: ${canonicalName(path)}`);
+      const health = await linkHealthAfterWrite(vaultPath, path, created);
+      return { path: canonicalName(path), created: true, ...health };
+    }
+    const resolved = await resolveWriteTargetAsync(vaultPath, path);
+    const raw = await readRaw(vaultPath, resolved);
+    const doc = NoteDocument.parse(raw);
+    const insert = content.endsWith("\n") ? content : content + "\n";
+    doc.body = insert + doc.body;
+    const next = doc.serialize();
+    await commitWrite(vaultPath, resolved, next, `prepend_note: ${resolved}`);
+    const health = await linkHealthAfterWrite(vaultPath, resolved, next);
+    return { path: resolved, created: false, ...health };
+  });
 }
 
 export interface DeleteNoteOptions {
@@ -372,7 +393,17 @@ export interface DeleteNoteOptions {
  * deletion is recoverable. Pass `permanent: true` to unlink it outright. Errors
  * if the note does not exist.
  */
+/**
+ * Serialized against other writes to the same vault (see write-lock.ts):
+ * this operation reads before it writes, and spans several notes.
+ */
 export async function deleteNote(
+  ...args: Parameters<typeof deleteNoteImpl>
+): ReturnType<typeof deleteNoteImpl> {
+  return withVaultWriteLock(args[0], () => deleteNoteImpl(...args));
+}
+
+async function deleteNoteImpl(
   vaultPath: string,
   notePath: string,
   { permanent = false, include_context = false }: DeleteNoteOptions = {}
@@ -447,7 +478,17 @@ export interface MoveNoteParams {
  * full path; bare-basename links become the new basename. Refuses to overwrite
  * an existing destination unless `overwrite` is set.
  */
+/**
+ * Serialized against other writes to the same vault (see write-lock.ts):
+ * this operation reads before it writes, and spans several notes.
+ */
 export async function moveNote(
+  ...args: Parameters<typeof moveNoteImpl>
+): ReturnType<typeof moveNoteImpl> {
+  return withVaultWriteLock(args[0], () => moveNoteImpl(...args));
+}
+
+async function moveNoteImpl(
   vaultPath: string,
   { from, to, overwrite = false, update_links = true }: MoveNoteParams
 ): Promise<{
@@ -563,7 +604,17 @@ function normalizeFilePath(filePath: string): string {
  * literally - no `.md` is appended and no wikilinks are rewritten. Refuses to
  * overwrite an existing destination unless `overwrite` is set.
  */
+/**
+ * Serialized against other writes to the same vault (see write-lock.ts):
+ * this operation reads before it writes, and spans several notes.
+ */
 export async function moveFile(
+  ...args: Parameters<typeof moveFileImpl>
+): ReturnType<typeof moveFileImpl> {
+  return withVaultWriteLock(args[0], () => moveFileImpl(...args));
+}
+
+async function moveFileImpl(
   vaultPath: string,
   { from, to, overwrite = false }: MoveFileParams
 ): Promise<{ from: string; to: string; overwritten: boolean }> {
@@ -619,27 +670,31 @@ export async function patchNote(
   if (typeof replace !== "string") {
     throw new Error("replace must be a string");
   }
-  const resolved = await resolveWriteTargetAsync(vaultPath, path);
-  const raw = await readRaw(vaultPath, resolved);
-  const parts = raw.split(find);
-  const occurrences = parts.length - 1;
-  if (occurrences === 0) {
-    throw new Error(`Text to patch was not found in ${resolved}`);
-  }
-  // Fail loud on a non-unique match rather than silently patching the first: an
-  // ambiguous find is the write most likely to hit the wrong text.
-  if (!all && occurrences > 1) {
-    throw new Error(
-      `Text to patch occurs ${occurrences} times in ${resolved}; ` +
-        `set all:true to replace all, or make find unique`
-    );
-  }
+  // Read, match and write as one critical section (see write-lock.ts): the
+  // occurrence counts above are only meaningful against the text we then write.
+  return withVaultWriteLock(vaultPath, async () => {
+    const resolved = await resolveWriteTargetAsync(vaultPath, path);
+    const raw = await readRaw(vaultPath, resolved);
+    const parts = raw.split(find);
+    const occurrences = parts.length - 1;
+    if (occurrences === 0) {
+      throw new Error(`Text to patch was not found in ${resolved}`);
+    }
+    // Fail loud on a non-unique match rather than silently patching the first: an
+    // ambiguous find is the write most likely to hit the wrong text.
+    if (!all && occurrences > 1) {
+      throw new Error(
+        `Text to patch occurs ${occurrences} times in ${resolved}; ` +
+          `set all:true to replace all, or make find unique`
+      );
+    }
 
-  const replacements = all ? occurrences : 1;
-  const next = parts.join(replace);
-  await commitWrite(vaultPath, resolved, next, `patch_note: ${resolved}`);
-  const health = await linkHealthAfterWrite(vaultPath, resolved, next);
-  return { path: resolved, replacements, ...health };
+    const replacements = all ? occurrences : 1;
+    const next = parts.join(replace);
+    await commitWrite(vaultPath, resolved, next, `patch_note: ${resolved}`);
+    const health = await linkHealthAfterWrite(vaultPath, resolved, next);
+    return { path: resolved, replacements, ...health };
+  });
 }
 
 export interface RenameSectionParams {
@@ -657,7 +712,17 @@ export interface RenameSectionParams {
  * (literal text, not Obsidian slugs); block refs (`#^id`) are never rewritten.
  * Fails loud on a missing or ambiguous `from` heading.
  */
+/**
+ * Serialized against other writes to the same vault (see write-lock.ts):
+ * this operation reads before it writes, and spans several notes.
+ */
 export async function renameSectionInVault(
+  ...args: Parameters<typeof renameSectionInVaultImpl>
+): ReturnType<typeof renameSectionInVaultImpl> {
+  return withVaultWriteLock(args[0], () => renameSectionInVaultImpl(...args));
+}
+
+async function renameSectionInVaultImpl(
   vaultPath: string,
   { path, from, to, update_anchors = true }: RenameSectionParams
 ): Promise<{
