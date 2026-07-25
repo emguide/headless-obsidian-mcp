@@ -352,12 +352,27 @@ export function firstHeading(content: string): string | undefined {
 }
 
 /**
+ * Thrown by {@link resolveSectionIndex} when a bare heading matches more than
+ * one heading in the note. Distinguished by type (not message text) from the
+ * plain not-found case, so callers like `appendToSection`'s create-fallback
+ * can tell "missing, safe to create" apart from "ambiguous, must not create"
+ * without depending on error-message wording.
+ */
+export class SectionAmbiguousError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SectionAmbiguousError";
+  }
+}
+
+/**
  * Resolve a section reference to a single heading index, fail-loud. `section`
  * is a bare heading (`Log`) or a `" > "`-joined heading-path (`Projects > Log`),
  * detected by the presence of `>`. A bare heading that matches more than one
- * heading throws an ambiguity error listing the candidate full paths; a
- * heading-path matches the fully-qualified path exactly. Throws when nothing
- * matches (`notFoundSuffix` is appended to that message, e.g. ` in <note>`).
+ * heading throws a {@link SectionAmbiguousError} listing the candidate full
+ * paths; a heading-path matches the fully-qualified path exactly. Throws a
+ * plain `Error` when nothing matches (`notFoundSuffix` is appended to that
+ * message, e.g. ` in <note>`).
  *
  * The single shared matcher for both read_section (section.ts) and the write
  * side's section edits (note-document.ts), so the two never disagree on which
@@ -388,7 +403,9 @@ export function resolveSectionIndex(
   }
   if (matches.length > 1) {
     const candidates = matches.map((m) => m.path).join(", ");
-    throw new Error(`Ambiguous section "${section}"; candidates: ${candidates}`);
+    throw new SectionAmbiguousError(
+      `Ambiguous section "${section}"; candidates: ${candidates}`
+    );
   }
   return matches[0].i;
 }

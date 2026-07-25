@@ -673,7 +673,7 @@ export async function renameSectionInVault(
   // Rename the local heading (fails loud before any snapshot on missing/ambiguous).
   const raw = await readRaw(vaultPath, path);
   const doc = NoteDocument.parse(raw);
-  const oldHeading = renameSection(doc, from, to);
+  const oldHeading = renameSection(doc, from, to, path);
 
   // Rewrite the renamed note's OWN self-reference anchors — both the bare
   // self-link form (`[[#Old Heading]]`, empty target) and the full
@@ -1018,7 +1018,7 @@ export async function addNoteSection(
   const { content: written } = await editNote(
     vaultPath,
     path,
-    (doc) => addSection(doc, heading, content ?? "", level ?? 2, after),
+    (doc) => addSection(doc, heading, content ?? "", level ?? 2, after, path),
     `add_section: ${canonicalName(path)}`
   );
   const health = await linkHealthAfterWrite(vaultPath, path, written);
@@ -1039,7 +1039,7 @@ export async function appendNoteSection(
   const { content: written } = await editNote(
     vaultPath,
     path,
-    (doc) => appendToSection(doc, heading, content ?? "", create ?? false),
+    (doc) => appendToSection(doc, heading, content ?? "", create ?? false, path),
     `append_to_section: ${canonicalName(path)}`
   );
   const health = await linkHealthAfterWrite(vaultPath, path, written);
@@ -1053,7 +1053,7 @@ export async function replaceNoteSection(
   const { content: written } = await editNote(
     vaultPath,
     path,
-    (doc) => replaceSection(doc, heading, content ?? ""),
+    (doc) => replaceSection(doc, heading, content ?? "", path),
     `replace_section: ${canonicalName(path)}`
   );
   const health = await linkHealthAfterWrite(vaultPath, path, written);
