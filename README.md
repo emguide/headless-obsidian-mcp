@@ -446,6 +446,8 @@ The structured checkbox-task surface — every `- [ ]` task in the vault as pars
 
 Aggregate every tag across the vault, unifying inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`.
 
+Inline `#tags` inside fenced code blocks are ignored, matching Obsidian and the fence-aware heading/task/wikilink parsers — a note that merely *documents* tag syntax creates no phantom vault tags. Every tag consumer (`list_tags`, `find_by_tag`, `read_notes`' `tags`, the shared `tags` filter) shares that extraction, so they never disagree.
+
 **Parameters:**
 - `offset` (number, optional): Rows to skip before the window, for pagination (default 0)
 

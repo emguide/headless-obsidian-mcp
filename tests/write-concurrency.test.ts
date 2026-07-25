@@ -10,6 +10,7 @@ import {
   addTag,
   setNoteFrontmatter,
   patchNote,
+  setTaskState,
 } from "../src/tools/write.js";
 import { withVaultWriteLock } from "../src/tools/write-lock.js";
 import { getFrontmatter } from "../src/tools/frontmatter.js";
@@ -152,4 +153,35 @@ test("different vaults do not block each other", async () => {
     });
   });
   assert.equal(twoRan, true);
+});
+
+test("set_task_state does not lose a concurrent append", async () => {
+  const dir = await vault();
+  await writeFile(join(dir, "tasks.md"), "- [ ] ship it\n", "utf-8");
+
+  // set_task_state rewrites one marker but writes the WHOLE note back, so
+  // without the vault lock whichever call landed second silently discarded the
+  // other's edit — while both still reported success.
+  await Promise.all([
+    setTaskState(dir, { path: "tasks", text: "ship it", status: "done" }),
+    appendNote(dir, { path: "tasks", content: "APPENDED" }),
+  ]);
+
+  const raw = await readFile(join(dir, "tasks.md"), "utf-8");
+  assert.match(raw, /- \[x\] ship it/, "the task state change was lost");
+  assert.match(raw, /APPENDED/, "the append was lost");
+});
+
+test("concurrent set_task_state calls on one note both land", async () => {
+  const dir = await vault();
+  await writeFile(join(dir, "tasks.md"), "- [ ] one\n- [ ] two\n", "utf-8");
+
+  await Promise.all([
+    setTaskState(dir, { path: "tasks", text: "one", status: "done" }),
+    setTaskState(dir, { path: "tasks", text: "two", status: "cancelled" }),
+  ]);
+
+  const raw = await readFile(join(dir, "tasks.md"), "utf-8");
+  assert.match(raw, /- \[x\] one/);
+  assert.match(raw, /- \[-\] two/);
 });
