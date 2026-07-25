@@ -22,7 +22,8 @@ jobs:
       # Report every version's result rather than hiding the rest on one failure.
       fail-fast: false
       matrix:
-        # 20 is what mise.toml pins; 22 guards against forward-compat drift.
+        # 20 is the declared engines.node floor (and what mise.toml pins);
+        # 22 guards against forward-compat drift.
         node: ['20', '22']
 
     steps:

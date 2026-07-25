@@ -760,7 +760,7 @@ it truthy now warns and maps to `OBSIDIAN_GIT_SYNC=commit`. An explicit
 
 ## Dependencies
 
-- Node.js runtime (18+)
+- Node.js runtime (20+)
 - ripgrep (`rg`) command-line tool
 - git (only required when `OBSIDIAN_GIT_SYNC` is set to a mode other than `off`)
 - @modelcontextprotocol/sdk
@@ -768,6 +768,18 @@ it truthy now warns and maps to `OBSIDIAN_GIT_SYNC=commit`. An explicit
 - commander (query CLI argument parsing)
 - dayjs (Moment-compatible date formatting for template placeholders)
 - Node's built-in `node:path`, `node:fs/promises`, and `node:child_process`
+
+### Dependency overrides
+
+`package.json` pins `@hono/node-server` to `^2.0.5` via `overrides`. The MCP SDK
+depends on `^1.19.9`, whose range cannot reach the fix for GHSA-frvp-7c67-39w9
+(a `serve-static` path traversal, Windows-only) — that landed in `2.0.5`, a major
+bump outside the SDK's caret. The SDK's only use of the package is
+`getRequestListener`, whose signature and `overrideGlobalObjects` option are
+unchanged in 2.x, and it is reached solely from `StreamableHTTPServerTransport`,
+which this stdio server never loads. Verified by a live HTTP round trip through
+that transport (SSE streaming included) plus the full suite. Drop the override
+once the SDK ships its own 2.x bump.
 
 ## Development
 
@@ -785,8 +797,9 @@ shells out to the real `rg` binary and its tests exercise it rather than a stub
 — and configures a git identity, since the `OBSIDIAN_GIT_SYNC` tests init real
 repositories, diverge them, and resolve genuine merge conflicts.
 
-`package.json` declares `engines.node >= 18`, but CI covers 20 and 22 only; add
-18 to the matrix or raise the floor if that gap matters.
+`package.json` declares `engines.node >= 20`, matching the matrix's lower bound.
+Node 18 reached end-of-life in April 2025 and is neither supported nor tested;
+raising the matrix floor and the declared floor together keeps the two honest.
 
 ### Vault index
 
