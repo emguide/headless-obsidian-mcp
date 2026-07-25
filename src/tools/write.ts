@@ -11,7 +11,7 @@ import {
   statusToMarker,
   WRITABLE_TASK_STATUSES,
 } from "./vault.js";
-import { commitAfterWrite, pushAfterWrite, isGitRepo } from "./git-sync.js";
+import { commitAfterWrite, commitAndSync, isGitRepo } from "./git-sync.js";
 import { resolveGitSyncMode, GIT_SYNC_ENV } from "./env-flags.js";
 import { linkHealthOf, LinkHealth } from "./link-health.js";
 import { backlinkContext } from "./link-context.js";
@@ -112,11 +112,17 @@ export async function assertSyncableBeforeWrite(vaultPath: string): Promise<void
  * The post-write funnel: commit the change with a tool-derived message, then
  * (every-write mode only) pull+push. Timer mode commits only — the background
  * timer performs the remote sync.
+ *
+ * In every-write mode the commit and the pull/push run under a SINGLE held git
+ * lock via {@link commitAndSync}, so a background timer tick (or a concurrent
+ * write) can never slip between this write's commit and its push. Timer mode
+ * takes the lock only for the commit (the timer owns remote sync).
  */
 export async function afterWrite(vaultPath: string, message: string): Promise<void> {
-  await commitAfterWrite(vaultPath, message);
   if (resolveGitSyncMode().mode === "every-write") {
-    await pushAfterWrite(vaultPath);
+    await commitAndSync(vaultPath, message);
+  } else {
+    await commitAfterWrite(vaultPath, message);
   }
 }
 

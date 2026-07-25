@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, readdir, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import {
   syncOnce,
   isConflictCopy,
@@ -12,13 +12,19 @@ import {
   conflictCopyName,
 } from "../src/tools/git-sync.js";
 
+/** Real high-byte bytes (a PNG signature prefix plus bytes ≥0x80): a UTF-8
+ * round-trip would corrupt every one of these to U+FFFD. */
+const BINARY_LOCAL = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0xc0, 0x80]);
+const BINARY_REMOTE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x01, 0x02, 0x03, 0x04]);
+const BINARY_BASE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x00]);
+
 const execFileAsync = promisify(execFile);
 async function g(dir: string, ...args: string[]) {
   await execFileAsync("git", ["-C", dir, ...args]);
 }
 
 /** Remote + two clones that will diverge on the same file. */
-async function makeDivergingClones(file: string, base0: string) {
+async function makeDivergingClones(file: string, base0: string | Buffer) {
   const base = await mkdtemp(join(tmpdir(), "gitsync-conflict-"));
   const remote = join(base, "remote.git");
   const a = join(base, "a");
@@ -27,6 +33,7 @@ async function makeDivergingClones(file: string, base0: string) {
   await execFileAsync("git", ["clone", "-q", remote, a]);
   await g(a, "config", "user.email", "a@x.com");
   await g(a, "config", "user.name", "A");
+  await mkdir(dirname(join(a, file)), { recursive: true });
   await writeFile(join(a, file), base0);
   await g(a, "add", "-A");
   await g(a, "commit", "-q", "-m", "base");
@@ -175,4 +182,97 @@ test("delete/modify conflict: local deletes, remote modifies", async (t) => {
   // Working tree clean.
   const status = (await execFileAsync("git", ["-C", fx.a, "status", "--porcelain"])).stdout.trim();
   assert.equal(status, "", "tree clean after delete/modify resolution");
+});
+
+test("binary conflict: local bytes preserved verbatim, copy keeps real extension", async (t) => {
+  process.env.OBSIDIAN_GIT_SYNC = "every-write";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  const fx = await makeDivergingClones("assets/image.png", BINARY_BASE);
+  t.after(fx.cleanup);
+
+  // Remote changes the binary and pushes.
+  await writeFile(join(fx.b, "assets/image.png"), BINARY_REMOTE);
+  await g(fx.b, "add", "-A");
+  await g(fx.b, "commit", "-q", "-m", "remote binary edit");
+  await g(fx.b, "push", "-q", "origin", "HEAD");
+
+  // Local changes the same binary with real high bytes, commits, then syncs.
+  await writeFile(join(fx.a, "assets/image.png"), BINARY_LOCAL);
+  await g(fx.a, "add", "-A");
+  await g(fx.a, "commit", "-q", "-m", "local binary edit");
+  const result = await syncOnce(fx.a, { now: new Date(Date.UTC(2026, 6, 24, 14, 30, 22)) });
+
+  // Exactly one conflict, reported with the real extension (NOT .md).
+  assert.equal(result.conflicts.length, 1);
+  const reported = result.conflicts[0];
+  assert.match(reported, /\.png$/, `reported copy keeps .png extension: ${reported}`);
+  assert.doesNotMatch(reported, /\.md$/);
+
+  // Canonical file holds the REMOTE bytes.
+  const canonical = await readFile(join(fx.a, "assets/image.png"));
+  assert.ok(canonical.equals(BINARY_REMOTE), "canonical = remote bytes");
+
+  // The conflict copy exists on disk with the .png extension and is byte-for-byte
+  // identical to the LOCAL bytes — no U+FFFD corruption of the high bytes.
+  const copyPath = join(fx.a, reported);
+  assert.match(copyPath, /image \(conflicted 2026-07-24 143022\)\.png$/);
+  const copyBytes = await readFile(copyPath);
+  assert.ok(
+    copyBytes.equals(BINARY_LOCAL),
+    `conflict copy byte-for-byte identical to local; got ${copyBytes.toString("hex")}`
+  );
+  // Guard specifically against the U+FFFD (0xEF 0xBF 0xBD) corruption signature.
+  assert.equal(copyBytes.includes(Buffer.from([0xef, 0xbf, 0xbd])), false, "no U+FFFD bytes");
+
+  // No stray .md copy was created.
+  const assetFiles = await readdir(join(fx.a, "assets"));
+  assert.equal(
+    assetFiles.some((f) => f.endsWith(".md")),
+    false,
+    `no .md copy in assets/: ${assetFiles.join(", ")}`
+  );
+
+  // Working tree clean and converged.
+  const status = (await execFileAsync("git", ["-C", fx.a, "status", "--porcelain"])).stdout.trim();
+  assert.equal(status, "", "tree clean after binary conflict resolution");
+});
+
+test("unclassified conflict: rename/rename resolves without wedging the repo", async (t) => {
+  process.env.OBSIDIAN_GIT_SYNC = "every-write";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  // Base has orig.md with enough lines that git's rename detection pairs the
+  // renames on BOTH sides. Each side `git mv`s orig.md to a DIFFERENT name
+  // (identical content), which git reports as a rename/rename conflict. That
+  // leaves the base path `orig.md` at stage 1 ONLY (deleted-by-both) — a combo
+  // that matches NONE of the three stage-2/3 branches, so it exercises the
+  // fallback branch. Without the fallback the still-unmerged `orig.md` would
+  // make `git commit --no-edit` fail and wedge the repo.
+  const fx = await makeDivergingClones("orig.md", "line1\nline2\nline3\nline4\nline5\n");
+  t.after(fx.cleanup);
+
+  // Remote renames orig.md -> remote-name.md and pushes.
+  await g(fx.b, "mv", "orig.md", "remote-name.md");
+  await g(fx.b, "commit", "-q", "-m", "remote rename");
+  await g(fx.b, "push", "-q", "origin", "HEAD");
+
+  // Local renames orig.md -> local-name.md and commits.
+  await g(fx.a, "mv", "orig.md", "local-name.md");
+  await g(fx.a, "commit", "-q", "-m", "local rename");
+
+  // Must NOT throw and must leave the tree clean (fallback resolves every path).
+  const result = await syncOnce(fx.a, { now: new Date(Date.UTC(2026, 6, 24, 14, 30, 22)) });
+  assert.ok(result.pulled, "pull/merge completed");
+
+  const status = (await execFileAsync("git", ["-C", fx.a, "status", "--porcelain"])).stdout.trim();
+  assert.equal(status, "", `tree clean after rename/rename resolution: ${status}`);
+  // No path left unmerged (belt-and-suspenders on the fallback invariant).
+  const unmerged = (
+    await execFileAsync("git", ["-C", fx.a, "diff", "--name-only", "--diff-filter=U"])
+  ).stdout.trim();
+  assert.equal(unmerged, "", "no unmerged paths remain");
+  // The remote-side rename target survives with the shared content.
+  assert.equal(
+    await readFile(join(fx.a, "remote-name.md"), "utf-8"),
+    "line1\nline2\nline3\nline4\nline5\n"
+  );
 });
