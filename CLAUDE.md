@@ -760,7 +760,7 @@ it truthy now warns and maps to `OBSIDIAN_GIT_SYNC=commit`. An explicit
 
 ## Dependencies
 
-- Node.js runtime (18+)
+- Node.js runtime (20+)
 - ripgrep (`rg`) command-line tool
 - git (only required when `OBSIDIAN_GIT_SYNC` is set to a mode other than `off`)
 - @modelcontextprotocol/sdk
@@ -785,8 +785,9 @@ shells out to the real `rg` binary and its tests exercise it rather than a stub
 — and configures a git identity, since the `OBSIDIAN_GIT_SYNC` tests init real
 repositories, diverge them, and resolve genuine merge conflicts.
 
-`package.json` declares `engines.node >= 18`, but CI covers 20 and 22 only; add
-18 to the matrix or raise the floor if that gap matters.
+`package.json` declares `engines.node >= 20`, matching the matrix's lower bound.
+Node 18 reached end-of-life in April 2025 and is neither supported nor tested;
+raising the matrix floor and the declared floor together keeps the two honest.
 
 ### Vault index
 

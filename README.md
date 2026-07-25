@@ -30,7 +30,7 @@ A headless MCP (Model Context Protocol) server for interacting with Obsidian vau
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 18 or newer
+- [Node.js](https://nodejs.org/) 20 or newer (18 is end-of-life and not tested)
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg` command)
 - An Obsidian vault with markdown files
 
