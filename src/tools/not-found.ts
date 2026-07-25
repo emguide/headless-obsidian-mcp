@@ -38,6 +38,49 @@ export function resolveNoteName(index: VaultIndex, notePath: string): string {
 }
 
 /**
+ * Resolve a WRITE target's name to its canonical path the way readers resolve
+ * (bare basename, wrong-case), but fail loud on an ambiguous bare name rather
+ * than silently mutating the shortest-path note. Returns the input's canonical
+ * form unchanged when the name does not resolve, so the caller's existing
+ * literal-path not-found flow still fires (and create paths stay literal).
+ */
+export function resolveWriteTarget(index: VaultIndex, notePath: string): string {
+  const canon = canonical(notePath);
+  const res = index.resolveForWrite(canon);
+  if (res.kind === "resolved") return res.path;
+  if (res.kind === "ambiguous") {
+    throw new Error(
+      `Ambiguous note name: ${canon}. Candidates: ${res.candidates.join(", ")}. ` +
+        `Pass the full path.`
+    );
+  }
+  return canon; // unresolved: fall through to the literal path
+}
+
+/**
+ * Async convenience for write sites that do not already hold an index (the
+ * write funnel). Mirrors {@link noteNotFoundError}: a failed index build is NOT
+ * masked into an error — the name degrades to its canonical form and the
+ * caller's own not-found flow decides. An AMBIGUOUS name, however, still throws
+ * (it is a caller error worth surfacing, not an index hiccup).
+ */
+export async function resolveWriteTargetAsync(
+  vaultPath: string,
+  notePath: string
+): Promise<string> {
+  try {
+    const index = await getIndex(vaultPath);
+    return resolveWriteTarget(index, notePath);
+  } catch (err) {
+    // Re-throw a genuine ambiguity error; swallow index-build failures only.
+    if (err instanceof Error && err.message.startsWith("Ambiguous note name:")) {
+      throw err;
+    }
+    return canonical(notePath);
+  }
+}
+
+/**
  * Up to {@link MAX_SUGGESTIONS} candidate paths for a note path that failed to
  * resolve. The whole input is tried as a name first (catches a title or alias
  * passed as the "path"); when the input carries a folder prefix, its last
