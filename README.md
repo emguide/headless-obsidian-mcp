@@ -958,6 +958,15 @@ message listing the valid vocabulary (or a migration hint — use
 policy gates the MCP server; the query CLI is the operator's own tool and is
 not affected by it.
 
+**Classification integrity.** Two invariants are machine-enforced, because a
+silent failure of either would expose a tool the operator meant to gate. The
+server refuses to start if a defined tool belongs to no group, or if a group
+names a tool the server doesn't define. And a test derives, from the source,
+which request handlers actually reach a vault-mutating function, then asserts
+that set equals the declared write tools exactly — so a new tool that changes
+the vault but is left off that list fails CI rather than being classified
+read-only and exposed under the default read-only policy.
+
 ### Git sync (`OBSIDIAN_GIT_SYNC`)
 
 `OBSIDIAN_GIT_SYNC` selects one of four modes:
