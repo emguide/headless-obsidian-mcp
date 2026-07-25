@@ -182,6 +182,74 @@ export interface ListFoldersParams {
   offset?: number;
 }
 
+/**
+ * Shared by every folder-write result: a non-null message means the operation
+ * ran with OBSIDIAN_GIT_SYNC off, so nothing was snapshotted and it cannot be
+ * rolled back. Report-only — the operation still happened (pass `require_git`
+ * to refuse instead).
+ */
+export interface GitPostureWarning {
+  git_warning: string | null;
+}
+
+/** Escalate the git warning into a pre-write refusal. Default false. */
+export interface RequireGit {
+  require_git?: boolean;
+}
+
+export interface CreateFolderParams extends RequireGit {
+  /** Folder path relative to the vault root. Parents are created as needed. */
+  path: string;
+}
+
+export interface CreateFolderResult extends GitPostureWarning {
+  path: string;
+  created: boolean;
+}
+
+export interface MoveFolderParams extends RequireGit {
+  /** Existing folder path relative to the vault root. */
+  from: string;
+  /** Destination folder path; must not already exist. */
+  to: string;
+  /** Rewrite folder-qualified wikilinks pointing into the folder. Default true. */
+  update_links?: boolean;
+}
+
+export interface MoveFolderResult extends GitPostureWarning {
+  from: string;
+  to: string;
+  /** Notes carried along by the move. */
+  moved_notes: number;
+  /** Non-markdown files carried along by the move. */
+  moved_files: number;
+  /** Notes whose wikilinks were rewritten. */
+  updated_notes: number;
+  /** Individual wikilinks rewritten. */
+  updated_links: number;
+}
+
+export interface DeleteFolderParams extends RequireGit {
+  /** Folder path relative to the vault root. */
+  path: string;
+  /** Required to delete a folder that is not empty. Default false. */
+  recursive?: boolean;
+  /** Unlink outright instead of moving the subtree to .trash. Default false. */
+  permanent?: boolean;
+}
+
+export interface DeleteFolderResult extends GitPostureWarning {
+  path: string;
+  deleted: boolean;
+  trashed: boolean;
+  /** Where the subtree landed under .trash (absent when permanent). */
+  trash_path?: string;
+  deleted_notes: number;
+  deleted_files: number;
+  /** Notes OUTSIDE the folder whose wikilinks into it are now broken. */
+  dangled_backlinks: string[];
+}
+
 export interface LinksResult {
   /** The note these links were computed for (relative path, no .md). */
   note: string;

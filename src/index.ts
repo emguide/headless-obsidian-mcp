@@ -26,6 +26,7 @@ import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
 import { listFolders } from "./tools/folders.js";
+import { createFolder, moveFolder, deleteFolder } from "./tools/folder-ops.js";
 import { listTemplates, applyTemplate, insertTemplate } from "./tools/templates.js";
 import { resolveServerConfig, selectConfigSection } from "./tools/config.js";
 import {
@@ -83,6 +84,9 @@ import {
   ListVaultIssuesParams,
   ListFilesParams,
   ListFoldersParams,
+  CreateFolderParams,
+  MoveFolderParams,
+  DeleteFolderParams,
   ListTasksParams,
   SetTaskStateParams,
 } from "./types.js";
@@ -145,6 +149,7 @@ const server = new Server(
       "Link-context convention: get_links, delete_note, and list_vault_issues (kinds unresolved_links/broken_anchors) accept opt-in include_context: true, decorating each reported link row with context — the source line(s) containing that link, as { line, text } pairs. line is 1-based and body-relative (frontmatter stripped, the same convention as get_outline/list_tasks); text is the line verbatim, so it can be fed straight into patch_note's find. Context is computed by call-time file reads (bounded by the returned window on list_vault_issues), so leave the flag off when you only need the paths.\n\n" +
       "Not-found convention: a missing-note error may append up to 3 'Did you mean' candidate paths, matched by resolve_note's exact semantics (case-insensitive title/alias/basename — never fuzzy). Suggestions are advisory: the tool never substitutes a candidate for the requested path.\n\n" +
       "Git-sync convention: when OBSIDIAN_GIT_SYNC is enabled (commit | every-write | timer), every write is committed with a tool-derived message; every-write also pulls+pushes per write and timer syncs on a background interval. A pull conflict never blocks or discards — the local version is kept aside as a '<note> (conflicted YYYY-MM-DD HHMMSS)' copy and remote is taken as canonical. Discover unreconciled copies via list_vault_issues kind:'conflicts' (also counted by get_vault_stats.conflict_notes); the active mode and last sync state are in get_config's sync section.\n\n" +
+      "Folder-write convention: create_folder, move_folder, and delete_folder each return git_warning alongside their normal fields — a non-null message means OBSIDIAN_GIT_SYNC is off, so the operation was not snapshotted and cannot be rolled back. It is report-only (the operation still ran); pass require_git: true to refuse the operation instead, before any filesystem change. These three carry the warning because one call can move or delete an arbitrary subtree, unlike the note-level writes whose blast radius is a named path.\n\n" +
       "Tool exposure is operator-configured (OBSIDIAN_TOOLS): this server may expose a subset of the full tool surface. get_config's tools section reports the active policy and the exposed/excluded tool names.",
   }
 );
@@ -757,6 +762,46 @@ const TOOL_DEFINITIONS = [
         }
       },
       {
+        name: "create_folder",
+        description: "Create a folder (and any missing parents). Fails loud if anything already exists at the path. Two limits follow from folders being implicit: the new folder holds no notes, so list_folders will not show it until one lands there, and git does not track empty directories, so this commits nothing even with sync enabled. Returns { path, created, git_warning }.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Folder path relative to the vault root" },
+            require_git: { type: "boolean", description: "Refuse the operation (before any filesystem change) when OBSIDIAN_GIT_SYNC is off, instead of proceeding with a warning (default: false)" }
+          },
+          required: ["path"]
+        }
+      },
+      {
+        name: "move_folder",
+        description: "Move or rename a folder and everything under it, rewriting folder-qualified wikilinks ([[projects/alpha]]) that pointed into it — the folder-level analogue of move_note. Bare [[basename]] links are left alone: a folder move preserves every basename. Never merges or overwrites: an existing destination is refused. Returns { from, to, moved_notes, moved_files, updated_notes, updated_links, git_warning }.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            from: { type: "string", description: "Existing folder path relative to the vault root" },
+            to: { type: "string", description: "Destination folder path; must not already exist" },
+            update_links: { type: "boolean", description: "Rewrite folder-qualified wikilinks pointing into the folder (default: true)" },
+            require_git: { type: "boolean", description: "Refuse the operation (before any filesystem change) when OBSIDIAN_GIT_SYNC is off, instead of proceeding with a warning (default: false)" }
+          },
+          required: ["from", "to"]
+        }
+      },
+      {
+        name: "delete_folder",
+        description: "Delete a folder and everything under it. Trash-safe by default (the subtree moves to .trash, recoverable); pass permanent:true to unlink. A non-empty folder is REFUSED unless recursive:true — this is the only tool whose blast radius is not bounded by an explicit list of paths. Returns { path, deleted, trashed, trash_path?, deleted_notes, deleted_files, dangled_backlinks, git_warning } where dangled_backlinks lists notes OUTSIDE the folder whose wikilinks into it are now broken (report-only; they are not modified).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Folder path relative to the vault root" },
+            recursive: { type: "boolean", description: "Required to delete a folder that is not empty (default: false)" },
+            permanent: { type: "boolean", description: "Permanently delete instead of moving the subtree to .trash (default: false)" },
+            require_git: { type: "boolean", description: "Refuse the operation (before any filesystem change) when OBSIDIAN_GIT_SYNC is off, instead of proceeding with a warning (default: false)" }
+          },
+          required: ["path"]
+        }
+      },
+      {
         name: "patch_note",
         description: "Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex). Replaces the first occurrence by default, or every occurrence with all:true. Errors if the text to find is not present. Returns { path, replacements } plus unresolved_links and broken_anchors for the resulting note (report-only; see the link-integrity convention).",
         inputSchema: {
@@ -1226,6 +1271,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "move_file": {
         const result = await moveFile(VAULT_PATH, (args ?? {}) as unknown as MoveFileParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "create_folder": {
+        const result = await createFolder(VAULT_PATH, (args ?? {}) as unknown as CreateFolderParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "move_folder": {
+        const result = await moveFolder(VAULT_PATH, (args ?? {}) as unknown as MoveFolderParams);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+
+      case "delete_folder": {
+        const result = await deleteFolder(VAULT_PATH, (args ?? {}) as unknown as DeleteFolderParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

@@ -18,8 +18,9 @@ export interface VaultFile {
 }
 
 // Directories that are part of Obsidian's machinery or version control rather
-// than user notes. These are skipped entirely when walking the vault.
-const IGNORED_DIRS = new Set([
+// than user notes. These are skipped entirely when walking the vault, and the
+// folder-write tools refuse to create, move, or delete them (see folder-ops.ts).
+export const IGNORED_DIRS: ReadonlySet<string> = new Set([
   ".obsidian",
   ".trash",
   ".git",

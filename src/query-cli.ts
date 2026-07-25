@@ -20,6 +20,7 @@ import { getVaultStats } from "./tools/stats.js";
 import { listVaultIssues } from "./tools/vault-issues.js";
 import { listFiles } from "./tools/files.js";
 import { listFolders } from "./tools/folders.js";
+import { createFolder, moveFolder, deleteFolder } from "./tools/folder-ops.js";
 import { listTemplates, applyTemplate, insertTemplate } from "./tools/templates.js";
 import { resolveServerConfig, selectConfigSection } from "./tools/config.js";
 import { listTasks } from "./tools/tasks.js";
@@ -124,6 +125,12 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
       result = await moveNote(VAULT_PATH!, args);
     } else if (toolName === "move_file") {
       result = await moveFile(VAULT_PATH!, args);
+    } else if (toolName === "create_folder") {
+      result = await createFolder(VAULT_PATH!, args);
+    } else if (toolName === "move_folder") {
+      result = await moveFolder(VAULT_PATH!, args);
+    } else if (toolName === "delete_folder") {
+      result = await deleteFolder(VAULT_PATH!, args);
     } else if (toolName === "patch_note") {
       result = await patchNote(VAULT_PATH!, args);
     } else if (toolName === "rename_section") {
@@ -702,6 +709,53 @@ program
     const verbose = command.parent?.opts().verbose ?? false;
     const args = { from, to, ...(options.overwrite && { overwrite: true }) };
     await queryTool("move_file", args, verbose);
+  });
+
+program
+  .command("create-folder")
+  .description("Create a folder (invisible to `folders` until it holds a note)")
+  .argument("<path>", "Folder path relative to the vault root")
+  .option("-g, --require-git", "Refuse if OBSIDIAN_GIT_SYNC is off, instead of warning")
+  .action(async (path: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = { path, ...(options.requireGit && { require_git: true }) };
+    await queryTool("create_folder", args, verbose);
+  });
+
+program
+  .command("move-folder")
+  .description("Move or rename a folder, updating folder-qualified wikilinks into it")
+  .argument("<from>", "Existing folder path")
+  .argument("<to>", "Destination folder path (must not exist)")
+  .option("--no-update-links", "Leave wikilinks pointing into the folder untouched")
+  .option("-g, --require-git", "Refuse if OBSIDIAN_GIT_SYNC is off, instead of warning")
+  .action(async (from: string, to: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      from,
+      to,
+      ...(options.updateLinks === false && { update_links: false }),
+      ...(options.requireGit && { require_git: true }),
+    };
+    await queryTool("move_folder", args, verbose);
+  });
+
+program
+  .command("delete-folder")
+  .description("Delete a folder (trash-safe by default; --recursive if not empty)")
+  .argument("<path>", "Folder path relative to the vault root")
+  .option("-r, --recursive", "Required to delete a folder that is not empty")
+  .option("-p, --permanent", "Permanently delete instead of moving to .trash")
+  .option("-g, --require-git", "Refuse if OBSIDIAN_GIT_SYNC is off, instead of warning")
+  .action(async (path: string, options: any, command: Command) => {
+    const verbose = command.parent?.opts().verbose ?? false;
+    const args = {
+      path,
+      ...(options.recursive && { recursive: true }),
+      ...(options.permanent && { permanent: true }),
+      ...(options.requireGit && { require_git: true }),
+    };
+    await queryTool("delete_folder", args, verbose);
   });
 
 program

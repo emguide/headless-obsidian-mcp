@@ -19,8 +19,8 @@ afterEach(() => {
 
 // --- taxonomy ---
 
-test("taxonomy covers exactly the 45 gated tools; get_config is groupless", () => {
-  assert.equal(GATED_TOOL_NAMES.size, 45);
+test("taxonomy covers exactly the 48 gated tools; get_config is groupless", () => {
+  assert.equal(GATED_TOOL_NAMES.size, 48);
   assert.ok(!GATED_TOOL_NAMES.has("get_config"));
   // every write tool is classified
   for (const name of WRITE_TOOL_NAMES) {
@@ -51,7 +51,7 @@ test("taxonomy matches the spec, tool by tool", () => {
     // templates
     "list_templates", "apply_template", "insert_template",
     // files
-    "list_files", "list_folders", "move_file",
+    "list_files", "list_folders", "move_file", "create_folder", "move_folder", "delete_folder",
     // vault
     "get_vault_stats", "list_vault_issues",
     // bulk
@@ -99,14 +99,21 @@ test("every dispatch handler that mutates the vault is declared a write tool", (
   const mutators = new Set(writeExports.filter((n) => !NON_MUTATING.includes(n)));
 
   // Wrapper modules: an exported function calling a write.ts mutator is one too.
-  for (const rel of ["../src/tools/bulk.ts", "../src/tools/templates.ts"]) {
+  for (const rel of [
+    "../src/tools/bulk.ts",
+    "../src/tools/templates.ts",
+    "../src/tools/folder-ops.ts",
+  ]) {
     for (const [name, body] of bodiesOf(read(rel))) {
       if ([...mutators].some((fn) => calls(body, fn))) mutators.add(name);
     }
   }
   // Anchors: if detection silently stops working, fail here rather than by
   // "discovering" that nothing mutates.
-  for (const anchor of ["writeNote", "bulkEdit", "applyTemplate", "insertTemplate"]) {
+  for (const anchor of [
+    "writeNote", "bulkEdit", "applyTemplate", "insertTemplate",
+    "createFolder", "moveFolder", "deleteFolder",
+  ]) {
     assert.ok(mutators.has(anchor), `expected ${anchor} to be detected as a mutator`);
   }
 
@@ -146,12 +153,12 @@ test("unset policy (null) defaults to reads + get_config", () => {
 
 test("'all' exposes every tool", () => {
   const exposed = evaluatePolicy("all");
-  assert.equal(exposed.size, 46);
+  assert.equal(exposed.size, 49);
 });
 
 test("'writes' exposes exactly the write tools plus get_config", () => {
   const exposed = evaluatePolicy("writes");
-  assert.equal(exposed.size, 22); // 21 writes + get_config
+  assert.equal(exposed.size, 25); // 24 writes + get_config
   for (const name of WRITE_TOOL_NAMES) assert.ok(exposed.has(name));
 });
 
@@ -241,7 +248,7 @@ test("resolveToolPolicy reads the env var and reports the raw policy", () => {
   process.env[TOOLS_ENV] = "all";
   const all = resolveToolPolicy();
   assert.equal(all.policy, "all");
-  assert.equal(all.exposed.size, 46);
+  assert.equal(all.exposed.size, 49);
 });
 
 test("retired OBSIDIAN_ALLOW_WRITES fails loud with a migration hint", () => {

@@ -23,7 +23,7 @@ Tool names follow a fixed verb taxonomy. A new tool reuses an existing verb; it 
 - **`list_`** — enumerate a vault-wide collection, optionally scoped or parameterized: `list_notes`, `list_files`, `list_folders`, `list_tags`, `list_properties`, `list_property_values`, `list_recent_notes`, `list_vault_issues`. A required argument does not demote it to `get_` (`list_property_values(key)`, `list_vault_issues(kind)`).
 - **`search_`** — text query over content (`search_notes`, `search_notes_ranked`). **`read_`** — return body text from disk (`read_notes`, `read_section`). **`resolve_`** — map a human name to a canonical path (`resolve_note`, `resolve_daily_note` — a date is a human-facing name too).
 - **`find_by_X`** — retrieval by one named criterion (`find_by_tag`). **`query_`** — retrieval by a condition object (`query_notes`); `where` is the single condition language, anchored by `query_notes`, and reused verbatim by every tool that filters notes.
-- **Writes** name the mutation: `write/append/prepend/delete/move`, `add/remove_tag`, `set_frontmatter`, `add/remove_property_values`, `rename_property`, `add/append_to/replace_section`, `patch_note`, `bulk_edit`. The `_property_values` noun is per-note when prefixed `add_`/`remove_` (writes) and vault-wide when prefixed `list_` (read) — the verb, not the noun, carries the scope.
+- **Writes** name the mutation: `write/append/prepend/delete/move`, `add/remove_tag`, `set_frontmatter`, `add/remove_property_values`, `rename_property`, `add/append_to/replace_section`, `patch_note`, `bulk_edit`. The `_property_values` noun is per-note when prefixed `add_`/`remove_` (writes) and vault-wide when prefixed `list_` (read) — the verb, not the noun, carries the scope. **`create_`** is the folder-only create verb (`create_folder`): `write_` implies content, which a folder has none of, so a folder's creation is named for what it actually does. On folders the mutation verbs otherwise carry over unchanged (`move_folder`, `delete_folder`).
 
 **No merges.** `list_notes` / `find_by_tag` / `query_notes` / `list_recent_notes` are distinct intents, not one query tool: `find_by_tag` matches the unified inline-plus-frontmatter tag set while `query_notes` sees frontmatter only, and `list_recent_notes` carries ordering semantics (`date_field`, mtime) that `query_notes` has no vocabulary for. The separation is structural.
 
@@ -80,6 +80,23 @@ is read. Opt-in so a 200-backlink hub note stays cheap by default; an
 unreadable source degrades to an empty `context` (report-only decoration).
 Stated once in the server's MCP `instructions`; the three tool descriptions
 carry only a short pointer.
+
+**Folder-write git posture (shared).** The three folder-write tools —
+`create_folder`, `move_folder`, `delete_folder` — each return `git_warning`
+alongside their normal fields: a non-null message means `OBSIDIAN_GIT_SYNC` is
+`off`, so the operation was not snapshotted and cannot be rolled back; `null`
+means a mode is active and the change was committed. **Report-only** (same
+philosophy as `delete_note`'s `dangled_backlinks`): the operation still runs.
+Passing `require_git: true` escalates the warning into a refusal raised
+*before* any filesystem change, for a caller that would rather fail than act
+unrecoverably. Only these three carry it, because only these three have a blast
+radius the arguments do not bound — every note-level write names the single
+path it touches, while one `delete_folder` can take an arbitrary subtree.
+`require_git` checks the *mode* only; a mode that is set but whose repo is
+unusable is already caught fail-closed by `assertSyncableBeforeWrite`.
+Implemented in `src/tools/folder-ops.ts`; stated once in the server's MCP
+`instructions` (`src/index.ts`), with the tool descriptions carrying only a
+short pointer.
 
 **Not-found suggestions (shared).** Every path-addressed tool that errors on a
 missing note appends up to 3 did-you-mean candidates to the error message —
@@ -395,7 +412,7 @@ individual tool descriptions state only their deviations from it.
 
 **Tool exposure is policy-controlled.** The server exposes tools according to
 the `OBSIDIAN_TOOLS` selector policy (see "Tool policy" below). With the
-variable unset the server is read-only (default policy `reads`): the twenty-one
+variable unset the server is read-only (default policy `reads`): the twenty-four
 write tools are hidden from `list_tools` and any call to one is rejected — so
 an agent only ever sees the read tools. Set `OBSIDIAN_TOOLS=all` to expose
 everything. The policy gates the MCP server (the agent-facing surface); the
@@ -442,6 +459,29 @@ change a tag or a section without reading and rewriting the whole note.
 - **Input**: `from` (required), `to` (required), `overwrite` (optional, default `false`)
 - **Output**: `{ from, to, overwritten }`
 - **Security**: Path traversal protected on both endpoints via `resolveVaultFile`.
+
+### create_folder
+- **Purpose**: Create a folder (and any missing parents) — the "C" of folder CRUD, whose "R" is `list_folders`.
+- **Input**: `path` (required), `require_git` (optional — see the folder-write git posture above)
+- **Output**: `{ path, created, git_warning }`
+- **Two honest limits**, both consequences of folders being *implicit* in the vault model: the new folder holds no notes, so **`list_folders` will not show it** until one lands there (`list_folders` derives its rows from indexed note paths, not from directories on disk); and **git does not track empty directories**, so with sync enabled this commits nothing — `commitAfterWrite` no-ops on a clean index rather than failing. It is still worth having: it materializes the directory so a subsequent `move_file` or attachment write has a destination.
+- **Errors** if anything already exists at the path (folder *or* file). A create that silently succeeded on an existing folder would hide a typo in the path.
+
+### move_folder
+- **Purpose**: Move or rename a folder and everything under it, rewriting the wikilinks that pointed into it — the folder-level analogue of `move_note`.
+- **Input**: `from` (required), `to` (required), `update_links` (optional, default `true`), `require_git` (optional)
+- **Output**: `{ from, to, moved_notes, moved_files, updated_notes, updated_links, git_warning }` — `moved_notes`/`moved_files` count what the subtree carried; `updated_notes`/`updated_links` count the rewrite.
+- **Link rewriting**: Only **folder-qualified** links (`[[projects/alpha]]`) are rewritten, because a folder move preserves every basename — `[[alpha]]` still names the same note afterwards. The one residual case is a bare link whose *shortest-path winner* the move changes (two notes sharing a basename, one moving nearer the root); Obsidian re-resolves such a link the same way, so it is left alone here rather than pinned to one side. Links inside fenced code blocks are never rewritten (shared `rewriteWikilinks`, same as `move_note`/`rename_section`). Notes *inside* the moved folder are rewritten too — a sibling's full-path link follows the move — and are read at their new location, since the pre-move index recorded them at the old one.
+- **No `overwrite`**: an existing destination is refused outright. Merging two subtrees is not a rename, and silently clobbering a destination tree is not something a single flag should buy. Moving a folder into its own descendant, or onto itself, is likewise refused.
+
+### delete_folder
+- **Purpose**: Delete a folder and everything under it. **Trash-safe by default**: the subtree is moved to the vault's `.trash` (Obsidian's convention, ignored by the index) so the deletion is recoverable, with the same numeric-suffix disambiguation as `delete_note`. `permanent: true` unlinks outright.
+- **Input**: `path` (required), `recursive` (optional, default `false`), `permanent` (optional, default `false`), `require_git` (optional)
+- **Output**: `{ path, deleted, trashed, trash_path?, deleted_notes, deleted_files, dangled_backlinks, git_warning }`
+- **`recursive` is required for a non-empty folder** — this is the only tool on the surface whose blast radius is not bounded by an explicit list of paths, so the caller states the intent to delete contents rather than discovering it afterwards. Emptiness is judged from a **disk walk, not the index**: the index skips hidden and machinery directories, so an index-derived listing would call a folder holding hidden data empty and wave the guard through.
+- **`dangled_backlinks`** lists notes *outside* the folder that linked to notes *inside* it and now have a broken `[[wikilink]]`. Report-only, exactly like `delete_note`'s field of the same name: those notes are never modified. A link from one deleted note to another is not dangling (both are going), so sources inside the folder are excluded.
+
+**Folder path guards (shared by all three).** Beyond the traversal and symlink guards every path gets from `resolveVaultFile`, folder operands carry two refusals of their own: the **vault root** is never an operand (`""`, `"."`, `"/"` — a `delete_folder` of the root would be a vault wipe), and neither are **hidden or machinery directories** (`.obsidian`, `.trash`, `.git`, `node_modules`, or any leading-dot folder) — `.obsidian` holds the vault's configuration and `.git` its history, so a rename there breaks the tooling the rest of this server depends on. A file addressed as a folder errors with a pointer to `move_file`/`delete_note`.
 
 ### patch_note
 - **Purpose**: Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex — no injection or catastrophic-backtracking risk). Errors if the text to find is absent, so a stale patch fails loudly.
@@ -681,7 +721,7 @@ The 11 domain groups (every gated tool belongs to exactly one):
 | `properties` | get_frontmatter, list_properties, list_property_values, query_notes, get_property | set_frontmatter, add_property_values, remove_property_values, rename_property |
 | `tasks` | list_tasks | set_task_state |
 | `templates` | list_templates | apply_template, insert_template |
-| `files` | list_files, list_folders | move_file |
+| `files` | list_files, list_folders | move_file, create_folder, move_folder, delete_folder |
 | `vault` | get_vault_stats, list_vault_issues | — |
 | `bulk` | — | bulk_edit |
 
@@ -921,6 +961,15 @@ npm run query -- rename-section "projects/alpha" "Old Heading" "New Heading"
 npm run query -- rename-section "projects/alpha" "Old" "New" --no-update-anchors
 npm run query -- move "projects/alpha" "archive/alpha"  # Rename + rewrite links
 npm run query -- move-file "assets/old.png" "assets/new.png"
+
+# Folder CRUD (create/move/delete; warns when OBSIDIAN_GIT_SYNC is off)
+npm run query -- create-folder "archive/2026"
+npm run query -- move-folder "projects" "archive/projects"     # rewrites folder-qualified links
+npm run query -- move-folder "projects" "archive/projects" --no-update-links
+npm run query -- delete-folder "scratch"                       # empty folders only
+npm run query -- delete-folder "archive/2025" --recursive      # trash-safe subtree delete
+npm run query -- delete-folder "archive/2025" --recursive --permanent
+npm run query -- delete-folder "archive/2025" --recursive --require-git   # refuse if sync is off
 npm run query -- template-apply "Daily" "journal/2026-07-23"   # New note from a template
 npm run query -- template-insert "Meeting" "journal/2026-07-23" --position section --section Notes --create-section
 npm run query -- patch "projects/alpha" "old text" "new text" --all

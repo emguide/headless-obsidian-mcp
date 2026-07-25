@@ -34,7 +34,10 @@ const GROUP_MEMBERS: Readonly<Record<string, readonly string[]>> = {
   ],
   tasks: ["list_tasks", "set_task_state"],
   templates: ["list_templates", "apply_template", "insert_template"],
-  files: ["list_files", "list_folders", "move_file"],
+  files: [
+    "list_files", "list_folders",
+    "move_file", "create_folder", "move_folder", "delete_folder",
+  ],
   vault: ["get_vault_stats", "list_vault_issues"],
   bulk: ["bulk_edit"],
 };
