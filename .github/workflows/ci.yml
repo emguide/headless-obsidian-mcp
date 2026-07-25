@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: build + test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Report every version's result rather than hiding the rest on one failure.
+      fail-fast: false
+      matrix:
+        # 20 is what mise.toml pins; 22 guards against forward-compat drift.
+        node: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # ripgrep is a hard runtime dependency: search_notes shells out to `rg`,
+      # and its tests exercise the real binary rather than a stub. GitHub's
+      # runner images ship it, but installing explicitly keeps the suite honest
+      # if that ever changes.
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      # git is required for the OBSIDIAN_GIT_SYNC tests, which init real repos,
+      # diverge them, and resolve genuine merge conflicts.
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@github-actions.local"
+          git config --global user.name "CI"
+
+      - name: Tool versions
+        run: |
+          node --version
+          npm --version
+          rg --version | head -1
+          git --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
