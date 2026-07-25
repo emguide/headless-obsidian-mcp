@@ -1,8 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
-import { join, resolve, relative } from "node:path";
 import matter from "gray-matter";
 import { Note, NoteMetadata, ReadNotesResult } from "../types.js";
-import { collectTags } from "./vault.js";
+import { collectTags, resolveNotePath } from "./vault.js";
 import { getIndex, VaultIndex } from "./vault-index.js";
 import { noteNotFoundMessage, resolveNoteName } from "./not-found.js";
 
@@ -22,7 +21,6 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
 
   const notes: Note[] = [];
   const errors: Array<{ path: string; error: string }> = [];
-  const resolvedVaultPath = resolve(vaultPath);
   // Built once up front: read_notes now addresses notes the same way the
   // index-backed readers do (a bare basename or wrong-case name resolves via
   // resolveNoteName), and the same index enriches missing-note errors with
@@ -46,15 +44,12 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
       // path when the index is unavailable or the name does not resolve.
       const canonical = index ? resolveNoteName(index, notePath) : notePath.replace(/\.md$/, '');
 
-      // Prevent path traversal by validating the resolved path
-      const fileName = `${canonical}${canonical.endsWith('.md') ? '' : '.md'}`;
-      const fullPath = resolve(join(vaultPath, fileName));
-
-      // Ensure the resolved path is within the vault directory
-      const relativePath = relative(resolvedVaultPath, fullPath);
-      if (relativePath.startsWith('..') || relativePath.includes('..')) {
-        throw new Error('Invalid note path: path traversal not allowed');
-      }
+      // Prevent path traversal via the shared guard (resolveNotePath) rather than
+      // a duplicated inline check — the inline copy tested `.includes("..")` with
+      // no separator, so a legitimate note whose name merely contains ".." (an
+      // ellipsis title like "And then...") was misclassified as an attack and,
+      // since traversal fails the whole batch, poisoned every other path.
+      const fullPath = resolveNotePath(vaultPath, canonical);
 
       // Check file size before reading (max 10MB)
       const fileInfo = await stat(fullPath);
@@ -72,7 +67,11 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
 
       notes.push({
         path,
-        contents: markdownContent.trim(),
+        // Verbatim body (gray-matter already strips the frontmatter block). No
+        // trim: the docs promise the body "unmodified" for patch_note matching,
+        // and the shared body-relative line convention (get_outline/list_tasks/
+        // search_notes) breaks if a leading blank line is silently dropped.
+        contents: markdownContent,
         frontmatter: frontmatter as NoteMetadata,
         tags
       });
