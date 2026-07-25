@@ -89,10 +89,72 @@ export function parseMatter(raw: string): ParsedMatter {
   };
 }
 
-/** Serialize a body plus frontmatter data back to note text (YAML only). */
+/**
+ * A `Date` that carries no time of day — i.e. what an unquoted `created:
+ * 2026-07-25` in frontmatter parses to. js-yaml would dump it back as a full
+ * ISO timestamp, silently rewriting a key the write never addressed.
+ */
+function isDateOnly(value: unknown): value is Date {
+  return (
+    value instanceof Date &&
+    !Number.isNaN(value.getTime()) &&
+    value.toISOString().endsWith("T00:00:00.000Z")
+  );
+}
+
+/**
+ * Placeholder marker for a date-only value during serialization. js-yaml 3
+ * gives no usable hook for overriding how it represents `Date` (its built-in
+ * timestamp type wins over a same-tag custom type, and forcing the issue
+ * disturbs unrelated keys), so the value is dumped as a plain scalar token and
+ * restored afterwards. The token holds only characters YAML emits unquoted.
+ */
+const DATE_TOKEN_PREFIX = "__obsidian_mcp_date_";
+
+/**
+ * Serialize a body plus frontmatter data back to note text (YAML only).
+ *
+ * Date-only values round-trip in their original `YYYY-MM-DD` form rather than
+ * being expanded to `2026-07-25T00:00:00.000Z`. Dates that do carry a time are
+ * dumped as full ISO timestamps, which is already lossless.
+ */
 export function stringifyMatter(
   body: string,
   data: Record<string, unknown>
 ): string {
-  return matter.stringify(body, data, { engines: SAFE_ENGINES, language: "yaml" });
+  const dates: string[] = [];
+
+  // If the token prefix somehow occurs in the real content, restoring it would
+  // corrupt that text — fall back to plain serialization instead.
+  const collides =
+    body.includes(DATE_TOKEN_PREFIX) ||
+    JSON.stringify(data).includes(DATE_TOKEN_PREFIX);
+
+  const encode = (value: unknown): unknown => {
+    if (!collides && isDateOnly(value)) {
+      const index = dates.length;
+      dates.push(value.toISOString().slice(0, 10));
+      return `${DATE_TOKEN_PREFIX}${index}__`;
+    }
+    return value;
+  };
+
+  const prepared: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    prepared[key] = Array.isArray(value) ? value.map(encode) : encode(value);
+  }
+
+  let out = matter.stringify(body, prepared, {
+    engines: SAFE_ENGINES,
+    language: "yaml",
+  });
+
+  if (dates.length > 0) {
+    // Drop any quoting js-yaml added, so the restored date stays a YAML date.
+    out = out.replace(
+      new RegExp(`'?"?${DATE_TOKEN_PREFIX}(\\d+)__"?'?`, "g"),
+      (whole, index: string) => dates[Number(index)] ?? whole
+    );
+  }
+  return out;
 }

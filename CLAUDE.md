@@ -512,6 +512,13 @@ canonical form (block-style lists) but leave the body untouched. Headings inside
 fenced code blocks are ignored when locating sections. All writes are
 path-traversal protected via the same guard as read_notes.
 
+**Dates**: YAML parses an unquoted `created: 2026-07-25` into a date, which is
+a valid scalar (`list_properties` reports it as `date`). A date-only value is
+re-serialized in its original `YYYY-MM-DD` form, so an unrelated frontmatter
+edit never rewrites it to `2026-07-25T00:00:00.000Z`; a value that carries a
+time keeps its full ISO timestamp. Handled in `stringifyMatter`
+(`src/tools/matter-safe.ts`).
+
 **Validation**: Every frontmatter write rejects (1) nested objects/maps, (2)
 arrays containing non-scalar elements, and (3) markdown syntax in string values
 (bare URLs are allowed). Validation runs only on the keys a given write actually

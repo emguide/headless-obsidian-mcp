@@ -143,13 +143,22 @@ export function removeTags(doc: NoteDocument, tags: string[]): string[] | null {
 
 /* ----------------------------------------------------------- validation -- */
 
-/** Scalar frontmatter values: what a property (or array element) may hold. */
+/**
+ * Scalar frontmatter values: what a property (or array element) may hold.
+ *
+ * `Date` counts. YAML parses an unquoted `created: 2026-07-25` — ordinary
+ * Obsidian frontmatter — into a Date, and rejecting it as a "nested object"
+ * refused every note carrying one, including any template whose frontmatter
+ * holds `date: {{date}}`. The index already treats Date as a first-class
+ * property type (`list_properties` reports "date").
+ */
 export function isScalar(v: unknown): boolean {
   return (
     v == null ||
     typeof v === "string" ||
     typeof v === "number" ||
-    typeof v === "boolean"
+    typeof v === "boolean" ||
+    v instanceof Date
   );
 }
 

@@ -836,6 +836,8 @@ Apply one or more frontmatter mutations to many notes in a single call, under a 
 
 > **Body vs. frontmatter fidelity:** section edits preserve the frontmatter block byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML in canonical form (block-style lists) but leave the body untouched. Headings inside fenced code blocks are ignored. All writes are path-traversal protected.
 
+> **Dates:** an unquoted `created: 2026-07-25` parses to a date and is a valid scalar. A date-only value round-trips in its original `YYYY-MM-DD` form, so an unrelated edit never rewrites it to `2026-07-25T00:00:00.000Z`; a value carrying a time keeps its full ISO timestamp.
+
 > **Validation:** every frontmatter write rejects nested objects/maps, arrays containing non-scalar elements, and markdown syntax in string values (bare URLs are allowed). Validation runs only on the keys a given write actually touches, so a pre-existing violation on an untouched key never blocks an unrelated edit. The content-writing tools (`write_note`, and the create path of `append_note`/`prepend_note`) validate any hand-written leading frontmatter block on these same rules — so creating a note by hand cannot bypass frontmatter integrity, and malformed YAML is rejected loudly rather than landing in the vault.
 
 ## Example Usage
