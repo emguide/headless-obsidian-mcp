@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve, basename } from "node:path";
-import matter from "gray-matter";
+import { parseMatter } from "./matter-safe.js";
 import {
   walkVault,
   collectTags,
@@ -321,7 +321,7 @@ export class VaultIndex {
     let body: string;
     try {
       const raw = await readFile(fullPath, "utf-8");
-      body = matter(raw).content;
+      body = parseMatter(raw).content;
     } catch {
       return "";
     }
@@ -354,7 +354,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
 
   try {
     const raw = await readFile(f.fullPath, "utf-8");
-    const parsed = matter(raw);
+    const parsed = parseMatter(raw);
     // Lines consumed by the frontmatter block, per gray-matter — the same
     // stripper whose body parseHeadings/parseTasks run on, so body-relative
     // line math stays consistent even on fences NoteDocument would swallow

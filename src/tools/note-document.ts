@@ -1,4 +1,4 @@
-import matter from "gray-matter";
+import { parseMatter, stringifyMatter } from "./matter-safe.js";
 import {
   parseHeadings,
   headingPaths,
@@ -62,7 +62,7 @@ export class NoteDocument {
     // separate parses of same-content notes. structuredClone isolates each parse.
     // (Edge: a YAML !!binary value becomes a Uint8Array rather than a Buffer —
     // irrelevant for Obsidian frontmatter, which holds scalars and flat arrays.)
-    const data = structuredClone((matter(raw).data ?? {})) as Record<string, unknown>;
+    const data = structuredClone(parseMatter(raw).data) as Record<string, unknown>;
     return new NoteDocument(data, body, block);
   }
 
@@ -79,7 +79,7 @@ export class NoteDocument {
       // Frontmatter emptied out — drop the block entirely.
       return this.body;
     }
-    return matter.stringify(this.body, this.data);
+    return stringifyMatter(this.body, this.data);
   }
 }
 

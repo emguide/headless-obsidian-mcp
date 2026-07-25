@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir, unlink, rename, stat } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
-import matter from "gray-matter";
+import { parseMatter, stringifyMatter } from "./matter-safe.js";
 import { getIndex } from "./vault-index.js";
 import {
   resolveNotePath,
@@ -259,7 +259,7 @@ export async function writeNote(
     for (const [key, value] of Object.entries(frontmatter!)) {
       validateFrontmatterValue(key, value);
     }
-    finalContent = matter.stringify(content, frontmatter!);
+    finalContent = stringifyMatter(content, frontmatter!);
   } else {
     validateContentFrontmatter(content);
     finalContent = content;
@@ -762,7 +762,7 @@ export async function renameSectionInVault(
  * Change one checkbox task's state, rewriting only its marker character.
  * Addressing (`text` and/or `line`) and `parseTasks` both use 1-based
  * body-relative line numbers — the same convention as `list_tasks` and
- * `get_outline`. Frontmatter is stripped via gray-matter (`matter(raw).content`)
+ * `get_outline`. Frontmatter is stripped via the shared safe parser (`parseMatter`)
  * — the SAME stripper `list_tasks`/`get_outline` use via the shared index —
  * rather than `NoteDocument`, because `NoteDocument`'s fence regex swallows
  * trailing whitespace on the closing `---` fence into the frontmatter block
@@ -803,7 +803,7 @@ export async function setTaskState(
   // parse and the line-array edit below must use gray-matter's `body` — never
   // `raw`, and never NoteDocument's body — to match list_tasks/get_outline
   // exactly (see the fence-regex divergence note in the doc comment above).
-  const body = matter(raw).content;
+  const body = parseMatter(raw).content;
   const bodyLines = body.split("\n");
   const tasks = parseTasks(body);
 
