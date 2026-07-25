@@ -348,7 +348,7 @@ individual tool descriptions state only their deviations from it.
 ### list_properties
 - **Purpose**: The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
 - **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`). `offset` (optional): Rows to skip before the window, for pagination (default `0`).
-- **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set. Index-backed.
+- **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`, plus `object` for nested YAML hand-written on disk — frontmatter *writes* reject nesting, reads do not), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set. Index-backed.
 
 ### list_property_values
 - **Purpose**: Distinct values of one frontmatter property with per-note counts — a faceted breakdown, e.g. to see every `status` value in use.

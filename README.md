@@ -557,7 +557,7 @@ The vault's frontmatter schema — every property key in use, with how many note
 - `include_tags` (boolean, optional): Include the `tags` key (default: true; set false since it's already covered by `list_tags`)
 - `offset` (number, optional): Rows to skip before the window, for pagination (default 0)
 
-**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
+**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`/`object`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
 
 ### list_property_values
 
