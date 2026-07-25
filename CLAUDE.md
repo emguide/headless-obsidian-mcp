@@ -456,7 +456,7 @@ change a tag or a section without reading and rewriting the whole note.
 - **Purpose**: Append text under an existing heading (before the next heading), leaving the rest of the note untouched. `create: true` creates the section if missing.
 - **Input**: `path` (required), `heading` (required — a bare heading or a `" > "`-joined heading-path), `content` (required), `create` (optional)
 - **Output**: `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (see the shared link-integrity convention above); report-only.
-- **Addressing**: Same fail-loud scheme as `read_section` — an ambiguous bare `heading` (repeated in the note) errors, listing the candidate full heading-paths so you can retry with the exact one (`Projects > Log`) and edit the right section. `create` only recovers a *missing* section; an ambiguous one is never silently created.
+- **Addressing**: Same fail-loud scheme as `read_section` — an ambiguous bare `heading` (repeated in the note) errors, listing the candidate full heading-paths so you can retry with the exact one (`Projects > Log`) and edit the right section. `create` recovers a *missing bare* heading only; an ambiguous one is never silently created, and a *heading-path* (`Projects > Log`) with no existing target **fails loud** — a heading-path addresses a section inside existing structure and cannot be created (which parent, what level?), so it is refused rather than written as a literal `## Projects > Log` heading.
 
 ### replace_section
 - **Purpose**: Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
@@ -564,7 +564,9 @@ keep precedence, so existing behavior is unchanged.
   `position` (required — `"append"` | `"prepend"` | `"section"`), `section`
   (required iff `position` is `"section"` — bare heading or `" > "`-joined
   heading-path), `create_section` (optional, default `false` — create the
-  section if missing; an ambiguous section is never silently created).
+  section if missing; an ambiguous section is never silently created, and a
+  *heading-path* with no existing target fails loud, inheriting
+  `append_to_section`'s create-guard).
 - **Output**: `{ path, position, unresolved_links, broken_anchors }` — link
   health for the resulting note (report-only). Section addressing and fail-loud
   ambiguity match `append_to_section`. Frontmatter in the expanded template is
