@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (ESM, NodeNext), Node 18+, `node:test` via tsx, `@modelcontextprotocol/sdk` (already a dependency — its stdio *client* is used for integration tests).
 
-**Spec:** `docs/superpowers/specs/2026-07-24-tool-policy-design.md`
+**Spec:** `design/specs/2026-07-24-tool-policy-design.md`
 
 ## Global Constraints
 

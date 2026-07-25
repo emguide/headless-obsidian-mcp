@@ -6,6 +6,20 @@ This is a headless MCP (Model Context Protocol) server for interacting with Obsi
 
 Anything beyond trivial work (a single-line fix or a pure question) should be done in a git worktree, so parallel development tasks stay isolated from each other and from the main checkout. Trivial changes may be made in place.
 
+### Design records
+
+Design specs (brainstorming output) go in `design/specs/`, implementation plans
+(writing-plans output) in `design/plans/` — **not** the superpowers skills'
+default `docs/superpowers/`, which this project does not use. Keep the skills'
+`YYYY-MM-DD-<topic>-design.md` / `YYYY-MM-DD-<feature-name>.md` filenames.
+`docs/` is reserved for user-facing reference ([docs/CLI.md](docs/CLI.md),
+[docs/TOOLS.md](docs/TOOLS.md)); `design/` is contributor-facing.
+
+These records are written before implementation and are **not** maintained
+afterwards — they capture why a decision was made, not what the code currently
+does. CLAUDE.md and README.md are the current source of truth; a spec that
+disagrees with them is stale, not authoritative.
+
 ## Setup
 
 1. Set the `OBSIDIAN_VAULT_PATH` environment variable to point to your Obsidian vault directory
