@@ -431,6 +431,7 @@ change a tag or a section without reading and rewriting the whole note.
 ### move_note
 - **Purpose**: Move or rename a note. By default every `[[wikilink]]` elsewhere in the vault that pointed to the old location is rewritten to the new one (full-path links become the new full path; bare-basename links become the new basename; aliases and `#anchors` are preserved), so the link graph is never broken.
 - **Input**: `from` (required), `to` (required), `overwrite` (optional, default `false`), `update_links` (optional, default `true`)
+- **Ownership**: a bare `[[basename]]` is rewritten only when it actually *resolves* to the moved note. With `a/log` and `b/log` in the vault a bare `[[log]]` resolves to `a/log` (shortest-path rule), so moving `b/log` leaves it alone instead of silently repointing it.
 - **Output**: `{ from, to, overwritten, updated_notes, updated_links }`
 - **Security**: Path traversal protected on both endpoints.
 
@@ -492,7 +493,7 @@ change a tag or a section without reading and rewriting the whole note.
 - **Purpose**: Rename a heading in a note and rewrite every inbound `[[note#heading]]` anchor across the vault to the new heading — the heading-level analogue of `move_note`, closing the last structural edit that could silently break the link graph.
 - **Input**: `path` (required), `from` (required — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `read_section`/`replace_section`), `to` (required — new heading text), `update_anchors` (optional, default `true` — rewrite inbound anchors elsewhere in the vault).
 - **Output**: `{ path, from, to, updated_notes, updated_links }` — `from`/`to` are the resolved old/new heading; `updated_notes` counts OTHER notes touched (the renamed note itself is always touched, so it's excluded); `updated_links` counts every anchor rewritten, including the renamed note's own self-references (`[[#Old]]`/`[[thisnote#Old]]`) alongside inbound anchors elsewhere.
-- **Anchor matching**: Literal case-insensitive (trimmed) text — NOT Obsidian slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud.
+- **Anchor matching**: Literal case-insensitive (trimmed) text — NOT Obsidian slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud. A bare `[[basename#anchor]]` is rewritten only when the basename resolves to the renamed note, and a *backlink note's own* `[[#anchor]]` self-link is never rewritten (that anchor addresses its own heading, not the renamed one) — while the renamed note's own self-links still are.
 - **Duplicate-leaf caveat**: If the renamed heading's leaf text is duplicated elsewhere in the same note (e.g. the same heading under a different parent), inbound anchors meant for the OTHER occurrence may also get rewritten — Obsidian anchors carry no parent context, so matching is by literal heading text alone.
 
 ### bulk_edit

@@ -487,8 +487,11 @@ export async function moveNote(
   // key on a case-insensitive filesystem and silently rewrite zero backlinks.
   let backlinks: string[] = [];
   let resolvedFrom = fromCanon;
+  // Held for the rewrite pass below, which must ask the PRE-move index what a
+  // bare `[[basename]]` actually pointed at.
+  let index: Awaited<ReturnType<typeof getIndex>> | null = null;
   if (update_links) {
-    const index = await getIndex(vaultPath);
+    index = await getIndex(vaultPath);
     resolvedFrom = index.resolve(fromCanon) ?? fromCanon; // now a case-exact hit
     backlinks = index.backlinks(resolvedFrom);
   }
@@ -513,7 +516,14 @@ export async function moveNote(
       const { content, changed } = rewriteWikilinks(raw, (target) => {
         const norm = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
         if (norm === fromLower) return toCanon; // full-path reference
-        if (!norm.includes("/") && norm === oldBase) return newBase; // basename reference
+        if (!norm.includes("/") && norm === oldBase) {
+          // A bare basename is only ours if it actually RESOLVES to the moved
+          // note. Another note can share the basename and own this link — with
+          // `a/log` and `b/log`, a bare `[[log]]` resolves to `a/log` by the
+          // shortest-path rule, so moving `b/log` must leave it alone rather
+          // than silently repointing it and breaking `a/log`'s backlink.
+          return index?.resolve(norm) === resolvedFrom ? newBase : null;
+        }
         return null;
       });
       if (changed > 0) {
@@ -673,21 +683,33 @@ export async function renameSectionInVault(
   // would be unreliable for matching — gating avoids relying on them at all.
   let backlinks: string[] = [];
   let notePath = canon;
+  let index: Awaited<ReturnType<typeof getIndex>> | null = null;
   if (update_anchors) {
-    const index = await getIndex(vaultPath);
+    index = await getIndex(vaultPath);
     notePath = index.resolve(canon) ?? canon;
     backlinks = index.backlinks(notePath);
   }
   const noteLower = notePath.toLowerCase();
   const noteBase = notePath.split("/").pop()!.toLowerCase();
 
-  // Shared predicate: does a wikilink target (already trimmed) point at THIS
-  // note? Used both for inbound backlinks (target never empty there) and for
-  // the renamed note's own self-references, where an empty target denotes a
-  // bare `[[#anchor]]` self-link.
-  const pointsToThisNote = (target: string): boolean => {
+  // Does a wikilink target (already trimmed) point at THIS note?
+  //
+  // `allowEmpty` distinguishes the two callers. Inside the renamed note an
+  // empty target is a bare `[[#anchor]]` self-link and IS ours; inside a
+  // backlink note the very same form is that note's own self-link and is NOT
+  // ours — treating it as ours rewrote unrelated notes' `[[#Heading]]` links
+  // to a heading they do not have.
+  //
+  // A bare basename must additionally RESOLVE to this note: another note can
+  // share the basename and own the link.
+  const pointsToThisNote = (target: string, allowEmpty: boolean): boolean => {
     const norm = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
-    return norm === "" || norm === noteLower || (!norm.includes("/") && norm === noteBase);
+    if (norm === "") return allowEmpty;
+    if (norm === noteLower) return true;
+    if (!norm.includes("/") && norm === noteBase) {
+      return index?.resolve(norm) === notePath;
+    }
+    return false;
   };
 
   // Rename the local heading (fails loud before any snapshot on missing/ambiguous).
@@ -711,7 +733,7 @@ export async function renameSectionInVault(
       selfRewritten,
       () => null, // never change the note target
       (target, anchor) => {
-        if (!pointsToThisNote(target)) return null;
+        if (!pointsToThisNote(target, true)) return null;
         return headingMatchesAnchor(oldHeading, anchor) ? to.trim() : null;
       }
     );
@@ -739,7 +761,7 @@ export async function renameSectionInVault(
         btext,
         () => null, // never change the note target
         (target, anchor) => {
-          if (!pointsToThisNote(target)) return null;
+          if (!pointsToThisNote(target, false)) return null;
           return headingMatchesAnchor(oldHeading, anchor) ? to.trim() : null;
         }
       );
