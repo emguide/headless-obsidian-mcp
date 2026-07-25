@@ -304,13 +304,13 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "get_config",
-        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, daily: { folder, format, template }, writes: { writes_enabled, git_autocommit }, vault: { path }, tools: { policy, exposed, excluded } }. Optional section narrows the result to one unwrapped section. template.folder and daily.folder are null when unconfigured (does not error). writes_enabled means at least one write tool is exposed. Read-only; never excluded by OBSIDIAN_TOOLS — this is how you discover the active tool policy.",
+        description: "Report the server's own configuration (not vault contents). Returns { template: { folder, date_format, time_format }, daily: { folder, format, template }, writes: { writes_enabled, git_sync }, sync: { mode, interval, remote, last_sync, last_error }, vault: { path }, tools: { policy, exposed, excluded } }. Optional section narrows the result to one unwrapped section. template.folder and daily.folder are null when unconfigured (does not error). writes_enabled means at least one write tool is exposed. sync section reports the active git-sync mode and current state. Read-only; never excluded by OBSIDIAN_TOOLS — this is how you discover the active tool policy.",
         inputSchema: {
           type: "object",
           properties: {
             section: {
               type: "string",
-              enum: ["template", "daily", "writes", "vault", "tools"],
+              enum: ["template", "daily", "writes", "sync", "vault", "tools"],
               description: "Return just this section, unwrapped. Omit for the whole config object."
             }
           }

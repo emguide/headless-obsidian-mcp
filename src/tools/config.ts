@@ -1,8 +1,9 @@
 import { resolveTemplateConfig } from "./templates.js";
 import { resolveDailyConfig, DEFAULT_DAILY_FORMAT } from "./daily-notes.js";
-import { gitGuardEnabled } from "./env-flags.js";
+import { resolveGitSyncMode, gitSyncInterval, gitRemote, GitSyncMode } from "./env-flags.js";
 import { GATED_TOOL_NAMES, resolveToolPolicy } from "./tool-policy.js";
 import { isWriteTool } from "./write.js";
+import { getSyncState } from "./sync-state.js";
 
 /** Obsidian's built-in defaults for a bare {{date}} / {{time}}. */
 const DEFAULT_DATE_FORMAT = "YYYY-MM-DD";
@@ -30,7 +31,14 @@ export interface ServerConfig {
   };
   writes: {
     writes_enabled: boolean;
-    git_autocommit: boolean;
+    git_sync: GitSyncMode;
+  };
+  sync: {
+    mode: GitSyncMode;
+    interval: number;
+    remote: string;
+    last_sync: string | null;
+    last_error: string | null;
   };
   vault: {
     path: string;
@@ -47,7 +55,7 @@ export interface ServerConfig {
 
 export type ConfigSection = keyof ServerConfig;
 
-const SECTIONS: ConfigSection[] = ["template", "daily", "writes", "vault", "tools"];
+const SECTIONS: ConfigSection[] = ["template", "daily", "writes", "sync", "vault", "tools"];
 
 /**
  * Assemble the server's own configuration. Unlike the template tools, an
@@ -82,13 +90,20 @@ export async function resolveServerConfig(
   }
 
   const { policy, exposed } = resolveToolPolicy();
+  const { mode } = resolveGitSyncMode();
 
   return {
     template: { folder, date_format: dateFormat, time_format: timeFormat },
     daily,
     writes: {
       writes_enabled: [...exposed].some((name) => isWriteTool(name)),
-      git_autocommit: gitGuardEnabled(),
+      git_sync: mode,
+    },
+    sync: {
+      mode,
+      interval: gitSyncInterval(),
+      remote: gitRemote(),
+      ...getSyncState(),
     },
     vault: { path: vaultPath },
     tools: {

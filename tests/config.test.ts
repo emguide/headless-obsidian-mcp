@@ -62,11 +62,12 @@ test("OBSIDIAN_TEMPLATE_FOLDER override wins", async () => {
 test("writes_enabled derives from the tool policy", async () => {
   const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
   delete process.env.OBSIDIAN_GIT_AUTOCOMMIT;
+  delete process.env.OBSIDIAN_GIT_SYNC;
   try {
     delete process.env[TOOLS_ENV];
     let cfg = await resolveServerConfig(fx.vaultPath);
     assert.equal(cfg.writes.writes_enabled, false); // default policy is read-only
-    assert.equal(cfg.writes.git_autocommit, false);
+    assert.equal(cfg.writes.git_sync, "off");
 
     process.env[TOOLS_ENV] = "all";
     cfg = await resolveServerConfig(fx.vaultPath);
@@ -171,6 +172,37 @@ test("dispatch: selectConfigSection round-trips through JSON for a section", asy
     const payload = JSON.parse(JSON.stringify(selectConfigSection(cfg, "template")));
     assert.equal(payload.folder, "Templates");
     assert.equal(payload.date_format, "DD/MM/YYYY");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("config: sync section reports mode/interval/remote", async () => {
+  process.env.OBSIDIAN_GIT_SYNC = "timer";
+  process.env.OBSIDIAN_GIT_SYNC_INTERVAL = "120";
+  process.env.OBSIDIAN_GIT_REMOTE = "backup";
+  const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
+  try {
+    const cfg = await resolveServerConfig(fx.vaultPath);
+    assert.equal(cfg.sync.mode, "timer");
+    assert.equal(cfg.sync.interval, 120);
+    assert.equal(cfg.sync.remote, "backup");
+    assert.equal(cfg.sync.last_sync, null);
+    assert.equal(cfg.sync.last_error, null);
+    assert.equal(cfg.writes.git_sync, "timer");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("config: writes.git_sync is 'off' when unset", async () => {
+  delete process.env.OBSIDIAN_GIT_SYNC;
+  delete process.env.OBSIDIAN_GIT_AUTOCOMMIT;
+  const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
+  try {
+    const cfg = await resolveServerConfig(fx.vaultPath);
+    assert.equal(cfg.writes.git_sync, "off");
+    assert.equal(cfg.sync.mode, "off");
   } finally {
     await fx.cleanup();
   }
