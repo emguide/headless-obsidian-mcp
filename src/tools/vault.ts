@@ -247,6 +247,48 @@ export function collectTags(
 // [[target#heading]], ![[target]]. Captures the inner reference.
 const WIKILINK_RE = /!?\[\[([^\]]+)\]\]/g;
 
+/**
+ * Character ranges covered by fenced code blocks, so wikilink handling can skip
+ * them the way {@link parseHeadings} and {@link parseTasks} already do. Obsidian
+ * ignores links inside code blocks; counting them produced phantom backlinks and
+ * permanent false `unresolved_links` findings for notes that merely *document*
+ * link syntax — findings no edit outside the fence could clear.
+ *
+ * Ranges rather than line flags, so a wikilink's match offset can be tested
+ * without changing the regex's existing (newline-tolerant) matching.
+ */
+function fencedRanges(content: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let offset = 0;
+  let inFence = false;
+  let fenceChar = "";
+  let start = 0;
+  for (const line of content.split("\n")) {
+    const lineStart = offset;
+    const lineEnd = offset + line.length + 1; // include the newline
+    const marker = line.match(/^\s*(```+|~~~+)/);
+    if (marker) {
+      const char = marker[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = char;
+        start = lineStart;
+      } else if (char === fenceChar) {
+        inFence = false;
+        ranges.push([start, lineEnd]);
+      }
+    }
+    offset = lineEnd;
+  }
+  if (inFence) ranges.push([start, offset]); // unterminated fence runs to EOF
+  return ranges;
+}
+
+/** Is `index` inside one of `ranges`? */
+function insideFence(ranges: Array<[number, number]>, index: number): boolean {
+  return ranges.some(([from, to]) => index >= from && index < to);
+}
+
 /** Reduce a raw wikilink body to just its note target (drop alias + heading). */
 function linkTarget(inner: string): string {
   // Strip display alias after "|", then any "#heading" / "#^block" anchor.
@@ -258,9 +300,11 @@ function linkTarget(inner: string): string {
 /** Extract all wikilink targets (alias/anchor stripped) from note content. */
 export function extractLinkTargets(content: string): string[] {
   const targets: string[] = [];
+  const fences = fencedRanges(content);
   let match: RegExpExecArray | null;
   WIKILINK_RE.lastIndex = 0;
   while ((match = WIKILINK_RE.exec(content)) !== null) {
+    if (insideFence(fences, match.index)) continue;
     const target = linkTarget(match[1]);
     if (target) targets.push(target);
   }
@@ -284,7 +328,13 @@ export function rewriteWikilinks(
   mapAnchor?: (target: string, anchor: string) => string | null
 ): { content: string; changed: number } {
   let changed = 0;
-  const next = content.replace(/(!?)\[\[([^\]]+)\]\]/g, (whole, bang: string, inner: string) => {
+  const fences = fencedRanges(content);
+  const next = content.replace(
+    /(!?)\[\[([^\]]+)\]\]/g,
+    (whole, bang: string, inner: string, index: number) => {
+    // A link inside a code fence is documentation, not a graph edge — leave it
+    // exactly as written so move_note/rename_section never edit code samples.
+    if (insideFence(fences, index)) return whole;
     const pipe = inner.indexOf("|");
     const left = pipe === -1 ? inner : inner.slice(0, pipe);
     const alias = pipe === -1 ? "" : inner.slice(pipe); // includes leading "|"
@@ -329,9 +379,11 @@ export interface LinkRef {
  */
 export function extractLinkRefs(content: string): LinkRef[] {
   const refs: LinkRef[] = [];
+  const fences = fencedRanges(content);
   let match: RegExpExecArray | null;
   WIKILINK_RE.lastIndex = 0;
   while ((match = WIKILINK_RE.exec(content)) !== null) {
+    if (insideFence(fences, match.index)) continue;
     const inner = match[1];
     const left = inner.split("|")[0];
     const hash = left.indexOf("#");
