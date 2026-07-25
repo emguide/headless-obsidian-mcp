@@ -1,13 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
-import dayjs from "dayjs";
-import advancedFormat from "dayjs/plugin/advancedFormat.js";
-import customParseFormat from "dayjs/plugin/customParseFormat.js";
+import { dayjs, formatMoment } from "./date-format.js";
 import { assertVaultPath, resolveNotePath } from "./vault.js";
-
-dayjs.extend(advancedFormat);
-dayjs.extend(customParseFormat);
 
 /** Env override for the daily-notes folder; wins over `.obsidian/daily-notes.json`. */
 export const DAILY_FOLDER_ENV = "OBSIDIAN_DAILY_FOLDER";
@@ -124,7 +119,7 @@ export async function resolveDailyNote(
   assertVaultPath(vaultPath);
   const cfg = await resolveDailyConfig(vaultPath);
   const day = parseDate(params.date, now);
-  const rendered = day.format(cfg.format);
+  const rendered = formatMoment(day, cfg.format);
   const path = cfg.folder ? `${cfg.folder}/${rendered}` : rendered;
   const fullPath = await resolveNotePath(vaultPath, path);
 

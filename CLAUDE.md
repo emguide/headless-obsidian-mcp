@@ -546,9 +546,16 @@ Interop with the vault's existing **core Templates plugin** — the built-in one
 not Templater. The server reproduces the plugin's insert-time substitution
 faithfully; it never invents a template format. Supported placeholders:
 `{{title}}`, `{{date}}`, `{{time}}`, and the inline format overrides
-`{{date:FORMAT}}` / `{{time:FORMAT}}`. Format tokens are Moment.js-compatible
-(via `dayjs` + `advancedFormat` / `customParseFormat`), so `{{date:Do MMMM
-YYYY}}` renders exactly as it does in Obsidian. Any unrecognized `{{...}}` token
+`{{date:FORMAT}}` / `{{time:FORMAT}}`. Format tokens are Moment.js-compatible,
+so `{{date:Do MMMM YYYY}}` renders exactly as it does in Obsidian. One shared
+date engine (`src/tools/date-format.ts`) backs both these placeholders and
+daily-note filename formats: dayjs with the `advancedFormat`,
+`customParseFormat`, `weekOfYear`, `weekYear`, `dayOfYear`, `isoWeek`, and
+`localeData` plugins, plus a `formatMoment` wrapper that supplies the
+day-of-year tokens (`DDD`/`DDDD`) dayjs has no token for. Week tokens
+(`gggg-[W]ww`, a common weekly-note format) therefore render instead of
+throwing, and `DDD` yields the day of year rather than three concatenated
+day-of-month digits. Any unrecognized `{{...}}` token
 (e.g. Templater's `{{tp...}}`) **passes through literally** — never silently
 dropped. Templater's `<% %>` scripting, `tp.*` API, prompts, and system commands
 are explicitly **out of scope** (they have no faithful headless equivalent).
