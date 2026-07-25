@@ -290,17 +290,18 @@ individual tool descriptions state only their deviations from it.
 ### get_vault_stats
 - **Purpose**: Summarize the whole vault in one call. Derived entirely from the shared index (no extra file reads).
 - **Input**: none
-- **Output**: `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, last_modified, first_modified }`. `orphan_notes` counts notes with no inbound and no outbound resolved links; the modification bounds are ISO timestamps (`null` for an empty vault).
+- **Output**: `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, conflict_notes, last_modified, first_modified }`. `orphan_notes` counts notes with no inbound and no outbound resolved links; `conflict_notes` counts unreconciled git-sync conflict copies (see "Git sync" below); the modification bounds are ISO timestamps (`null` for an empty vault).
 
 ### list_vault_issues
 - **Purpose**: Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
-- **Input**: `kind` (required): `"orphans"`, `"unresolved_links"`, or `"broken_anchors"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap). `offset` (optional): Rows/groups to skip before the window, for pagination (default `0`). `include_context` (optional): For the two link kinds, decorate each target with the source line(s) containing it — `{ target, context }` / `{ target, anchor, context }` — so you can see what the broken reference says before deciding how to fix it (see "Link context" above; only the returned window is read). Errors on `kind: "orphans"`.
+- **Input**: `kind` (required): `"orphans"`, `"unresolved_links"`, `"broken_anchors"`, or `"conflicts"`. `limit` (optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap). `offset` (optional): Rows/groups to skip before the window, for pagination (default `0`). `include_context` (optional): For the two link kinds, decorate each target with the source line(s) containing it — `{ target, context }` / `{ target, anchor, context }` — so you can see what the broken reference says before deciding how to fix it (see "Link context" above; only the returned window is read). Errors on `kind: "orphans"` and `kind: "conflicts"` (neither has links to contextualize).
 - **Output**: `{ results, returned, skipped, omitted, truncated }`. `results`' shape depends on `kind`:
   - `"orphans"`: Array of note headers (same shape as `list_notes`) for notes with no inbound and no outbound resolved links — the exact predicate `get_vault_stats` uses for `orphan_notes`.
   - `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `source` is the note path, `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
   - `"broken_anchors"`: `[[note#heading]]` links whose target note resolves but whose heading anchor matches no heading in that note — the complement of `unresolved_links` ("note resolves, heading doesn't"). Array of `{ source, targets: [{ target, anchor }] }` grouped by source note, same truncation semantics as `unresolved_links` (counts groups, not individual anchors). Block-ref anchors (`#^id`) and links to unresolved notes are excluded.
+  - `"conflicts"`: Array of `{ path, original, created }` — `path` is the conflict-copy note (`<note> (conflicted YYYY-MM-DD HHMMSS)`, see "Git sync" below), `original` is the canonical note path it diverged from, `created` is the copy's file mtime as an ISO timestamp. One row per copy (not grouped).
   `returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`.
-- **Count relationship**: for the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), `orphans`' `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count. A group-limited result naturally shows fewer.
+- **Count relationship**: for the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), `orphans`' `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` array length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count; `conflicts`' `results.length` equals `get_vault_stats`'s `conflict_notes`. A group-limited result naturally shows fewer.
 - **Notes**: Index-backed (no file read).
 
 ### list_files
@@ -574,11 +575,12 @@ keep precedence, so existing behavior is unchanged.
 
 ### get_config
 - **Purpose**: Report the server's *own configuration* — how it is set up, not what is in the vault (that is `get_vault_stats`). Answers "where is the template folder?", "are writes enabled?", "which vault am I pointed at?" in one call, instead of inferring them from other tools' side effects.
-- **Input**: `section` (optional): `"template" | "daily" | "writes" | "vault" | "tools"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors loudly, listing the valid sections.
-- **Output**: `{ template, daily, writes, vault, tools }` (or one unwrapped section):
+- **Input**: `section` (optional): `"template" | "daily" | "writes" | "sync" | "vault" | "tools"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors loudly, listing the valid sections.
+- **Output**: `{ template, daily, writes, sync, vault, tools }` (or one unwrapped section):
   - `template`: `{ folder, date_format, time_format }` — `folder` is the resolved template folder or `null` when none is configured (this tool does **not** throw on an unconfigured folder, unlike the template tools); `date_format`/`time_format` are the **effective** formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`).
   - `daily`: `{ folder, format, template }` — the Daily Notes configuration `resolve_daily_note` runs on, reported leniently (`folder: null` when daily notes are unconfigured, no throw; `""` means configured at the vault root); `format` is the effective filename format, `template` the configured daily template path or `null`.
-  - `writes`: `{ writes_enabled, git_autocommit }` — `writes_enabled` is **derived**: `true` iff at least one write tool is exposed by the tool policy; `git_autocommit` is the `OBSIDIAN_GIT_AUTOCOMMIT` flag state.
+  - `writes`: `{ writes_enabled, git_sync }` — `writes_enabled` is **derived**: `true` iff at least one write tool is exposed by the tool policy; `git_sync` is the active `OBSIDIAN_GIT_SYNC` mode (`"off" | "commit" | "every-write" | "timer"`).
+  - `sync`: `{ mode, interval, remote, last_sync, last_error }` — `mode` mirrors `writes.git_sync`; `interval` is the effective `OBSIDIAN_GIT_SYNC_INTERVAL` in seconds; `remote` is the effective `OBSIDIAN_GIT_REMOTE`; `last_sync`/`last_error` track only the **background timer's** own sync attempts (`timer` mode) — `last_sync` is the ISO timestamp of its last successful tick (`null` if none yet), `last_error` the message from its most recent failed tick (`null` if the last one succeeded or none has run yet). In `commit`/`every-write` mode, where there is no background timer, both stay `null` forever — a failed `every-write` pull/push instead throws back to the write call (see "Git sync" below).
   - `vault`: `{ path }` — the configured `OBSIDIAN_VAULT_PATH`. Configuration only; vault contents (counts, sizes, link health) stay in `get_vault_stats`.
   - `tools`: `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset), the sorted exposed tool names (always including `get_config`), and the sorted gated tool names the policy hides.
 - **Gating**: Read-only and **never excludable** by `OBSIDIAN_TOOLS` — it is how an agent discovers the active tool policy, so it is always exposed.
@@ -637,23 +639,65 @@ as defense in depth, calling one is rejected with the current policy named.
 Write/read classification derives from `isWriteTool` (`src/tools/write.ts`) —
 one source of truth. Implemented in `src/tools/tool-policy.ts`.
 
-### Git guard (`OBSIDIAN_GIT_AUTOCOMMIT`)
+### Git sync (`OBSIDIAN_GIT_SYNC`)
 
-Set `OBSIDIAN_GIT_AUTOCOMMIT` to a truthy value (`1`, `true`, `yes`, `on`) to
-snapshot the vault into a git commit **before every write**, so the agent's
-change lands as an isolated, revertible diff. The pre-existing state is
-committed (`git add -A && git commit`); the agent's own write is left
-**uncommitted** for review. A clean working tree is not an error (nothing to
-snapshot). The guard is **fail-closed**: when enabled but the snapshot cannot be
-taken (git missing, vault not a repo, or the commit fails), the write is
-refused rather than proceeding without the safety net. Implemented in
-`src/tools/git-guard.ts`.
+`OBSIDIAN_GIT_SYNC` selects one of four modes:
+
+- `off` (default) — no git involvement.
+- `commit` — every write is committed (`git add -A && git commit`) immediately
+  after it lands, with a tool-derived message (e.g. `add_tag: projects/alpha`).
+  No remote interaction.
+- `every-write` — commits like `commit`, then additionally pulls (merge) and
+  pushes the configured remote after every write.
+- `timer` — commits like `commit`; a background interval (not per-write) pulls
+  and pushes on a fixed cadence.
+
+Two more vars tune `every-write`/`timer`: `OBSIDIAN_GIT_SYNC_INTERVAL` (seconds
+between background syncs in `timer` mode, default `300`, floored at `1`) and
+`OBSIDIAN_GIT_REMOTE` (the remote name to pull/push, default `origin`).
+
+**Fail-closed contract.** In any mode other than `off`, a write is refused
+*before* touching the filesystem if the vault is not a usable git repository
+(`assertSyncableBeforeWrite`), and the post-write commit itself throws if it
+fails (`commitAfterWrite`) — so a write never lands without its snapshot. The
+**one exception** is the background timer tick (`sync-timer.ts`
+`runSyncTick`): a scheduled pull/push failure is recorded (`get_config`'s
+`sync.last_error`) rather than thrown, since there is no in-flight write to
+fail on the timer's own account.
+
+**Conflict handling (non-destructive).** Every pull (`every-write`'s per-write
+pull, or `timer`'s background tick) is a merge; a real conflict is resolved
+automatically without blocking or discarding data, per conflicting file, based
+on which side changed:
+
+- **Both modified**: the local version is kept aside as a
+  `<note> (conflicted YYYY-MM-DD HHMMSS)` copy; the note's canonical path takes
+  the remote version.
+- **Remote deleted, local modified**: the local version is kept aside as the
+  same conflict-copy; the canonical path is deleted (matching the remote's
+  intent — deletion can be the canonical outcome).
+- **Local deleted, remote modified**: the remote version is restored at the
+  canonical path; no conflict copy is made (there was no local content to
+  preserve).
+
+Conflict copies are terminal artifacts (a conflict on one note is never itself
+re-conflicted into a copy-of-a-copy). Discover unreconciled copies via
+`list_vault_issues kind:"conflicts"` or the `conflict_notes` count on
+`get_vault_stats`.
+
+**Migration.** `OBSIDIAN_GIT_AUTOCOMMIT` (the old flag) is deprecated: setting
+it truthy now warns and maps to `OBSIDIAN_GIT_SYNC=commit`. An explicit
+`OBSIDIAN_GIT_SYNC` always wins over the legacy flag. Implemented in
+`src/tools/git-sync.ts` (commit/pull/push/conflict logic), `src/tools/write.ts`
+(`assertSyncableBeforeWrite`/`afterWrite`, the write funnel's fail-closed hook),
+`src/tools/sync-timer.ts` (the background interval), and `src/tools/env-flags.ts`
+(mode/interval/remote resolution and the `OBSIDIAN_GIT_AUTOCOMMIT` migration).
 
 ## Dependencies
 
 - Node.js runtime (18+)
 - ripgrep (`rg`) command-line tool
-- git (only required when `OBSIDIAN_GIT_AUTOCOMMIT` is enabled)
+- git (only required when `OBSIDIAN_GIT_SYNC` is set to a mode other than `off`)
 - @modelcontextprotocol/sdk
 - gray-matter (frontmatter parsing)
 - commander (query CLI argument parsing)
@@ -742,10 +786,12 @@ npm run query -- config                                 # Whole server config
 npm run query -- config template                        # Just the template section
 npm run query -- config daily                           # Daily Notes config (folder/format/template)
 npm run query -- config tools                           # Active tool policy (exposed/excluded)
+npm run query -- config sync                             # Git-sync mode/interval/remote/last_sync/last_error
 npm run query -- vault-issues orphans                    # Notes with no in/outbound links
 npm run query -- vault-issues unresolved_links --limit 50  # Broken wikilink targets, by source
 npm run query -- vault-issues unresolved_links --include-context  # ...with the offending lines
 npm run query -- vault-issues broken_anchors --limit 50    # Resolved-note, dead-heading anchors, by source
+npm run query -- vault-issues conflicts                    # Unreconciled git-sync conflict copies
 npm run query -- files --folder assets --extension png  # Non-markdown files (attachments)
 npm run query -- folders                                 # Folder tree with note counts
 npm run query -- folders --folder projects --depth 1     # Immediate subfolders of projects/
@@ -795,10 +841,12 @@ npm run query -- bulk-edit --select '{"where":{"status":"draft"}}' \
 printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"
 ```
 
-Enable the git safety net for any write by exporting the flag first:
+Enable git sync for any write by exporting the mode first (see `OBSIDIAN_GIT_SYNC`
+above; the legacy `OBSIDIAN_GIT_AUTOCOMMIT=1` still works but warns and maps to
+`commit`):
 
 ```bash
-OBSIDIAN_GIT_AUTOCOMMIT=1 npm run query -- add-tag "projects/alpha" review
+OBSIDIAN_GIT_SYNC=commit npm run query -- add-tag "projects/alpha" review
 ```
 
 (With mise: `mise run query -- search "productivity"`, etc.)
