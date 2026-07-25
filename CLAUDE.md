@@ -503,7 +503,7 @@ change a tag or a section without reading and rewriting the whole note.
   - `dry_run` (optional): preview the matched notes and parsed operations with **zero writes and no git snapshot**. This previews the selection and operation shape only — it does not parse notes or predict per-note apply outcomes, so a note that will fail on commit (e.g. `rename_property` onto an existing key) still shows in the dry-run match set.
   - `expected_count` (optional): abort before any snapshot or write if the resolved match count differs — guards a filter that drifted between an agent's preview and its commit.
 - **Output**: `{ dry_run, matched_count, applied_count, failed_count, results }` where each `results` entry is `{ path, ok: true, changed }` or `{ path, ok: false, error }`. A per-note failure (missing note, frontmatter validation error, write error) is isolated and reported — it does not sink the rest of the batch. `changed: false` marks a note whose operations were all no-ops (e.g. a tag already present).
-- **Git**: One `snapshotBeforeWrite` call for the whole batch, not one per note — the pre-existing state is committed once, then every note in the batch is written uncommitted, so a partial batch still reviews and reverts as a single diff.
+- **Git**: One `afterWrite` commit for the whole batch, not one per note — `assertSyncableBeforeWrite` guards once up front, then every note in the batch is written (via `writeResolved`) and the batch is committed once at the end, so a partial batch still reviews and reverts as a single diff.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
 **Structure notes**: Body-only edits (sections) preserve the frontmatter block
