@@ -111,3 +111,68 @@ test("terminal artifact: a conflict copy never spawns a second-order copy", asyn
   // The seed copy + exactly one new copy — no copy-of-a-copy.
   assert.equal(files.length, 2, files.join(", "));
 });
+
+test("delete/modify conflict: remote deletes, local modifies", async (t) => {
+  process.env.OBSIDIAN_GIT_SYNC = "every-write";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  const fx = await makeDivergingClones("note.md", "# Base\nshared\n");
+  t.after(fx.cleanup);
+
+  // Remote deletes note.md and pushes.
+  await g(fx.b, "rm", "-f", "note.md");
+  await g(fx.b, "add", "-A");
+  await g(fx.b, "commit", "-q", "-m", "remote delete");
+  await g(fx.b, "push", "-q", "origin", "HEAD");
+
+  // Local modifies note.md and commits.
+  await writeFile(join(fx.a, "note.md"), "# Base\nlocal-modify\n");
+  await g(fx.a, "add", "-A");
+  await g(fx.a, "commit", "-q", "-m", "local modify");
+  const result = await syncOnce(fx.a, { now: new Date(Date.UTC(2026, 6, 24, 14, 30, 22)) });
+
+  // No throw; conflict reported.
+  assert.equal(result.conflicts.length, 1);
+  const copy = result.conflicts[0];
+  assert.equal(isConflictCopy(copy), true);
+  assert.equal(parseConflictCopy(copy)!.original, "note");
+
+  // Canonical note is GONE (remote deletion wins).
+  assert.equal((await readdir(fx.a)).includes("note.md"), false, "note.md deleted");
+  // Conflict copy preserves the local edit.
+  const copyContent = await readFile(join(fx.a, `${copy}.md`), "utf-8");
+  assert.equal(copyContent, "# Base\nlocal-modify\n");
+
+  // Working tree clean.
+  const status = (await execFileAsync("git", ["-C", fx.a, "status", "--porcelain"])).stdout.trim();
+  assert.equal(status, "", "tree clean after delete/modify resolution");
+});
+
+test("delete/modify conflict: local deletes, remote modifies", async (t) => {
+  process.env.OBSIDIAN_GIT_SYNC = "every-write";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  const fx = await makeDivergingClones("note.md", "# Base\nshared\n");
+  t.after(fx.cleanup);
+
+  // Remote modifies note.md and pushes.
+  await writeFile(join(fx.b, "note.md"), "# Base\nremote-modify\n");
+  await g(fx.b, "add", "-A");
+  await g(fx.b, "commit", "-q", "-m", "remote modify");
+  await g(fx.b, "push", "-q", "origin", "HEAD");
+
+  // Local deletes note.md and commits.
+  await g(fx.a, "rm", "-f", "note.md");
+  await g(fx.a, "add", "-A");
+  await g(fx.a, "commit", "-q", "-m", "local delete");
+  const result = await syncOnce(fx.a, { now: new Date(Date.UTC(2026, 6, 24, 14, 30, 22)) });
+
+  // No throw; no conflict copy (nothing to preserve locally).
+  assert.equal(result.conflicts.length, 0, "no conflict copy when local deleted");
+
+  // Canonical note exists with remote content.
+  const content = await readFile(join(fx.a, "note.md"), "utf-8");
+  assert.equal(content, "# Base\nremote-modify\n", "remote content preserved");
+
+  // Working tree clean.
+  const status = (await execFileAsync("git", ["-C", fx.a, "status", "--porcelain"])).stdout.trim();
+  assert.equal(status, "", "tree clean after delete/modify resolution");
+});

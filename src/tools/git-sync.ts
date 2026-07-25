@@ -106,6 +106,20 @@ async function currentBranch(vaultPath: string): Promise<string> {
   return (await git(vaultPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
 }
 
+/** Check if a specific stage exists for a file in a merge conflict. */
+async function checkStageExists(
+  vaultPath: string,
+  rel: string,
+  stage: "2" | "3"
+): Promise<boolean> {
+  try {
+    await git(vaultPath, ["show", `:${stage}:${rel}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Pull (merge) from the remote then push local commits. Fail-closed: an
  * unreachable remote or a failed push throws. Resolves merge conflicts
@@ -130,11 +144,11 @@ export async function syncOnce(
       const m = error instanceof Error ? error.message : String(error);
       throw new Error(`${GIT_SYNC_ENV} pull failed (${m.trim()}).`);
     }
-    // Non-destructive resolution: for each conflicted file, keep the LOCAL
-    // version aside as a (conflicted …) copy, then take REMOTE (theirs) as
-    // canonical. Conflict copies are terminal artifacts — a conflict on one
-    // never produces a copy-of-a-copy because the ORIGINAL path is copied,
-    // never the copy itself (git only reports the real path as conflicted).
+    // Non-destructive resolution: for each conflicted file, determine which
+    // stages exist and resolve accordingly to keep both versions without
+    // wedging the merge. Conflict copies are terminal artifacts — a conflict
+    // on one never produces a copy-of-a-copy because the ORIGINAL path is
+    // copied, never the copy itself (git only reports the real path as conflicted).
     const now = opts.now ?? new Date();
     const stamp = conflictStamp(now);
     const conflicted = (
@@ -146,16 +160,35 @@ export async function syncOnce(
 
     for (const rel of conflicted) {
       const canonical = rel.replace(/\.md$/, "");
-      // Local (ours) content is at the ":2:" stage; write it aside.
-      const localContent = await git(vaultPath, ["show", `:2:${rel}`]).catch(() => "");
-      const copyRel = `${conflictCopyName(canonical, stamp)}.md`;
-      await writeFile(join(vaultPath, copyRel), localContent, "utf-8");
-      // Take remote (theirs) for the canonical path.
-      await git(vaultPath, ["checkout", "--theirs", "--", rel]);
-      await git(vaultPath, ["add", "--", rel, copyRel]);
-      conflicts.push(conflictCopyName(canonical, stamp));
+
+      // Detect which stages exist (2=local/ours, 3=remote/theirs).
+      const stage2Exists = await checkStageExists(vaultPath, rel, "2");
+      const stage3Exists = await checkStageExists(vaultPath, rel, "3");
+
+      if (stage2Exists && stage3Exists) {
+        // Both modified: keep local as copy, take remote for canonical.
+        const localContent = await git(vaultPath, ["show", `:2:${rel}`]);
+        const copyRel = `${conflictCopyName(canonical, stamp)}.md`;
+        await writeFile(join(vaultPath, copyRel), localContent, "utf-8");
+        await git(vaultPath, ["checkout", "--theirs", "--", rel]);
+        await git(vaultPath, ["add", "--", rel, copyRel]);
+        conflicts.push(conflictCopyName(canonical, stamp));
+      } else if (stage2Exists && !stage3Exists) {
+        // Remote deleted, local modified: preserve local in copy, delete canonical.
+        const localContent = await git(vaultPath, ["show", `:2:${rel}`]);
+        const copyRel = `${conflictCopyName(canonical, stamp)}.md`;
+        await writeFile(join(vaultPath, copyRel), localContent, "utf-8");
+        await git(vaultPath, ["rm", "--", rel]);
+        await git(vaultPath, ["add", "--", copyRel]);
+        conflicts.push(conflictCopyName(canonical, stamp));
+      } else if (!stage2Exists && stage3Exists) {
+        // Local deleted, remote modified: take remote for canonical, no copy.
+        await git(vaultPath, ["checkout", "--theirs", "--", rel]);
+        await git(vaultPath, ["add", "--", rel]);
+        // No conflict copy: nothing local to preserve.
+      }
     }
-    // Complete the merge commit (records both the resolved file and the copies).
+    // Complete the merge commit (records resolved files and any copies).
     await git(vaultPath, ["commit", "--no-verify", "--no-edit"]);
     pulled = true;
   }
