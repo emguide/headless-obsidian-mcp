@@ -21,6 +21,7 @@ import {
 import { getFrontmatter } from "../src/tools/frontmatter.js";
 import { readRaw } from "../src/tools/write.js";
 import { bulkEdit } from "../src/tools/bulk.js";
+import { insertTemplate } from "../src/tools/templates.js";
 
 /** Vault with: a folder note, a root note, and two notes sharing a basename. */
 function notes() {
@@ -272,5 +273,28 @@ describe("bulk_edit resolves explicit paths", () => {
     assert.equal(alpha.ok, true);
     assert.equal(log.ok, false);
     assert.match((log as any).error, /Ambiguous note name: log/);
+  });
+});
+
+describe("insert_template echoes the resolved path", () => {
+  let fx: Fixture;
+  before(async () => {
+    fx = await makeVault([{ path: "projects/alpha.md", content: "# Alpha\n" }]);
+    // A template folder + template so insert has something to expand.
+    await writeNote(fx.vaultPath, {
+      path: ".obsidian-templates/T", content: "inserted line",
+    });
+    process.env.OBSIDIAN_TEMPLATE_FOLDER = ".obsidian-templates";
+  });
+  after(() => {
+    delete process.env.OBSIDIAN_TEMPLATE_FOLDER;
+    return fx.cleanup();
+  });
+
+  test("append into a bare-named note echoes projects/alpha", async () => {
+    const res = await insertTemplate(fx.vaultPath, {
+      template: "T", path: "alpha", position: "append",
+    });
+    assert.equal(res.path, "projects/alpha");
   });
 });

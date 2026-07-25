@@ -277,18 +277,21 @@ export async function insertTemplate(
   const content = await expandTemplateFor(vaultPath, template, path);
 
   let health: LinkHealth;
+  let resolvedPath = path.replace(/\.md$/, "");
   if (position === "append") {
     const r = await appendNote(vaultPath, { path, content });
     health = {
       unresolved_links: r.unresolved_links,
       broken_anchors: r.broken_anchors,
     };
+    resolvedPath = r.path;
   } else if (position === "prepend") {
     const r = await prependNote(vaultPath, { path, content });
     health = {
       unresolved_links: r.unresolved_links,
       broken_anchors: r.broken_anchors,
     };
+    resolvedPath = r.path;
   } else {
     const r = await appendNoteSection(vaultPath, {
       path,
@@ -300,6 +303,7 @@ export async function insertTemplate(
       unresolved_links: r.unresolved_links,
       broken_anchors: r.broken_anchors,
     };
+    resolvedPath = r.path;
   }
-  return { path: path.replace(/\.md$/, ""), position, ...health };
+  return { path: resolvedPath, position, ...health };
 }
