@@ -22,6 +22,22 @@ function canonical(notePath: string): string {
 }
 
 /**
+ * Resolve a human-facing note path to the note's canonical vault path, the way
+ * the index-backed readers (`get_links`, `get_property`, `get_outline`,
+ * `get_related_notes`) do: case-insensitively, with Obsidian's bare-basename
+ * shortest-path fallback (see {@link VaultIndex.resolve}). Returns the canonical
+ * path when the name resolves, else the input's own canonical form unchanged —
+ * so a caller reading from disk still attempts the literal path and produces the
+ * usual did-you-mean error if it, too, is missing. This is the single point that
+ * keeps the disk-reading readers (`get_frontmatter`, `read_section`,
+ * `read_notes`) in the same addressing camp as their index-backed siblings.
+ */
+export function resolveNoteName(index: VaultIndex, notePath: string): string {
+  const canon = canonical(notePath);
+  return index.resolve(canon) ?? canon;
+}
+
+/**
  * Up to {@link MAX_SUGGESTIONS} candidate paths for a note path that failed to
  * resolve. The whole input is tried as a name first (catches a title or alias
  * passed as the "path"); when the input carries a folder prefix, its last

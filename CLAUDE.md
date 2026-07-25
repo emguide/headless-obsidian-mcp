@@ -101,6 +101,32 @@ Covered sites: the write funnel's not-found paths (`patch_note`, `delete_note`,
 files only — a too-large file gets no suggestions). `move_file` is excluded
 (attachments are not indexed).
 
+**Note addressing (shared).** Every single-note reader — `get_frontmatter`,
+`get_property`, `get_outline`, `get_links`, `read_section`, `read_notes`,
+`get_related_notes` — addresses its target the same way: the `path` argument is
+resolved through the shared index (`VaultIndex.resolve` via the
+`resolveNoteName` helper in `src/tools/not-found.ts`), so a bare basename
+(`alpha` → `projects/alpha`) or a wrong-case path (`Projects/Alpha`) reaches the
+same note through all of them. This is Obsidian's own wikilink resolution:
+exact path first, then — for a **slash-less** name only — the shortest-path
+basename fallback; a slash-qualified path that names no note stays unresolved
+(it never falls back to a same-basename note elsewhere), and a **title or
+alias** is *not* a resolvable address here (that is `resolve_note`'s job). The
+disk-reading readers (`get_frontmatter`, `read_section`, `read_notes`) resolve
+the name to a canonical path, then read that file (gray-matter parity for
+frontmatter, call-time body reads for sections); the index-backed readers answer
+from the index directly. A name that resolves to nothing falls through to the
+literal path and produces the usual not-found error with did-you-mean
+candidates. Stated once here; individual reader descriptions do not repeat it.
+
+Resolution itself is defined by `VaultIndex.resolve` (`src/tools/vault-index.ts`)
+and is used identically for the outbound/backlink graph, `unresolved_links`, and
+these readers — so "what links to this note" and "what does this name address"
+can never disagree. In particular a broken slash-link (`[[wrong-folder/alpha]]`)
+is reported as unresolved rather than silently pointing at `projects/alpha`,
+which also keeps `move_note`'s link rewriting (it only rewrites slash-less
+basename references) consistent with what the graph counts as a backlink.
+
 **Pagination (`offset`).** Every envelope-returning tool (all the list-style
 tools plus `search_notes` and `search_notes_ranked`) accepts an optional
 `offset` (default `0`): the rows are a window `[offset, offset + limit)` over the
@@ -182,7 +208,7 @@ individual tool descriptions state only their deviations from it.
   - `unresolved_links`: Wikilink targets that do not resolve to any note
   - `backlinks`: Notes elsewhere in the vault that link to this one
   - With `include_context: true`, every row in all three arrays gains `context` (`{ line, text }` pairs): `outbound_links` rows become `{ target, path, context }`, `unresolved_links` rows become `{ target, context }` (bare strings without the flag), and `backlinks` rows become `{ path, context }` — the linking lines in each source note. Without the flag the shapes are unchanged.
-- **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default). When a bare `[[basename]]` matches several notes, it resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — matching Obsidian's shortest-path rule, so a bare link points to the same note vault-wide regardless of where it appears.
+- **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default). When a bare `[[basename]]` matches several notes, it resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — matching Obsidian's shortest-path rule, so a bare link points to the same note vault-wide regardless of where it appears. A **slash-qualified** target (`[[folder/note]]`) resolves only by exact path: if that path names no note it is reported as unresolved — the basename fallback applies to slash-less names alone, so `[[wrong-folder/note]]` is a broken link, never a silent hop to a same-basename note elsewhere.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
 ### get_outline

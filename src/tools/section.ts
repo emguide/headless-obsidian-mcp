@@ -1,15 +1,18 @@
 import { readFile, stat } from "node:fs/promises";
 import matter from "gray-matter";
 import { resolveNotePath, parseHeadings, headingPaths } from "./vault.js";
-import { noteNotFoundError } from "./not-found.js";
+import { getIndex } from "./vault-index.js";
+import { noteNotFoundError, resolveNoteName } from "./not-found.js";
 import { ReadSectionParams, SectionResult } from "../types.js";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Read a single section from a note without loading the whole note into the
- * caller's context. Reads the file at call time (the index does not retain body
- * text), then addresses the section by bare heading or by a " > "-joined path,
+ * caller's context. Addresses the note the same way the index-backed readers do
+ * (a bare basename or wrong-case name resolves via {@link resolveNoteName}),
+ * then reads the resolved file at call time (the index does not retain body
+ * text). The section is addressed by bare heading or by a " > "-joined path,
  * failing loudly when a bare heading is ambiguous. The returned slice is the
  * heading line plus its own body; nested subsections are excluded unless
  * `include_subsections` is set.
@@ -26,7 +29,9 @@ export async function readSection(
     throw new Error("A section is required for read_section");
   }
 
-  const fullPath = resolveNotePath(vaultPath, notePath); // guards traversal
+  const index = await getIndex(vaultPath);
+  const canonical = resolveNoteName(index, notePath);
+  const fullPath = resolveNotePath(vaultPath, canonical); // guards traversal
   let info;
   try {
     info = await stat(fullPath);
@@ -85,5 +90,5 @@ export async function readSection(
   }
 
   const content = [lines[h.line], ...lines.slice(bodyStart, bodyEnd)].join("\n");
-  return { path: notePath.replace(/\.md$/, ""), section: paths[i], level: h.level, content };
+  return { path: canonical, section: paths[i], level: h.level, content };
 }

@@ -166,15 +166,21 @@ describe("enriched not-found errors across tools", () => {
   });
 
   test("file-reading read sites suggest candidates", async () => {
-    await assert.rejects(() => getFrontmatter(fx.vaultPath, "alpha"), HINT);
+    // These readers now resolve a bare basename ("alpha" -> projects/alpha) just
+    // like the index-backed ones, so a genuine miss here must NOT be a valid
+    // note name. A title ("Alpha Project") does not resolve as a path (only
+    // resolve_note matches titles), yet still produces the did-you-mean hint.
+    await assert.rejects(() => getFrontmatter(fx.vaultPath, "Alpha Project"), HINT);
     await assert.rejects(
-      () => readSection(fx.vaultPath, { path: "alpha", section: "Alpha" }),
+      () => readSection(fx.vaultPath, { path: "Alpha Project", section: "Alpha" }),
       HINT
     );
   });
 
   test("read_notes enriches per-path errors without failing the batch", async () => {
-    const res = await readNotes(fx.vaultPath, ["alpha", "projects/alpha"]);
+    // "Alpha Project" is a title, not a path/basename, so it does not resolve —
+    // it lands in errors (with a hint); "projects/alpha" reads normally.
+    const res = await readNotes(fx.vaultPath, ["Alpha Project", "projects/alpha"]);
     assert.equal(res.notes.length, 1);
     assert.equal(res.notes[0].path, "projects/alpha");
     assert.equal(res.errors.length, 1);

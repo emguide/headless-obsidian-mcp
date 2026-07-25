@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { moveNote, moveFile, deleteNote, writeNote } from "../src/tools/write.js";
+import { getLinks } from "../src/tools/links.js";
 import { makeVault, Fixture } from "./fixtures.js";
 
 const read = (vault: string, name: string) => readFile(join(vault, name), "utf-8");
@@ -61,6 +62,36 @@ test("moveNote errors on a missing source and on a no-op move", async () => {
   const local = await makeVault([{ path: "x.md", content: "# X\n" }]);
   await assert.rejects(() => moveNote(local.vaultPath, { from: "ghost", to: "y" }), /not found/);
   await assert.rejects(() => moveNote(local.vaultPath, { from: "x", to: "x" }), /same note/);
+  await local.cleanup();
+});
+
+test("a slash-qualified target with no matching note is unresolved, not a hidden backlink", async () => {
+  // Root cause of the move_note desync the reviewer found: the index used to
+  // apply its basename fallback even to slash-qualified targets, so
+  // [[wrong-folder/alpha]] silently resolved to projects/alpha. That both hid a
+  // genuinely broken link from unresolved_links AND made it a phantom backlink
+  // of projects/alpha that move_note refused to rewrite (its predicate only
+  // touches slash-less basename links) — so a move "broke" a link it claimed to
+  // protect. With the fallback gone, the link is honestly unresolved from the
+  // start; a move of projects/alpha never counted it as a backlink at all.
+  const local = await makeVault([
+    { path: "home.md", content: "# Home\nSee [[wrong-folder/alpha]].\n" },
+    { path: "projects/alpha.md", content: "# Alpha\n" },
+  ]);
+
+  const before = await getLinks(local.vaultPath, "home");
+  assert.deepEqual(before.unresolved_links, ["wrong-folder/alpha"]);
+  assert.deepEqual(before.outbound_links, []);
+
+  const result = await moveNote(local.vaultPath, {
+    from: "projects/alpha",
+    to: "archive/alpha2",
+  });
+  // The bogus link was never a real backlink of projects/alpha — nothing to rewrite.
+  assert.equal(result.updated_notes, 0);
+  // The move leaves the pre-existing broken link exactly as it was.
+  assert.match(await read(local.vaultPath, "home.md"), /\[\[wrong-folder\/alpha\]\]/);
+  assert.equal(await exists(local.vaultPath, "archive/alpha2.md"), true);
   await local.cleanup();
 });
 

@@ -185,13 +185,20 @@ export class VaultIndex {
    * matches several notes resolves to the one closest to the vault root, ties
    * broken alphabetically (the byBasename ordering established during refresh),
    * matching Obsidian's default shortest-path resolution.
+   *
+   * The basename fallback applies ONLY to slash-less targets. A slash-qualified
+   * target ("folder/note") is a path-qualified link: if that exact path has no
+   * note it is UNRESOLVED, exactly as Obsidian treats it — it does NOT fall
+   * back to a same-basename note elsewhere. Falling back there would both hide a
+   * genuinely broken link from `unresolved_links` and desync `move_note`, whose
+   * rewrite predicate only ever touches slash-less basename references.
    */
   resolve(target: string): string | null {
     const key = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
     const exact = this.byPath.get(key);
     if (exact) return exact;
-    const base = key.split("/").pop()!;
-    const candidates = this.byBasename.get(base);
+    if (key.includes("/")) return null; // path-qualified: no basename fallback
+    const candidates = this.byBasename.get(key);
     return candidates && candidates.length > 0 ? candidates[0] : null;
   }
 
