@@ -16,6 +16,8 @@ import {
   commitAfterWrite,
   syncOnce,
 } from "../src/tools/git-sync.js";
+import { runSyncTick } from "../src/tools/sync-timer.js";
+import { getSyncState } from "../src/tools/sync-state.js";
 
 const execFileAsync = promisify(execFile);
 async function g(dir: string, ...args: string[]) {
@@ -155,4 +157,32 @@ test("syncOnce: fast-forward pull brings remote commits, push sends local", asyn
   const verify = join(fx.base, "verify");
   await execFileAsync("git", ["clone", "-q", fx.remote, verify]);
   assert.equal(await readFile(join(verify, "c.md"), "utf-8"), "# C\n", "pushed c");
+});
+
+test("runSyncTick: records success on a clean sync", async (t) => {
+  const fx = await makeRemoteAndClone();
+  t.after(fx.cleanup);
+  process.env.OBSIDIAN_GIT_SYNC = "timer";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  await runSyncTick(fx.work);
+  const state = getSyncState();
+  assert.match(state.last_sync ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(state.last_error, null);
+});
+
+test("runSyncTick: records error (not throws) on a broken remote", async (t) => {
+  const base = await mkdtemp(join(tmpdir(), "gitsync-broken-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const work = join(base, "work");
+  await execFileAsync("git", ["init", "-q", work]);
+  await g(work, "config", "user.email", "t@x.com");
+  await g(work, "config", "user.name", "T");
+  await writeFile(join(work, "a.md"), "# A\n");
+  await g(work, "add", "-A");
+  await g(work, "commit", "-q", "-m", "a");
+  await g(work, "remote", "add", "origin", join(base, "does-not-exist.git"));
+  process.env.OBSIDIAN_GIT_SYNC = "timer";
+  t.after(() => delete process.env.OBSIDIAN_GIT_SYNC);
+  await runSyncTick(work); // must NOT throw
+  assert.notEqual(getSyncState().last_error, null);
 });

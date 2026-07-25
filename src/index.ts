@@ -93,6 +93,8 @@ import {
   resolveToolPolicy,
   ToolPolicy,
 } from "./tools/tool-policy.js";
+import { resolveGitSyncMode } from "./tools/env-flags.js";
+import { startSyncTimer } from "./tools/sync-timer.js";
 
 const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH;
 if (!VAULT_PATH) {
@@ -111,6 +113,18 @@ try {
   process.exit(1);
 }
 const EXPOSED_TOOLS = TOOL_POLICY.exposed;
+
+// Resolve the git-sync mode once, fail-loud: a typo'd OBSIDIAN_GIT_SYNC value
+// kills startup cleanly.
+try {
+  const { warning: syncWarning } = resolveGitSyncMode();
+  if (syncWarning) console.error(`Warning: ${syncWarning}`);
+  // Start the background sync loop (no-op unless mode is "timer").
+  startSyncTimer(VAULT_PATH);
+} catch (error) {
+  console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 
 const server = new Server(
   {
