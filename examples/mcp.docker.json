@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "obsidian": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "/absolute/path/to/your/obsidian/vault:/vault:ro",
+        "headless-obsidian-mcp"
+      ]
+    }
+  }
+}

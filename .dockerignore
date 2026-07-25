@@ -1,0 +1,26 @@
+# Build inputs only. Everything the image needs is package.json,
+# package-lock.json, tsconfig.json, and src/ — the build stage compiles those
+# into dist/, so a host-built dist/ must never leak in and shadow it.
+node_modules/
+dist/
+*.log
+
+.git/
+.github/
+.worktrees/
+.superpowers/
+
+tests/
+docs/
+examples/
+skills/
+
+.dockerignore
+Dockerfile
+.env
+.env.example
+CLAUDE.md
+README.md
+LICENSE
+mise.toml
+start-server.sh
