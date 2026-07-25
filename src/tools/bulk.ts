@@ -18,6 +18,7 @@ import {
   assertSyncableBeforeWrite,
   afterWrite,
 } from "./write.js";
+import { resolveWriteTarget } from "./not-found.js";
 
 export type BulkOperation =
   | { op: "add_tag"; tags: string[] }
@@ -223,18 +224,22 @@ export async function bulkEdit(
 
   await assertSyncableBeforeWrite(vaultPath);
 
+  const index = await getIndex(vaultPath);
   const results: BulkNoteResult[] = [];
   for (const notePath of matched) {
     try {
+      // Resolve the note path first (bare basename / wrong-case). An ambiguous
+      // bare name throws here and becomes this note's isolated error row.
+      const resolved = resolveWriteTarget(index, notePath);
       // Read through the shared funnel helper so a missing note in the batch
       // reports the polished "Note not found: x. Did you mean…?" message every
       // other write path uses, instead of leaking a raw ENOENT with an absolute
       // filesystem path.
-      const raw = await readRaw(vaultPath, notePath);
+      const raw = await readRaw(vaultPath, resolved);
       const doc = NoteDocument.parse(raw);
       const changed = applyOperations(doc, operations);
-      if (changed) await writeResolved(vaultPath, notePath, doc.serialize());
-      results.push({ path: notePath, ok: true, changed });
+      if (changed) await writeResolved(vaultPath, resolved, doc.serialize());
+      results.push({ path: resolved, ok: true, changed });
     } catch (error) {
       results.push({
         path: notePath,

@@ -13,6 +13,7 @@ import {
   deleteNote,
   moveNote,
   patchNote,
+  addTag,
 } from "../src/tools/write.js";
 import { getFrontmatter } from "../src/tools/frontmatter.js";
 import { getProperty } from "../src/tools/properties.js";
@@ -136,21 +137,33 @@ describe("enriched not-found errors across tools", () => {
   const HINT = /Did you mean: projects\/alpha\?/;
 
   test("write-side sites suggest candidates", async () => {
+    // patchNote/appendNote/prependNote now resolve a bare basename like "alpha"
+    // to "projects/alpha" (writer-name-resolution) instead of erroring, so this
+    // uses a slash-qualified miss ("archive/alpha") to still exercise the
+    // not-found+hint path: a slash-qualified name gets no basename fallback in
+    // resolveForWrite (see not-found.ts / vault-index.ts), so it stays
+    // genuinely unresolved and still throws with a suggestion.
     await assert.rejects(
-      () => patchNote(fx.vaultPath, { path: "alpha", find: "x", replace: "y" }),
+      () => patchNote(fx.vaultPath, { path: "archive/alpha", find: "x", replace: "y" }),
       HINT
     );
     await assert.rejects(
-      () => appendNote(fx.vaultPath, { path: "alpha", content: "x" }),
+      () => appendNote(fx.vaultPath, { path: "archive/alpha", content: "x" }),
       HINT
     );
     await assert.rejects(
-      () => prependNote(fx.vaultPath, { path: "alpha", content: "x" }),
+      () => prependNote(fx.vaultPath, { path: "archive/alpha", content: "x" }),
       HINT
     );
-    await assert.rejects(() => deleteNote(fx.vaultPath, "alpha"), HINT);
+    // deleteNote/moveNote (source) now ALSO resolve a bare/wrong-case name
+    // (writer-name-resolution task 4), so — like the patch/append/prepend
+    // calls above — a slash-qualified miss is used here to still exercise the
+    // not-found+hint path without actually deleting/moving the shared
+    // "projects/alpha" fixture note that later tests in this describe block
+    // depend on.
+    await assert.rejects(() => deleteNote(fx.vaultPath, "archive/alpha"), HINT);
     await assert.rejects(
-      () => moveNote(fx.vaultPath, { from: "alpha", to: "elsewhere/alpha" }),
+      () => moveNote(fx.vaultPath, { from: "archive/alpha", to: "elsewhere/alpha" }),
       HINT
     );
   });
@@ -194,6 +207,33 @@ describe("enriched not-found errors across tools", () => {
         assert.equal(err.message, "Note not found: no-such-note");
         return true;
       }
+    );
+  });
+});
+
+describe("write-side bare names resolve; ambiguity still errors", () => {
+  let fx: Fixture;
+  before(async () => {
+    fx = await makeVault(suggestionNotes());
+  });
+  after(() => fx.cleanup());
+
+  test("a bare basename that uniquely resolves succeeds at a write site", async () => {
+    // "alpha" resolves to projects/alpha (the only note with that basename).
+    const r = await addTag(fx.vaultPath, { path: "alpha", tags: ["t7"] });
+    assert.equal(r.path, "projects/alpha");
+    assert(r.tags.includes("t7"));
+  });
+
+  test("write-side sites fail loud on an ambiguous bare name", async () => {
+    // Four notes share the basename "shared" (a/shared, b/shared, c/shared, d/shared).
+    await assert.rejects(
+      () => deleteNote(fx.vaultPath, "shared"),
+      /Ambiguous note name: shared/
+    );
+    await assert.rejects(
+      () => moveNote(fx.vaultPath, { from: "shared", to: "x/shared" }),
+      /Ambiguous note name: shared/
     );
   });
 });

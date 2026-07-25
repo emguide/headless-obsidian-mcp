@@ -127,6 +127,30 @@ is reported as unresolved rather than silently pointing at `projects/alpha`,
 which also keeps `move_note`'s link rewriting (it only rewrites slash-less
 basename references) consistent with what the graph counts as a backlink.
 
+**Note addressing on writes (shared).** Every edit-existing write tool resolves
+its target the same way readers do: `add_tag`/`remove_tag`, `set_frontmatter`,
+`add`/`remove_property_values`, `rename_property`, `patch_note`, `add_section`/
+`append_to_section`/`replace_section`, `rename_section`, `set_task_state`,
+`delete_note`, `move_note` (its `from`), `bulk_edit`'s per-note paths,
+`append_note`/`prepend_note` **without** `create`, and `insert_template` all
+resolve a bare basename or wrong-case path through the shared index
+(`VaultIndex.resolveForWrite` via `resolveWriteTarget` in
+`src/tools/not-found.ts`) before touching disk. The one divergence from
+readers: an **ambiguous** bare basename (shared by several notes) fails loud —
+`Ambiguous note name: log. Candidates: daily/log, projects/log. Pass the full
+path.` — instead of silently picking the shortest-path note the way readers/
+`get_links` do, since a wrong-note write mutates the wrong file, not just a
+wasted read. Same limits as readers: a **title or alias** is not a resolvable
+write address (`resolve_note`'s job), and a slash-qualified miss
+(`wrong-folder/alpha`) gets no basename fallback — a not-found error with
+did-you-mean candidates, same as today. **Create paths stay literal**:
+`write_note`, `apply_template`, and the `create: true` branches of
+`append_note`/`prepend_note` address the literal path, so a bare name always
+creates the note you named, never an existing folder note. This also hardened
+`move_note`/`rename_section`, whose source resolution previously picked a
+shortest-path winner silently on an ambiguous `from`. Stated once here;
+write-tool descriptions carry no repetition.
+
 **Pagination (`offset`).** Every envelope-returning tool (all the list-style
 tools plus `search_notes` and `search_notes_ranked`) accepts an optional
 `offset` (default `0`): the rows are a window `[offset, offset + limit)` over the

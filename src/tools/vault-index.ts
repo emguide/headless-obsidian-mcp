@@ -22,6 +22,7 @@ import {
   ListResponse,
   ResolveMatch,
   ResolveMatchField,
+  WriteResolution,
 } from "../types.js";
 
 /**
@@ -200,6 +201,26 @@ export class VaultIndex {
     if (key.includes("/")) return null; // path-qualified: no basename fallback
     const candidates = this.byBasename.get(key);
     return candidates && candidates.length > 0 ? candidates[0] : null;
+  }
+
+  /**
+   * Resolve a WRITE target's name, distinguishing unique from ambiguous — the
+   * distinction {@link resolve} hides. Same matching rules as `resolve` (exact
+   * path wins; slash-less bare basename falls back; a slash-qualified miss does
+   * NOT fall back), but an ambiguous bare basename is reported as such rather
+   * than silently resolved to the shortest-path candidate. A caller turns
+   * `unresolved` into the literal-path not-found flow and `ambiguous` into a
+   * fail-loud error.
+   */
+  resolveForWrite(target: string): WriteResolution {
+    const key = target.replace(/\.md$/i, "").replace(/\\/g, "/").toLowerCase();
+    const exact = this.byPath.get(key);
+    if (exact) return { kind: "resolved", path: exact };
+    if (key.includes("/")) return { kind: "unresolved" }; // path-qualified: no fallback
+    const candidates = this.byBasename.get(key);
+    if (!candidates || candidates.length === 0) return { kind: "unresolved" };
+    if (candidates.length === 1) return { kind: "resolved", path: candidates[0] };
+    return { kind: "ambiguous", candidates: [...candidates] };
   }
 
   /**
