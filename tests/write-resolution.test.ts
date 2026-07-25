@@ -21,7 +21,7 @@ import {
 import { getFrontmatter } from "../src/tools/frontmatter.js";
 import { readRaw } from "../src/tools/write.js";
 import { bulkEdit } from "../src/tools/bulk.js";
-import { insertTemplate } from "../src/tools/templates.js";
+import { insertTemplate, applyTemplate } from "../src/tools/templates.js";
 
 /** Vault with: a folder note, a root note, and two notes sharing a basename. */
 function notes() {
@@ -296,5 +296,75 @@ describe("insert_template echoes the resolved path", () => {
       template: "T", path: "alpha", position: "append",
     });
     assert.equal(res.path, "projects/alpha");
+  });
+});
+
+describe("write_note creates at literal path when given a bare name", () => {
+  let fx: Fixture;
+  before(async () => {
+    fx = await makeVault([
+      { path: "projects/alpha.md", content: "# Folder Alpha original" },
+    ]);
+  });
+  after(() => fx.cleanup());
+
+  test("write_note with bare name creates at literal root path, not folder redirect", async () => {
+    // projects/alpha.md exists, but write_note("alpha") should create a NEW
+    // note at the literal root path "alpha.md", not redirect onto projects/alpha.
+    const res = await writeNote(fx.vaultPath, {
+      path: "alpha",
+      content: "# Root Alpha",
+    });
+    // Confirm the create happened at the literal path.
+    assert.equal(res.path, "alpha");
+    assert.equal(res.created, true);
+
+    // Confirm projects/alpha was NOT touched.
+    const folderContent = await readRaw(fx.vaultPath, "projects/alpha");
+    assert.equal(folderContent, "# Folder Alpha original");
+
+    // Confirm the literal root alpha.md now exists with the new content.
+    const rootContent = await readRaw(fx.vaultPath, "alpha");
+    assert.equal(rootContent, "# Root Alpha");
+  });
+});
+
+describe("apply_template creates at literal path when given a bare name", () => {
+  let fx: Fixture;
+  before(async () => {
+    fx = await makeVault([
+      { path: "projects/alpha.md", content: "# Folder Alpha original" },
+    ]);
+    // Set up a template folder + one template for apply_template test.
+    await writeNote(fx.vaultPath, {
+      path: ".obsidian-templates/BasicTemplate",
+      content: "# {{title}} from template\n\nTemplate content here.",
+    });
+    process.env.OBSIDIAN_TEMPLATE_FOLDER = ".obsidian-templates";
+  });
+  after(() => {
+    delete process.env.OBSIDIAN_TEMPLATE_FOLDER;
+    return fx.cleanup();
+  });
+
+  test("apply_template with bare name creates at literal root path, not folder redirect", async () => {
+    // Like write_note: apply_template("alpha") should create at the literal
+    // root path, not redirect onto the existing projects/alpha.
+    const res = await applyTemplate(fx.vaultPath, {
+      template: "BasicTemplate",
+      path: "alpha",
+    });
+    // Confirm the create happened at the literal path.
+    assert.equal(res.path, "alpha");
+    assert.equal(res.created, true);
+
+    // Confirm projects/alpha was NOT touched.
+    const folderContent = await readRaw(fx.vaultPath, "projects/alpha");
+    assert.equal(folderContent, "# Folder Alpha original");
+
+    // Confirm the literal root alpha.md now exists with the template-expanded content.
+    const rootContent = await readRaw(fx.vaultPath, "alpha");
+    assert.match(rootContent, /# alpha from template/);
+    assert.match(rootContent, /Template content here/);
   });
 });
