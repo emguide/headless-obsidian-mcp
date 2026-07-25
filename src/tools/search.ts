@@ -61,19 +61,6 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     throw new Error('Pattern too long (max 1000 characters)');
   }
 
-  // Prevent regex DoS by blocking overly complex patterns
-  const suspiciousPatterns = [
-    /\(\?\#.*\){10,}/, // Excessive comments
-    /\{[0-9]+,[0-9]*\}.*\{[0-9]+,[0-9]*\}/, // Multiple large quantifiers
-    /(\(.*\).*){5,}/, // Excessive grouping
-  ];
-
-  for (const suspicious of suspiciousPatterns) {
-    if (suspicious.test(pattern)) {
-      throw new Error('Pattern complexity not allowed');
-    }
-  }
-
   if (!Number.isInteger(context_lines) || context_lines < 0 || context_lines > 100) {
     throw new Error('Context lines must be an integer between 0 and 100');
   }
