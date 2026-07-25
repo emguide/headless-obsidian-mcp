@@ -16,7 +16,7 @@
 - Defaults: `limit` = 20, `max_matches_per_file` = 20. `context_lines` default stays 5 (unchanged).
 - Do **not** modify `search_notes_ranked` — it is already bounded (explicit non-goal in the spec).
 - When updating functionality, update **both** `CLAUDE.md` and `README.md` (project rule).
-- Spec: `docs/superpowers/specs/2026-07-22-bound-search-notes-design.md`.
+- Spec: `design/specs/2026-07-22-bound-search-notes-design.md`.
 
 ---
 
