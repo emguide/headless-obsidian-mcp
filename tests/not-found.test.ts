@@ -136,18 +136,27 @@ describe("enriched not-found errors across tools", () => {
   const HINT = /Did you mean: projects\/alpha\?/;
 
   test("write-side sites suggest candidates", async () => {
+    // patchNote/appendNote/prependNote now resolve a bare basename like "alpha"
+    // to "projects/alpha" (writer-name-resolution) instead of erroring, so this
+    // uses a slash-qualified miss ("archive/alpha") to still exercise the
+    // not-found+hint path: a slash-qualified name gets no basename fallback in
+    // resolveForWrite (see not-found.ts / vault-index.ts), so it stays
+    // genuinely unresolved and still throws with a suggestion.
     await assert.rejects(
-      () => patchNote(fx.vaultPath, { path: "alpha", find: "x", replace: "y" }),
+      () => patchNote(fx.vaultPath, { path: "archive/alpha", find: "x", replace: "y" }),
       HINT
     );
     await assert.rejects(
-      () => appendNote(fx.vaultPath, { path: "alpha", content: "x" }),
+      () => appendNote(fx.vaultPath, { path: "archive/alpha", content: "x" }),
       HINT
     );
     await assert.rejects(
-      () => prependNote(fx.vaultPath, { path: "alpha", content: "x" }),
+      () => prependNote(fx.vaultPath, { path: "archive/alpha", content: "x" }),
       HINT
     );
+    // deleteNote/moveNote are untouched by writer-name-resolution (out of
+    // scope for this task) and still address by literal path only, so a bare
+    // basename still errors with a hint here.
     await assert.rejects(() => deleteNote(fx.vaultPath, "alpha"), HINT);
     await assert.rejects(
       () => moveNote(fx.vaultPath, { from: "alpha", to: "elsewhere/alpha" }),

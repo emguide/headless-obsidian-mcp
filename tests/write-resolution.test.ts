@@ -6,6 +6,15 @@ import {
   resolveWriteTarget,
   resolveWriteTargetAsync,
 } from "../src/tools/not-found.js";
+import {
+  addTag,
+  patchNote,
+  setNoteFrontmatter,
+  appendNote,
+  writeNote,
+} from "../src/tools/write.js";
+import { getFrontmatter } from "../src/tools/frontmatter.js";
+import { readRaw } from "../src/tools/write.js";
 
 /** Vault with: a folder note, a root note, and two notes sharing a basename. */
 function notes() {
@@ -103,5 +112,58 @@ describe("resolveWriteTarget", () => {
       await resolveWriteTargetAsync("/nonexistent-vault-xyz", "ghost"),
       "ghost"
     );
+  });
+});
+
+describe("edit-existing writers resolve bare/wrong-case names", () => {
+  let fx: Fixture;
+  before(async () => { fx = await makeVault(notes()); });
+  after(() => fx.cleanup());
+
+  test("add_tag on a bare basename hits the folder note", async () => {
+    const res = await addTag(fx.vaultPath, { path: "alpha", tags: ["x"] });
+    assert.equal(res.path, "projects/alpha"); // resolved path echoed
+    const fm = await getFrontmatter(fx.vaultPath, "projects/alpha");
+    assert.deepEqual(fm.frontmatter.tags, ["x"]);
+  });
+
+  test("patch_note on a wrong-case path hits the note", async () => {
+    const res = await patchNote(fx.vaultPath, {
+      path: "Projects/Alpha", find: "# Alpha", replace: "# Alpha!",
+    });
+    assert.equal(res.path, "projects/alpha");
+    assert.equal(res.replacements, 1);
+  });
+
+  test("set_frontmatter on a bare name resolves", async () => {
+    await setNoteFrontmatter(fx.vaultPath, { path: "root-note", set: { s: 1 } });
+    const fm = await getFrontmatter(fx.vaultPath, "root-note");
+    assert.equal(fm.frontmatter.s, 1);
+  });
+
+  test("ambiguous bare name fails loud and writes nothing", async () => {
+    const before = await readRaw(fx.vaultPath, "daily/log");
+    await assert.rejects(
+      () => addTag(fx.vaultPath, { path: "log", tags: ["y"] }),
+      /Ambiguous note name: log/
+    );
+    const after = await readRaw(fx.vaultPath, "daily/log");
+    assert.equal(after, before); // untouched
+  });
+
+  test("append_note WITHOUT create resolves a bare name", async () => {
+    const res = await appendNote(fx.vaultPath, { path: "alpha", content: "more" });
+    assert.equal(res.path, "projects/alpha");
+    assert.equal(res.created, false);
+  });
+
+  test("append_note WITH create stays literal (create path unchanged)", async () => {
+    // "alpha" already exists at projects/alpha, but create targets the literal
+    // root path — a NEW note, never a redirect onto the folder note.
+    const res = await appendNote(fx.vaultPath, {
+      path: "alpha", content: "x", create: true,
+    });
+    assert.equal(res.path, "alpha");
+    assert.equal(res.created, true);
   });
 });

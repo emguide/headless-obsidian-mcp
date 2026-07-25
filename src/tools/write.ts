@@ -15,7 +15,7 @@ import {
 import { snapshotBeforeWrite } from "./git-guard.js";
 import { linkHealthOf, LinkHealth } from "./link-health.js";
 import { backlinkContext } from "./link-context.js";
-import { noteNotFoundError } from "./not-found.js";
+import { noteNotFoundError, resolveWriteTargetAsync } from "./not-found.js";
 import { SetTaskStateParams, WritableTaskStatus, LinkContextLine } from "../types.js";
 import {
   NoteDocument,
@@ -127,11 +127,12 @@ async function linkHealthAfterWrite(
 
 /** Read an existing note's raw text, or throw a friendly not-found error. */
 export async function readRaw(vaultPath: string, notePath: string): Promise<string> {
-  const fullPath = resolveNotePath(vaultPath, notePath);
+  const resolved = await resolveWriteTargetAsync(vaultPath, notePath);
+  const fullPath = resolveNotePath(vaultPath, resolved);
   try {
     return await readFile(fullPath, "utf-8");
   } catch {
-    throw await noteNotFoundError(vaultPath, notePath);
+    throw await noteNotFoundError(vaultPath, resolved);
   }
 }
 
@@ -139,22 +140,26 @@ export async function readRaw(vaultPath: string, notePath: string): Promise<stri
  * Load an existing note, mutate it, and write it back through the guarded
  * funnel. The mutate callback may return `false` to signal "no change", in
  * which case the write (and its git snapshot) is skipped. Returning `void` or
- * `true` performs the write. Returns whether a write happened plus the note's
- * final serialized content (the written text, or the unchanged original on a
- * no-op) so callers can report the resulting note's link health.
+ * `true` performs the write. Resolves `notePath` once via
+ * {@link resolveWriteTargetAsync} (bare basename / wrong-case, fail-loud on
+ * ambiguity) and returns the resolved path alongside whether a write happened
+ * and the note's final serialized content (the written text, or the unchanged
+ * original on a no-op), so callers can echo the resolved path and report the
+ * resulting note's link health from it.
  */
 async function editNote(
   vaultPath: string,
   notePath: string,
   mutate: (doc: NoteDocument) => boolean | void
-): Promise<{ changed: boolean; content: string }> {
-  const raw = await readRaw(vaultPath, notePath);
+): Promise<{ changed: boolean; content: string; path: string }> {
+  const resolved = await resolveWriteTargetAsync(vaultPath, notePath);
+  const raw = await readRaw(vaultPath, resolved);
   const doc = NoteDocument.parse(raw);
   const changed = mutate(doc);
-  if (changed === false) return { changed: false, content: raw };
+  if (changed === false) return { changed: false, content: raw, path: resolved };
   const content = doc.serialize();
-  await commitWrite(vaultPath, notePath, content);
-  return { changed: true, content };
+  await commitWrite(vaultPath, resolved, content);
+  return { changed: true, content, path: resolved };
 }
 
 /**
@@ -245,20 +250,24 @@ export async function appendNote(
   if (typeof content !== "string") throw new Error("content must be a string");
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
-  if (!existed) {
-    if (!create) throw await noteNotFoundError(vaultPath, path);
+  // `create:true` always targets the literal path — a bare/wrong-case name
+  // must never be redirected onto a different note when the intent is to
+  // create a brand new one. Only the non-create ("existing note") branch
+  // resolves, since only there is redirecting to the intended note correct.
+  if (!existed && create) {
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
     await commitWrite(vaultPath, path, created);
     const health = await linkHealthAfterWrite(vaultPath, path, created);
     return { path: canonicalName(path), created: true, ...health };
   }
-  const raw = await readRaw(vaultPath, path);
+  const resolved = await resolveWriteTargetAsync(vaultPath, path);
+  const raw = await readRaw(vaultPath, resolved);
   const separator = raw.length === 0 || raw.endsWith("\n") ? "" : "\n";
   const next = raw + separator + content + (content.endsWith("\n") ? "" : "\n");
-  await commitWrite(vaultPath, path, next);
-  const health = await linkHealthAfterWrite(vaultPath, path, next);
-  return { path: canonicalName(path), created: false, ...health };
+  await commitWrite(vaultPath, resolved, next);
+  const health = await linkHealthAfterWrite(vaultPath, resolved, next);
+  return { path: resolved, created: false, ...health };
 }
 
 export interface PrependNoteParams {
@@ -280,22 +289,24 @@ export async function prependNote(
   if (typeof content !== "string") throw new Error("content must be a string");
   const fullPath = resolveNotePath(vaultPath, path);
   const existed = await fileExists(fullPath);
-  if (!existed) {
-    if (!create) throw await noteNotFoundError(vaultPath, path);
+  // See appendNote: create:true always targets the literal path (never
+  // redirected onto a different note); only the existing-note branch resolves.
+  if (!existed && create) {
     validateContentFrontmatter(content);
     const created = content.endsWith("\n") ? content : content + "\n";
     await commitWrite(vaultPath, path, created);
     const health = await linkHealthAfterWrite(vaultPath, path, created);
     return { path: canonicalName(path), created: true, ...health };
   }
-  const raw = await readRaw(vaultPath, path);
+  const resolved = await resolveWriteTargetAsync(vaultPath, path);
+  const raw = await readRaw(vaultPath, resolved);
   const doc = NoteDocument.parse(raw);
   const insert = content.endsWith("\n") ? content : content + "\n";
   doc.body = insert + doc.body;
   const next = doc.serialize();
-  await commitWrite(vaultPath, path, next);
-  const health = await linkHealthAfterWrite(vaultPath, path, next);
-  return { path: canonicalName(path), created: false, ...health };
+  await commitWrite(vaultPath, resolved, next);
+  const health = await linkHealthAfterWrite(vaultPath, resolved, next);
+  return { path: resolved, created: false, ...health };
 }
 
 export interface DeleteNoteOptions {
@@ -534,26 +545,27 @@ export async function patchNote(
   if (typeof replace !== "string") {
     throw new Error("replace must be a string");
   }
-  const raw = await readRaw(vaultPath, path);
+  const resolved = await resolveWriteTargetAsync(vaultPath, path);
+  const raw = await readRaw(vaultPath, resolved);
   const parts = raw.split(find);
   const occurrences = parts.length - 1;
   if (occurrences === 0) {
-    throw new Error(`Text to patch was not found in ${canonicalName(path)}`);
+    throw new Error(`Text to patch was not found in ${resolved}`);
   }
   // Fail loud on a non-unique match rather than silently patching the first: an
   // ambiguous find is the write most likely to hit the wrong text.
   if (!all && occurrences > 1) {
     throw new Error(
-      `Text to patch occurs ${occurrences} times in ${canonicalName(path)}; ` +
+      `Text to patch occurs ${occurrences} times in ${resolved}; ` +
         `set all:true to replace all, or make find unique`
     );
   }
 
   const replacements = all ? occurrences : 1;
   const next = parts.join(replace);
-  await commitWrite(vaultPath, path, next);
-  const health = await linkHealthAfterWrite(vaultPath, path, next);
-  return { path: canonicalName(path), replacements, ...health };
+  await commitWrite(vaultPath, resolved, next);
+  const health = await linkHealthAfterWrite(vaultPath, resolved, next);
+  return { path: resolved, replacements, ...health };
 }
 
 export interface RenameSectionParams {
@@ -811,12 +823,12 @@ export async function addTag(
     throw new Error("tags must be a non-empty array");
   }
   let resultTags: string[] = [];
-  await editNote(vaultPath, path, (doc) => {
+  const { path: resolved } = await editNote(vaultPath, path, (doc) => {
     const next = addTags(doc, tags);
     resultTags = next ?? frontmatterTagList(doc.data);
     return next != null;
   });
-  return { path: canonicalName(path), tags: resultTags };
+  return { path: resolved, tags: resultTags };
 }
 
 export async function removeTag(
@@ -827,12 +839,12 @@ export async function removeTag(
     throw new Error("tags must be a non-empty array");
   }
   let resultTags: string[] = [];
-  await editNote(vaultPath, path, (doc) => {
+  const { path: resolved } = await editNote(vaultPath, path, (doc) => {
     const next = removeTags(doc, tags);
     resultTags = next ?? frontmatterTagList(doc.data);
     return next != null;
   });
-  return { path: canonicalName(path), tags: resultTags };
+  return { path: resolved, tags: resultTags };
 }
 
 /* ------------------------------------------------------------ frontmatter -- */
@@ -848,10 +860,10 @@ export async function setNoteFrontmatter(
   { path, set, unset }: SetFrontmatterParams
 ): Promise<{ path: string; changed: boolean }> {
   if (!set && !unset) throw new Error("Provide `set` and/or `unset`");
-  const { changed } = await editNote(vaultPath, path, (doc) =>
+  const { changed, path: resolved } = await editNote(vaultPath, path, (doc) =>
     setFrontmatter(doc, set, unset)
   );
-  return { path: canonicalName(path), changed };
+  return { path: resolved, changed };
 }
 
 /* -------------------------------------------------------------- properties -- */
@@ -871,13 +883,13 @@ export async function addNotePropertyValues(
     throw new Error("values must be a non-empty array");
   }
   let result: unknown[] = [];
-  await editNote(vaultPath, path, (doc) => {
+  const { path: resolved } = await editNote(vaultPath, path, (doc) => {
     const next = addPropertyValues(doc, key, values);
     const current = doc.data[key];
     result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
     return next != null;
   });
-  return { path: canonicalName(path), key, values: result };
+  return { path: resolved, key, values: result };
 }
 
 export async function removeNotePropertyValues(
@@ -889,13 +901,13 @@ export async function removeNotePropertyValues(
     throw new Error("values must be a non-empty array");
   }
   let result: unknown[] = [];
-  await editNote(vaultPath, path, (doc) => {
+  const { path: resolved } = await editNote(vaultPath, path, (doc) => {
     const next = removePropertyValues(doc, key, values);
     const current = doc.data[key];
     result = next ?? (Array.isArray(current) ? current : current == null ? [] : [current]);
     return next != null;
   });
-  return { path: canonicalName(path), key, values: result };
+  return { path: resolved, key, values: result };
 }
 
 export interface RenamePropertyParams {
@@ -910,8 +922,8 @@ export async function renameNoteProperty(
 ): Promise<{ path: string; from: string; to: string }> {
   if (!from || typeof from !== "string") throw new Error("from must be a non-empty string");
   if (!to || typeof to !== "string") throw new Error("to must be a non-empty string");
-  await editNote(vaultPath, path, (doc) => renameProperty(doc, from, to));
-  return { path: canonicalName(path), from, to };
+  const { path: resolved } = await editNote(vaultPath, path, (doc) => renameProperty(doc, from, to));
+  return { path: resolved, from, to };
 }
 
 /* --------------------------------------------------------------- sections -- */
@@ -928,11 +940,11 @@ export async function addNoteSection(
   vaultPath: string,
   { path, heading, content, level, after }: AddSectionParams
 ): Promise<{ path: string; heading: string } & LinkHealth> {
-  const { content: written } = await editNote(vaultPath, path, (doc) =>
+  const { content: written, path: resolved } = await editNote(vaultPath, path, (doc) =>
     addSection(doc, heading, content ?? "", level ?? 2, after)
   );
-  const health = await linkHealthAfterWrite(vaultPath, path, written);
-  return { path: canonicalName(path), heading, ...health };
+  const health = await linkHealthAfterWrite(vaultPath, resolved, written);
+  return { path: resolved, heading, ...health };
 }
 
 export interface SectionEditParams {
@@ -946,20 +958,20 @@ export async function appendNoteSection(
   vaultPath: string,
   { path, heading, content, create }: SectionEditParams
 ): Promise<{ path: string; heading: string } & LinkHealth> {
-  const { content: written } = await editNote(vaultPath, path, (doc) =>
+  const { content: written, path: resolved } = await editNote(vaultPath, path, (doc) =>
     appendToSection(doc, heading, content ?? "", create ?? false)
   );
-  const health = await linkHealthAfterWrite(vaultPath, path, written);
-  return { path: canonicalName(path), heading, ...health };
+  const health = await linkHealthAfterWrite(vaultPath, resolved, written);
+  return { path: resolved, heading, ...health };
 }
 
 export async function replaceNoteSection(
   vaultPath: string,
   { path, heading, content }: SectionEditParams
 ): Promise<{ path: string; heading: string } & LinkHealth> {
-  const { content: written } = await editNote(vaultPath, path, (doc) =>
+  const { content: written, path: resolved } = await editNote(vaultPath, path, (doc) =>
     replaceSection(doc, heading, content ?? "")
   );
-  const health = await linkHealthAfterWrite(vaultPath, path, written);
-  return { path: canonicalName(path), heading, ...health };
+  const health = await linkHealthAfterWrite(vaultPath, resolved, written);
+  return { path: resolved, heading, ...health };
 }
