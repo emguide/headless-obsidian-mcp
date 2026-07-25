@@ -84,7 +84,7 @@ async function queryTool(toolName: string, args: any, verbose: boolean) {
     } else if (toolName === "read_section") {
       result = await readSection(VAULT_PATH!, args);
     } else if (toolName === "list_tags") {
-      result = await listTags(VAULT_PATH!);
+      result = await listTags(VAULT_PATH!, args.offset);
     } else if (toolName === "find_by_tag") {
       result = await findByTag(VAULT_PATH!, args);
     } else if (toolName === "list_recent_notes") {
@@ -470,7 +470,7 @@ program
 program
   .command("recent")
   .description("List notes ordered by recency (newest first), optionally scoped by folder/tags/where")
-  .option("-l, --limit <n>", "Maximum number of notes to return (default: 20)")
+  .option("-l, --limit <n>", "Maximum number of notes to return (default: 100, 0 = unbounded)")
   .option("-s, --since <date>", "Only include notes on or after this ISO date")
   .option("-d, --date-field <field>", "Frontmatter date field to sort by")
   .option("-f, --folder <folder>", "Restrict to notes under this folder")
@@ -565,7 +565,7 @@ program
 
 program
   .command("vault-issues <kind>")
-  .description("List orphans or unresolved_links")
+  .description("List vault-hygiene findings: orphans | unresolved_links | broken_anchors | conflicts")
   .option("-l, --limit <n>", "Maximum number of rows to return")
   .option("-o, --offset <n>", "Rows/groups to skip before the window (pagination)")
   .option("-c, --include-context", "Include the source line(s) containing each broken reference (not valid for orphans)")
@@ -762,14 +762,14 @@ program
   .option("-u, --unset <keys...>", "Frontmatter keys to remove")
   .action(async (path: string, options: any, command: Command) => {
     const verbose = command.parent?.opts().verbose ?? false;
-    const set: Record<string, string> = {};
+    const set: Record<string, unknown> = {};
     for (const pair of options.set ?? []) {
       const eq = String(pair).indexOf("=");
       if (eq === -1) {
         console.error(`Error: --set expects key=value, got "${pair}"`);
         process.exit(1);
       }
-      set[pair.slice(0, eq)] = pair.slice(eq + 1);
+      set[pair.slice(0, eq)] = coerceScalar(pair.slice(eq + 1));
     }
     const args = {
       path,
@@ -778,6 +778,26 @@ program
     };
     await queryTool("set_frontmatter", args, verbose);
   });
+
+/**
+ * Coerce a `--set key=value` string to the scalar the MCP tool would receive.
+ * The shell hands everything over as text, so without this `--set priority=3`
+ * stored the string "3" where set_frontmatter accepts a number — visible in
+ * list_properties' reported types and to Obsidian. Wrap a value in quotes
+ * (`--set 'v="3"'`) to force it to stay a string.
+ */
+function coerceScalar(raw: string): unknown {
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    return raw.slice(1, -1);
+  }
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  if (raw === "null") return null;
+  if (raw !== "" && /^-?\d+(\.\d+)?$/.test(raw) && Number.isFinite(Number(raw))) {
+    return Number(raw);
+  }
+  return raw;
+}
 
 program
   .command("add-section")

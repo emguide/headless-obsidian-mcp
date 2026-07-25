@@ -871,6 +871,8 @@ npm run query -- prepend "daily/2026-07-22" "> banner"  # Prepend to the body
 npm run query -- add-tag "projects/alpha" project active
 npm run query -- remove-tag "projects/alpha" stale
 npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
+npm run query -- set-frontmatter "projects/alpha" --set priority=3 --set done=true   # numbers/booleans are coerced
+npm run query -- set-frontmatter "projects/alpha" --set 'version="7"'                # quote to force a string
 npm run query -- add-property-values "projects/alpha" aliases a2 a3
 npm run query -- remove-property-values "projects/alpha" aliases a3
 npm run query -- rename-property "projects/alpha" author authors
