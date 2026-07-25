@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   GIT_SYNC_ENV,
   resolveGitSyncMode,
@@ -12,6 +14,36 @@ export interface SyncResult {
   pulled: boolean;
   pushed: boolean;
   conflicts: string[];
+}
+
+/** `<canonical> (conflicted <stamp>)` — no .md suffix. */
+export function conflictCopyName(canonical: string, stamp: string): string {
+  return `${canonical} (conflicted ${stamp})`;
+}
+
+const CONFLICT_SUFFIX = / \(conflicted (\d{4}-\d{2}-\d{2} \d{6})\)$/;
+
+/** True iff a note path (no .md) is a conflict copy. */
+export function isConflictCopy(path: string): boolean {
+  return CONFLICT_SUFFIX.test(path);
+}
+
+/** Inverse of conflictCopyName; null when the path is not a conflict copy. */
+export function parseConflictCopy(
+  path: string
+): { original: string; stamp: string } | null {
+  const m = path.match(CONFLICT_SUFFIX);
+  if (!m) return null;
+  return { original: path.slice(0, m.index), stamp: m[1] };
+}
+
+/** HHMMSS-stamped conflict timestamp; deterministic when `now` is injected. */
+function conflictStamp(now: Date): string {
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return (
+    `${now.getUTCFullYear()}-${p(now.getUTCMonth() + 1)}-${p(now.getUTCDate())} ` +
+    `${p(now.getUTCHours())}${p(now.getUTCMinutes())}${p(now.getUTCSeconds())}`
+  );
 }
 
 /** Run a git subcommand inside the vault directory. */
@@ -76,28 +108,56 @@ async function currentBranch(vaultPath: string): Promise<string> {
 
 /**
  * Pull (merge) from the remote then push local commits. Fail-closed: an
- * unreachable remote or a failed push throws. Conflict handling is added in
- * Task 3 — here a merge conflict aborts to a clean tree and throws.
+ * unreachable remote or a failed push throws. Resolves merge conflicts
+ * non-destructively: keeps local version as a (conflicted …) copy, takes
+ * remote as canonical.
  */
-export async function syncOnce(vaultPath: string): Promise<SyncResult> {
+export async function syncOnce(
+  vaultPath: string,
+  opts: { now?: Date } = {}
+): Promise<SyncResult> {
   await assertRepoOrThrow(vaultPath);
   const remote = gitRemote();
   const branch = await currentBranch(vaultPath);
+  const conflicts: string[] = [];
 
   let pulled = false;
   try {
-    // --no-rebase forces a merge; --no-edit keeps the default merge message.
     await git(vaultPath, ["pull", "--no-rebase", "--no-edit", remote, branch]);
     pulled = true;
   } catch (error) {
-    // Conflict? Abort to a clean tree, then throw (Task 3 replaces this branch).
-    const merging = await isMerging(vaultPath);
-    if (merging) {
-      await git(vaultPath, ["merge", "--abort"]).catch(() => {});
-      throw new Error(`Sync pull produced a merge conflict in ${vaultPath}`);
+    if (!(await isMerging(vaultPath))) {
+      const m = error instanceof Error ? error.message : String(error);
+      throw new Error(`${GIT_SYNC_ENV} pull failed (${m.trim()}).`);
     }
-    const m = error instanceof Error ? error.message : String(error);
-    throw new Error(`${GIT_SYNC_ENV} pull failed (${m.trim()}).`);
+    // Non-destructive resolution: for each conflicted file, keep the LOCAL
+    // version aside as a (conflicted …) copy, then take REMOTE (theirs) as
+    // canonical. Conflict copies are terminal artifacts — a conflict on one
+    // never produces a copy-of-a-copy because the ORIGINAL path is copied,
+    // never the copy itself (git only reports the real path as conflicted).
+    const now = opts.now ?? new Date();
+    const stamp = conflictStamp(now);
+    const conflicted = (
+      await git(vaultPath, ["diff", "--name-only", "--diff-filter=U"])
+    )
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    for (const rel of conflicted) {
+      const canonical = rel.replace(/\.md$/, "");
+      // Local (ours) content is at the ":2:" stage; write it aside.
+      const localContent = await git(vaultPath, ["show", `:2:${rel}`]).catch(() => "");
+      const copyRel = `${conflictCopyName(canonical, stamp)}.md`;
+      await writeFile(join(vaultPath, copyRel), localContent, "utf-8");
+      // Take remote (theirs) for the canonical path.
+      await git(vaultPath, ["checkout", "--theirs", "--", rel]);
+      await git(vaultPath, ["add", "--", rel, copyRel]);
+      conflicts.push(conflictCopyName(canonical, stamp));
+    }
+    // Complete the merge commit (records both the resolved file and the copies).
+    await git(vaultPath, ["commit", "--no-verify", "--no-edit"]);
+    pulled = true;
   }
 
   let pushed = false;
@@ -109,7 +169,7 @@ export async function syncOnce(vaultPath: string): Promise<SyncResult> {
     throw new Error(`${GIT_SYNC_ENV} push failed (${m.trim()}).`);
   }
 
-  return { pulled, pushed, conflicts: [] };
+  return { pulled, pushed, conflicts };
 }
 
 /** True when a merge is in progress (MERGE_HEAD exists). */
