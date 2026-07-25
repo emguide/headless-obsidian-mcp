@@ -908,19 +908,19 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "bulk_edit",
-        description: "Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot. Select notes by an explicit `paths` array OR a filter (`where`/`tags`, optionally scoped by `folder`) — not both. Pass `dry_run:true` to preview the matched notes without writing. Pass `expected_count` to abort if the match count differs (guards a drifting filter). Operations are applied in order to each note; each note's result is reported independently (a per-note failure does not sink the batch). Only frontmatter ops are supported: add_tag, remove_tag, set_frontmatter, add_property_values, remove_property_values, rename_property.",
+        description: "Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot. Select notes by an explicit `paths` array OR a filter (`where`/`tags`/`folder`, any combination) — not both. A `folder` alone is a valid selection (every note under it). Pass `dry_run:true` to preview the matched notes without writing. Pass `expected_count` to abort if the match count differs (guards a drifting filter). Operations are applied in order to each note; each note's result is reported independently (a per-note failure does not sink the batch). Only frontmatter ops are supported: add_tag, remove_tag, set_frontmatter, add_property_values, remove_property_values, rename_property.",
         inputSchema: {
           type: "object",
           properties: {
             select: {
               type: "object",
-              description: "Note selection. Provide either `paths` OR a filter (`where`/`tags`), not both.",
+              description: "Note selection. Provide either `paths` OR a filter (`where`/`tags`/`folder`, any combination), not both. `folder` alone selects every note under it.",
               properties: {
                 paths: { type: "array", items: { type: "string" }, description: "Explicit note paths (.md optional)" },
                 where: { type: "object", description: "Frontmatter conditions (same syntax as query_notes)" },
                 tags: { type: "array", items: { type: "string" }, description: "Tags to match (with or without leading #)" },
-                match: { type: "string", enum: ["all", "any"], description: "How where/tags combine (default: all)" },
-                folder: { type: "string", description: "Restrict a filter to notes under this folder" },
+                match: { type: "string", enum: ["all", "any"], description: "How multiple `tags` combine (default: any). `where` conditions always combine as all." },
+                folder: { type: "string", description: "Restrict to notes under this folder (a valid filter on its own)" },
                 limit: { type: "number", description: "Maximum notes to match" }
               }
             },

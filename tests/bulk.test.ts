@@ -67,6 +67,44 @@ test("resolveSelection folder scope with a filter", async () => {
   assert.deepEqual(paths, ["projects/alpha"]);
 });
 
+test("resolveSelection accepts a folder-only filter", async () => {
+  // `folder` is part of the shared candidate-filter vocabulary, so it's a
+  // valid selection on its own: every note under the folder, no tags/where.
+  const paths = await resolveSelection(fx.vaultPath, { folder: "projects" });
+  assert.deepEqual(paths, ["projects/alpha"]);
+});
+
+test("resolveSelection treats a blank/whitespace folder as no filter", async () => {
+  // A whitespace-only folder is not a real filter — it must still error rather
+  // than silently selecting the whole vault.
+  await assert.rejects(() => resolveSelection(fx.vaultPath, { folder: "   " }), /requires/);
+});
+
+test("resolveSelection: match governs tags only, not where", async () => {
+  // alpha carries BOTH `project` and `project/active`; Beta carries neither.
+  // With match:"all" on two tags, only alpha matches. The `where` condition
+  // (status:active, which alpha satisfies) rides along as an independent `all`
+  // — match does not fold it in. This is the fixed behavior: match is the
+  // primary (tags) filter's combinator, never the where combinator.
+  const paths = await resolveSelection(fx.vaultPath, {
+    tags: ["project", "project/active"],
+    where: { status: "active" },
+    match: "all",
+  });
+  assert.deepEqual(paths, ["projects/alpha"]);
+});
+
+test("resolveSelection: default tag match is any", async () => {
+  // productivity is on alpha and Beta; a bogus second tag with the default
+  // (any) still matches both. Under the old match-defaults-to-all this would
+  // have matched nothing.
+  const paths = await resolveSelection(fx.vaultPath, {
+    tags: ["productivity", "does-not-exist"],
+  });
+  assert.ok(paths.includes("projects/alpha"));
+  assert.ok(paths.includes("Beta Note"));
+});
+
 test("resolveSelection limit caps the match count", async () => {
   const all = await resolveSelection(fx.vaultPath, { where: { status: { exists: true } } });
   assert.ok(all.length > 1, "fixture should have >1 note with a status");
@@ -132,6 +170,20 @@ test("bulkEdit dry_run returns matches and writes nothing", async () => {
   // No write happened.
   const alpha = await readNote(local.vaultPath, "projects/alpha.md");
   assert.doesNotMatch(alpha, /reviewed/);
+  await local.cleanup();
+});
+
+test("bulkEdit applies ops to a folder-only selection", async () => {
+  const local = await makeVault(sampleNotes());
+  const res = await bulkEdit(local.vaultPath, {
+    select: { folder: "projects" },
+    operations: [{ op: "add_tag", tags: ["reviewed"] }],
+  });
+  assert.equal(res.dry_run, false);
+  assert.equal(res.applied_count, 1);
+  assert.equal(res.failed_count, 0);
+  const alpha = await readNote(local.vaultPath, "projects/alpha.md");
+  assert.match(alpha, /- reviewed/);
   await local.cleanup();
 });
 

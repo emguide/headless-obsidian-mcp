@@ -122,31 +122,43 @@ export async function resolveSelection(
   if (select.where != null && (typeof select.where !== "object" || Array.isArray(select.where))) {
     throw new Error("select.where must be an object of frontmatter conditions");
   }
-  if (Array.isArray(select.paths) && select.paths.length === 0 && select.where == null && !(Array.isArray(select.tags) && select.tags.length > 0)) {
-    throw new Error("select.paths is empty; provide at least one path or use a filter (`where`/`tags`)");
-  }
 
   const hasPaths = Array.isArray(select.paths) && select.paths.length > 0;
-  const hasFilter = select.where != null || (Array.isArray(select.tags) && select.tags.length > 0);
+  // `folder` counts as a filter alongside `where`/`tags`: it's part of the
+  // shared candidate-filter vocabulary, so "bulk-edit every note in projects/"
+  // is a valid selection on its own (resolveCandidates honors a folder-only
+  // filter — it returns every note under the prefix).
+  const hasFilter =
+    select.where != null ||
+    (Array.isArray(select.tags) && select.tags.length > 0) ||
+    (typeof select.folder === "string" && select.folder.trim() !== "");
+  // An empty `paths: []` is a filter-shaped select missing its filter — surface
+  // that specifically rather than the generic "requires" message.
+  if (Array.isArray(select.paths) && select.paths.length === 0 && !hasFilter) {
+    throw new Error("select.paths is empty; provide at least one path or use a filter (`where`/`tags`/`folder`)");
+  }
   if (hasPaths && hasFilter) {
-    throw new Error("select accepts either `paths` or a filter (`where`/`tags`), not both");
+    throw new Error("select accepts either `paths` or a filter (`where`/`tags`/`folder`), not both");
   }
   if (!hasPaths && !hasFilter) {
-    throw new Error("select requires `paths`, `where`, or `tags`");
+    throw new Error("select requires `paths`, `where`, `tags`, or `folder`");
   }
 
   if (hasPaths) {
     return select.paths!.map(canonicalName);
   }
 
-  const match = select.match ?? "all";
+  // `match` governs the primary filter (`tags`) only, matching every other
+  // note-selecting tool; `where` applies with its own default ("all"), as it
+  // does as a secondary filter on find_by_tag.
+  const match = select.match ?? "any";
   const index = await getIndex(vaultPath);
   let entries = resolveCandidates(index, {
     folder: select.folder,
     where: select.where,
     tags: Array.isArray(select.tags) && select.tags.length > 0 ? select.tags : undefined,
-    tagMatch: match,   // bulk: match governs both tags...
-    whereMatch: match, // ...and where
+    tagMatch: match,
+    // whereMatch left to resolveCandidates' default ("all").
   });
   // `limit: 0` is the vault-wide sentinel for "unbounded"; any other negative
   // or non-integer value is rejected.
