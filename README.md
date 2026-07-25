@@ -10,16 +10,16 @@ It reduces token cost and removes the need for your agent to understand Obsidian
 
 | | |
 |---|---|
-| **Find** | Literal/regex search via ripgrep, plus BM25 relevance-ranked full-text search with snippets. Resolve a human name ("Alpha Project") or a date ("yesterday") to a note path. |
-| **Browse** | List notes, folders, attachments, tags, and frontmatter properties. Read a note's outline or one section without loading the whole thing. |
-| **Traverse** | Resolve `[[wikilinks]]` and backlinks. Rank the notes most related to a given one — shared tags and link-graph structure, no embeddings. |
-| **Query** | Filter notes by frontmatter conditions (`eq`, `gt`, `contains`, …), by tag, or by recency. Every note-selecting tool accepts the same `folder` / `tags` / `where` filters. |
-| **Audit** | Whole-vault stats, then drill into the actual orphaned notes, broken wikilinks, and dead heading anchors. |
-| **Edit** *(opt-in)* | Create, append, prepend, move, and delete notes. Change a tag, a frontmatter field, or one section without rewriting the note. Bulk-edit many notes in one call. |
-| **Protect** | Moving a note rewrites the wikilinks that point to it; renaming a heading rewrites inbound anchors. Every write reports any broken links it introduced. Deletes go to `.trash`. |
+| [**Find**](docs/TOOLS.md#search) | Literal/regex search via ripgrep ([`search_notes`](docs/TOOLS.md#search_notes)), plus BM25 relevance-ranked full-text search with snippets ([`search_notes_ranked`](docs/TOOLS.md#search_notes_ranked)). Resolve a human name ("Alpha Project") or a date ("yesterday") to a note path ([`resolve_note`](docs/TOOLS.md#resolve_note), [`resolve_daily_note`](docs/TOOLS.md#resolve_daily_note)). |
+| [**Browse**](docs/TOOLS.md#notes) | List [notes](docs/TOOLS.md#list_notes), [folders](docs/TOOLS.md#list_folders), [attachments](docs/TOOLS.md#list_files), [tags](docs/TOOLS.md#list_tags), and [frontmatter properties](docs/TOOLS.md#list_properties). Read a note's [outline](docs/TOOLS.md#get_outline) or [one section](docs/TOOLS.md#read_section) without loading the whole thing. |
+| [**Traverse**](docs/TOOLS.md#links) | Resolve `[[wikilinks]]` and backlinks ([`get_links`](docs/TOOLS.md#get_links)). Rank the notes most related to a given one — shared tags and link-graph structure, no embeddings ([`get_related_notes`](docs/TOOLS.md#get_related_notes)). |
+| [**Query**](docs/TOOLS.md#query_notes) | Filter notes by [frontmatter conditions](docs/TOOLS.md#query_notes) (`eq`, `gt`, `contains`, …), by [tag](docs/TOOLS.md#find_by_tag), or by [recency](docs/TOOLS.md#list_recent_notes). Every note-selecting tool accepts the same [`folder` / `tags` / `where` filters](docs/TOOLS.md#filter-vocabulary). |
+| [**Audit**](docs/TOOLS.md#vault) | [Whole-vault stats](docs/TOOLS.md#get_vault_stats), then [drill into](docs/TOOLS.md#list_vault_issues) the actual orphaned notes, broken wikilinks, and dead heading anchors. |
+| [**Edit**](docs/TOOLS.md#write-tools) *(opt-in)* | [Create, append, prepend, move, and delete notes](docs/TOOLS.md#creating-and-replacing-notes). Change [a tag](docs/TOOLS.md#add_tag--remove_tag), [a frontmatter field](docs/TOOLS.md#frontmatter-edits), or [one section](docs/TOOLS.md#section-edits) without rewriting the note. [Bulk-edit](docs/TOOLS.md#bulk_edit) many notes in one call. See [Enabling writes](#enabling-writes). |
+| [**Protect**](docs/TOOLS.md#guarantees-shared-by-every-write) | [Moving a note](docs/TOOLS.md#move_note) rewrites the wikilinks that point to it; [renaming a heading](docs/TOOLS.md#rename_section) rewrites inbound anchors. Every write [reports any broken links it introduced](docs/TOOLS.md#link-integrity-on-writes). [Deletes](docs/TOOLS.md#delete_note) go to `.trash`. |
 | **Sync** *(opt-in)* | If the vault is a git repo, snapshot every write as a commit — optionally pulling and pushing a remote per write or on a background timer. Merge conflicts are resolved non-destructively: your version is always preserved. See [Git safety net](#git-safety-net-obsidian_git_sync). |
 
-Templates from Obsidian's core Templates plugin are supported (`{{title}}`, `{{date:FORMAT}}`, …); Templater scripting is not.
+Templates from Obsidian's core [Templates plugin](docs/TOOLS.md#templates) are supported (`{{title}}`, `{{date:FORMAT}}`, …); Templater scripting is not.
 
 **[→ Full tool reference](docs/TOOLS.md)** — all 46 tools with parameters and return shapes.
 
