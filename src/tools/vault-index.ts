@@ -84,8 +84,29 @@ export class VaultIndex {
     this.vaultPath = resolve(vaultPath);
   }
 
-  /** Bring the index up to date with the filesystem, re-reading only changes. */
+  /** In-flight refresh, so overlapping callers share one pass. */
+  private refreshing: Promise<void> | null = null;
+
+  /**
+   * Bring the index up to date with the filesystem, re-reading only changes.
+   *
+   * Serialized: `getIndex` hands every caller the same instance and MCP tool
+   * handlers are async, so two refreshes could interleave at the `await
+   * buildEntry` points. A pass that walked before a file existed would then
+   * delete that file's entry — added by a later pass — because it was missing
+   * from the earlier pass's `seen` set, and the call would report a note that
+   * demonstrably existed as absent. Concurrent callers now await the in-flight
+   * pass instead of starting a competing one.
+   */
   async refresh(): Promise<void> {
+    if (this.refreshing) return this.refreshing;
+    this.refreshing = this.runRefresh().finally(() => {
+      this.refreshing = null;
+    });
+    return this.refreshing;
+  }
+
+  private async runRefresh(): Promise<void> {
     const files = await walkVault(this.vaultPath);
     const seen = new Set<string>();
 

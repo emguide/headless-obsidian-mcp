@@ -134,8 +134,21 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     const args = [...baseArgs, "--", pattern, ...paths];
     const r = await runRipgrep(args);
     if (r.code !== 0 && r.code !== 1) {
-      console.error(`ripgrep failed with code ${r.code}:`, r.stderr);
-      throw new Error(`Search failed`);
+      // rg exits 2 if ANY explicitly-passed path errors, even when it matched
+      // elsewhere. A candidate deleted between the index refresh and this spawn
+      // (Obsidian, a git-sync pull, another agent) would otherwise sink a
+      // perfectly good read. Keep whatever it did produce; only fail when the
+      // run yielded nothing usable, so a genuine rg failure still surfaces.
+      const onlyMissingFiles =
+        r.stderr.length > 0 &&
+        r.stderr
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .every((line) => /No such file or directory|os error 2/i.test(line));
+      if (!onlyMissingFiles || !r.stdout.trim()) {
+        console.error(`ripgrep failed with code ${r.code}:`, r.stderr);
+        throw new Error(`Search failed`);
+      }
     }
     stdout += r.stdout;
   };
