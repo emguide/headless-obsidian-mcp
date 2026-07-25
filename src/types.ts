@@ -289,6 +289,8 @@ export interface VaultStats {
   notes_with_links: number;
   /** Notes with no inbound and no outbound resolved links. */
   orphan_notes: number;
+  /** Notes that are unreconciled git-sync conflict copies. */
+  conflict_notes: number;
   /** Most recent note modification time (ISO 8601), or null for an empty vault. */
   last_modified: string | null;
   /** Oldest note modification time (ISO 8601), or null for an empty vault. */

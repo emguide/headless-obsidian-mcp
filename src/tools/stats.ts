@@ -1,5 +1,6 @@
 import { assertVaultPath } from "./vault.js";
 import { getIndex } from "./vault-index.js";
+import { isConflictCopy } from "./git-sync.js";
 import { VaultStats } from "../types.js";
 
 /**
@@ -20,6 +21,7 @@ export async function getVaultStats(vaultPath: string): Promise<VaultStats> {
   let unresolvedLinks = 0;
   let notesWithLinks = 0;
   let orphanNotes = 0;
+  let conflictNotes = 0;
   let newest = -Infinity;
   let oldest = Infinity;
   const distinctTags = new Set<string>();
@@ -45,6 +47,8 @@ export async function getVaultStats(vaultPath: string): Promise<VaultStats> {
       orphanNotes++;
     }
 
+    if (isConflictCopy(entry.path)) conflictNotes++;
+
     if (entry.mtimeMs > newest) newest = entry.mtimeMs;
     if (entry.mtimeMs < oldest) oldest = entry.mtimeMs;
   }
@@ -60,6 +64,7 @@ export async function getVaultStats(vaultPath: string): Promise<VaultStats> {
     unresolved_links: unresolvedLinks,
     notes_with_links: notesWithLinks,
     orphan_notes: orphanNotes,
+    conflict_notes: conflictNotes,
     last_modified: entries.length ? new Date(newest).toISOString() : null,
     first_modified: entries.length ? new Date(oldest).toISOString() : null,
   };
