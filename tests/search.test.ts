@@ -55,6 +55,7 @@ before(async () => {
       path: "exactly.md",
       content: ["# Exactly", "needle one", "filler", "needle two"].join("\n"),
     },
+    { path: "ips.md", content: "# Hosts\nserver at 10.0.0.1 is up\n" },
   ]);
 });
 after(async () => {
@@ -215,6 +216,25 @@ test("no matches returns empty results with empty flags", async () => {
   assert.equal(res.files_returned, 0);
   assert.equal(res.files_omitted, 0);
   assert.deepEqual(res.matches_capped_in, []);
+});
+
+// rg's default engine (Rust regex crate) is linear-time — catastrophic
+// backtracking cannot occur — so ordinary patterns with several bounded
+// quantifiers or groups must not be rejected as "too complex".
+test("a pattern with multiple bounded quantifiers is accepted", async () => {
+  const res = await searchNotes(fx.vaultPath, {
+    pattern: "[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}",
+  });
+  assert.equal(res.results.length, 1);
+  assert.equal(res.results[0].path, "ips");
+});
+
+test("a pattern with five groups is accepted", async () => {
+  const res = await searchNotes(fx.vaultPath, {
+    pattern: "(n)(e)(e)(d)(le)",
+    limit: 1,
+  });
+  assert.ok(res.results.length > 0);
 });
 
 test("negative limit throws", async () => {
