@@ -463,10 +463,16 @@ export async function moveNote(
   }
 
   // Capture backlinks from the pre-move index before touching the filesystem.
+  // Resolve fromCanon through the index first (as rename_section does): the
+  // backlink map is keyed by the note's real on-disk path, so a lookup with a
+  // wrong-cased input (`projects/alpha` for `Projects/Alpha.md`) would miss the
+  // key on a case-insensitive filesystem and silently rewrite zero backlinks.
   let backlinks: string[] = [];
+  let resolvedFrom = fromCanon;
   if (update_links) {
     const index = await getIndex(vaultPath);
-    backlinks = index.backlinks(fromCanon);
+    resolvedFrom = index.resolve(fromCanon) ?? fromCanon;
+    backlinks = index.backlinks(resolvedFrom);
   }
 
   await assertSyncableBeforeWrite(vaultPath);
@@ -476,8 +482,8 @@ export async function moveNote(
   let updatedNotes = 0;
   let updatedLinks = 0;
   if (update_links && backlinks.length > 0) {
-    const fromLower = fromCanon.toLowerCase();
-    const oldBase = fromCanon.split("/").pop()!.toLowerCase();
+    const fromLower = resolvedFrom.toLowerCase();
+    const oldBase = resolvedFrom.split("/").pop()!.toLowerCase();
     const newBase = toCanon.split("/").pop()!;
     for (const backlink of backlinks) {
       let raw: string;

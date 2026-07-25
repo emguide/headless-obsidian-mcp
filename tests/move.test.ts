@@ -95,6 +95,48 @@ test("a slash-qualified target with no matching note is unresolved, not a hidden
   await local.cleanup();
 });
 
+test("moveNote resolves a wrong-cased `from` before rewriting backlinks", async () => {
+  // Regression: move_note looked up backlinks with the raw canonicalName(from)
+  // string instead of resolving it through the index first. On a case-
+  // insensitive filesystem, move_note({from:"projects/alpha"}) against a
+  // Projects/Alpha.md file renamed the file fine but rewrote ZERO backlinks —
+  // the backlink map is keyed by the note's real on-disk path (Projects/Alpha),
+  // so the exact, case-sensitive Map.get missed it (updated_notes:0, as if there
+  // were no backlinks). Its sibling rename_section resolved first; move_note now
+  // does too.
+  const local = await makeVault([
+    { path: "Projects/Alpha.md", content: "# Alpha\n" },
+    { path: "home.md", content: "# Home\n[[Alpha]] and [[Projects/Alpha]]\n" },
+  ]);
+
+  // The index-level facts the fix hinges on, asserted on every filesystem: the
+  // raw wrong-cased canon misses the backlink map key; resolving first hits it.
+  const { getIndex } = await import("../src/tools/vault-index.js");
+  const index = await getIndex(local.vaultPath);
+  assert.deepEqual(index.backlinks("projects/alpha"), []);
+  assert.equal(index.resolve("projects/alpha"), "Projects/Alpha");
+  assert.deepEqual(index.backlinks("Projects/Alpha"), ["home"]);
+
+  // On a case-insensitive filesystem the wrong-cased path still opens the real
+  // file, so the whole move runs and both backlink forms must be rewritten. On
+  // a case-sensitive filesystem the file cannot be opened by that path, so the
+  // end-to-end move legitimately can't run — skip only that half there.
+  const caseInsensitive = await exists(local.vaultPath, "projects/alpha.md");
+  if (caseInsensitive) {
+    const result = await moveNote(local.vaultPath, {
+      from: "projects/alpha",
+      to: "Projects/Gamma",
+    });
+    assert.equal(result.updated_notes, 1);
+    assert.equal(result.updated_links, 2);
+    const home = await read(local.vaultPath, "home.md");
+    assert.match(home, /\[\[Gamma\]\]/);
+    assert.match(home, /\[\[Projects\/Gamma\]\]/);
+    assert.doesNotMatch(home, /Alpha/);
+  }
+  await local.cleanup();
+});
+
 test("moveNote with update_links:false leaves backlinks untouched", async () => {
   const local = await makeVault([
     { path: "home.md", content: "# Home\n[[target]]\n" },
