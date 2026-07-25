@@ -1,5 +1,6 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_POLICY,
   GATED_TOOL_NAMES,
@@ -57,6 +58,77 @@ test("taxonomy matches the spec, tool by tool", () => {
     "bulk_edit",
   ]);
   assert.deepEqual(new Set(GATED_TOOL_NAMES), expected);
+});
+
+/**
+ * WRITE_TOOL_NAMES is a hand-maintained list, and nothing else forces a tool
+ * that mutates the vault onto it. A miss there is silent and serious: the tool
+ * classifies as read-only, so the default `reads` policy hands it to agents on
+ * a server the operator deliberately left read-only. The startup taxonomy check
+ * can't catch it (the tool IS grouped), and the mode-derivation test below
+ * can't either (it compares isWriteTool to WRITE_TOOL_NAMES — the same source).
+ *
+ * So derive the truth from the code instead: find every function that actually
+ * changes the vault, then find which dispatch handlers reach one. That set must
+ * equal WRITE_TOOL_NAMES exactly.
+ */
+test("every dispatch handler that mutates the vault is declared a write tool", () => {
+  const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf-8");
+  const calls = (body: string, fn: string) => new RegExp(`\\b${fn}\\s*\\(`).test(body);
+
+  /** Exports of write.ts that do not themselves change the vault. */
+  const NON_MUTATING = ["isWriteTool", "readRaw", "assertSyncableBeforeWrite"];
+
+  const exportsOf = (src: string) =>
+    [...src.matchAll(/^export (?:async )?function (\w+)/gm)].map((m) => m[1]);
+  /** Split a module into { exported function name -> its body text }. */
+  const bodiesOf = (src: string) => {
+    const parts = src.split(/^export (?:async )?function (\w+)/m);
+    const out = new Map<string, string>();
+    for (let i = 1; i < parts.length; i += 2) out.set(parts[i], parts[i + 1]);
+    return out;
+  };
+
+  const writeExports = exportsOf(read("../src/tools/write.ts"));
+  for (const name of NON_MUTATING) {
+    assert.ok(
+      writeExports.includes(name),
+      `write.ts no longer exports ${name} — revisit the NON_MUTATING allowlist`
+    );
+  }
+  const mutators = new Set(writeExports.filter((n) => !NON_MUTATING.includes(n)));
+
+  // Wrapper modules: an exported function calling a write.ts mutator is one too.
+  for (const rel of ["../src/tools/bulk.ts", "../src/tools/templates.ts"]) {
+    for (const [name, body] of bodiesOf(read(rel))) {
+      if ([...mutators].some((fn) => calls(body, fn))) mutators.add(name);
+    }
+  }
+  // Anchors: if detection silently stops working, fail here rather than by
+  // "discovering" that nothing mutates.
+  for (const anchor of ["writeNote", "bulkEdit", "applyTemplate", "insertTemplate"]) {
+    assert.ok(mutators.has(anchor), `expected ${anchor} to be detected as a mutator`);
+  }
+
+  const indexSrc = read("../src/index.ts");
+  const dispatch = indexSrc.slice(indexSrc.indexOf("    switch (name) {"));
+  const parts = dispatch.split(/^\s*case "([a-z_]+)": \{/m);
+  const handlers = new Map<string, string>();
+  for (let i = 1; i < parts.length; i += 2) handlers.set(parts[i], parts[i + 1]);
+
+  // Same guard for the dispatch parse: one case per gated tool, plus get_config.
+  assert.equal(
+    handlers.size,
+    GATED_TOOL_NAMES.size + 1,
+    "dispatch parse matched an unexpected number of cases — the guard below would be vacuous"
+  );
+
+  const mutating = new Set(
+    [...handlers]
+      .filter(([, body]) => [...mutators].some((fn) => calls(body, fn)))
+      .map(([name]) => name)
+  );
+  assert.deepEqual(mutating, new Set(WRITE_TOOL_NAMES));
 });
 
 // --- evaluatePolicy ---

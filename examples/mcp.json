@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "obsidian": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/headless-obsidian-mcp/dist/index.js"],
+      "env": {
+        "OBSIDIAN_VAULT_PATH": "/absolute/path/to/your/obsidian/vault"
+      }
+    }
+  }
+}

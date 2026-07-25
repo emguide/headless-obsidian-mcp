@@ -27,7 +27,7 @@ Tool names follow a fixed verb taxonomy. A new tool reuses an existing verb; it 
 
 **No merges.** `list_notes` / `find_by_tag` / `query_notes` / `list_recent_notes` are distinct intents, not one query tool: `find_by_tag` matches the unified inline-plus-frontmatter tag set while `query_notes` sees frontmatter only, and `list_recent_notes` carries ordering semantics (`date_field`, mtime) that `query_notes` has no vocabulary for. The separation is structural.
 
-**Extending the surface.** A new note-selecting tool reuses the `folder` / `tags` / `where` / `match` filter vocabulary rather than inventing its own. A new vault-hygiene finding becomes a `kind` of `list_vault_issues`, not a new tool. Every new tool must also be classified into exactly one domain group of the `OBSIDIAN_TOOLS` tool policy (`GROUP_MEMBERS` in `src/tools/tool-policy.ts`; see "Tool policy" below) — a mutating tool additionally joins `WRITE_TOOL_NAMES` in `src/tools/write.ts`, which is what marks it as write-mode. This is enforced: the server refuses to start, and the taxonomy tests fail, if a defined tool has no group.
+**Extending the surface.** A new note-selecting tool reuses the `folder` / `tags` / `where` / `match` filter vocabulary rather than inventing its own. A new vault-hygiene finding becomes a `kind` of `list_vault_issues`, not a new tool. Every new tool must also be classified into exactly one domain group of the `OBSIDIAN_TOOLS` tool policy (`GROUP_MEMBERS` in `src/tools/tool-policy.ts`; see "Tool policy" below) — a mutating tool additionally joins `WRITE_TOOL_NAMES` in `src/tools/write.ts`, which is what marks it as write-mode. Both halves are enforced. Grouping: the server refuses to start, and the taxonomy tests fail, if a defined tool has no group (or a group names an undefined tool). Write-mode: a test in `tests/tool-policy.test.ts` derives from the source which dispatch handlers actually reach a vault-mutating function and asserts that set equals `WRITE_TOOL_NAMES` exactly — the startup check cannot catch a mutating tool that was grouped but left off the write list, and the mode-derivation test cannot either (it compares `isWriteTool` against the same list). Omitting a mutating tool from `WRITE_TOOL_NAMES` would classify it read-only and expose it under the default `reads` policy, so it fails CI instead. The test carries its own anti-vacuity guards: it asserts the mutator-detection anchors and the dispatch-case count, so a parse that silently stops matching fails rather than passing on an empty set.
 
 **Filter vocabulary (shared).** Every note-selecting tool — `search_notes`,
 `search_notes_ranked`, `list_notes`, `list_recent_notes`, `find_by_tag`,
@@ -945,6 +945,46 @@ OBSIDIAN_GIT_SYNC=commit npm run query -- add-tag "projects/alpha" review
 ```
 
 (With mise: `mise run query -- search "productivity"`, etc.)
+
+## Packaging and accessory files
+
+Four artifacts sit outside the server itself. Each exists because it carries
+something no other file does; the guiding rule is **no restating** — a
+convention already stated in the MCP `instructions` block, the README, or here
+is referenced, never duplicated.
+
+- **`Dockerfile` + `.dockerignore`** — multi-stage `node:20-alpine`. The build
+  stage installs with `--ignore-scripts` (package.json's `prepare` runs `tsc`,
+  which would fire before `src/` is copied) and builds explicitly; the runtime
+  stage installs `--omit=dev --ignore-scripts` and copies `dist/` across.
+  `apk add ripgrep git` is load-bearing, not convenience: `search_notes` shells
+  out to the real `rg`, and `assertSyncableBeforeWrite` refuses every write in
+  any non-`off` `OBSIDIAN_GIT_SYNC` mode without a usable git repo. The image
+  sets a system-level git identity and `safe.directory /vault`, because a bind
+  mount owned by a different uid otherwise fails git's dubious-ownership check
+  and surfaces as a fail-closed write refusal rather than anything git-shaped.
+  `.dockerignore` excludes host `dist/` so it can never shadow the build stage's
+  output. No `docker-compose.yml`: a stdio server is spawned per client, not
+  supervised.
+
+- **`.env.example`** — the single table of all 8 variables plus the two
+  migration traps. Nothing reads it (no dotenv dependency, by design — an MCP
+  server inherits its environment from the client that spawns it), so its jobs
+  are documentation and `docker run --env-file`. Keep it in sync when a variable
+  is added, renamed, or retired.
+
+- **`examples/`** — MCP client config for Claude Code (`mcp.json`), the Docker
+  image (`mcp.docker.json`), and Claude Desktop (`claude_desktop_config.json`),
+  with a README explaining the read-only vs. writes split. Deliberately **not**
+  a live `.mcp.json` at the repo root: Claude Code auto-loads project-scope
+  `.mcp.json`, so a checked-in one would attach a server pointing at someone
+  else's vault path for everyone working *on* this project.
+
+- **`skills/obsidian-vault/SKILL.md`** — a copyable Agent Skill. Its scope is
+  strictly what the `instructions` block in `src/index.ts` cannot carry:
+  intent→tool routing across the tool surface, anti-patterns, multi-step
+  recipes, and a fail-loud error playbook. If a change would add a *convention*,
+  it belongs in `instructions`, not here; if it adds a *workflow*, here.
 
 ## Documentation Updates
 

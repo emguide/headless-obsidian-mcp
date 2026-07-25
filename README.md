@@ -958,6 +958,15 @@ message listing the valid vocabulary (or a migration hint — use
 policy gates the MCP server; the query CLI is the operator's own tool and is
 not affected by it.
 
+**Classification integrity.** Two invariants are machine-enforced, because a
+silent failure of either would expose a tool the operator meant to gate. The
+server refuses to start if a defined tool belongs to no group, or if a group
+names a tool the server doesn't define. And a test derives, from the source,
+which request handlers actually reach a vault-mutating function, then asserts
+that set equals the declared write tools exactly — so a new tool that changes
+the vault but is left off that list fails CI rather than being classified
+read-only and exposed under the default read-only policy.
+
 ### Git sync (`OBSIDIAN_GIT_SYNC`)
 
 `OBSIDIAN_GIT_SYNC` selects one of four modes:
@@ -1044,6 +1053,56 @@ Replace the paths with:
 To allow the agent to modify your vault, add `"OBSIDIAN_TOOLS": "all"` to the `env` block above (with the variable unset the server is read-only). Any selector policy works here — e.g. `"OBSIDIAN_TOOLS": "reads,tasks.write"` for a read-everything, write-only-tasks agent; see [Tool policy](#tool-policy-obsidian_tools). To also commit every write to git (and optionally sync a remote), add `"OBSIDIAN_GIT_SYNC": "commit"` (or `"every-write"` / `"timer"`); see [Git sync](#git-sync-obsidian_git_sync).
 
 After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_config`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_templates`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`, `resolve_daily_note`). With write tools selected in `OBSIDIAN_TOOLS` it also provides them (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`, `apply_template`, `insert_template`).
+
+Ready-to-copy versions of both blocks — plus a Claude Code project-scope
+`.mcp.json` and a Docker variant — live in [`examples/`](examples/).
+
+## Docker
+
+The [`Dockerfile`](Dockerfile) builds a multi-stage `node:20-alpine` image with
+**ripgrep** and **git** installed: `search_notes` shells out to the real `rg`
+binary, and every `OBSIDIAN_GIT_SYNC` mode other than `off` refuses writes
+without a usable git repository, so both are hard runtime dependencies rather
+than conveniences.
+
+```bash
+docker build -t headless-obsidian-mcp .
+docker run -i --rm -v "$HOME/vault:/vault:ro" headless-obsidian-mcp
+```
+
+`-i` is load-bearing — this is a stdio server, and without an open stdin the
+transport never comes up. The image mounts the vault at `/vault` by default and
+runs as the unprivileged `node` user; for writes, drop the `:ro` and add
+`--user "$(id -u):$(id -g)"` so files land owned by you. See
+[`examples/mcp.docker.json`](examples/mcp.docker.json) for the client config.
+
+There is no `docker-compose.yml` by design: an MCP stdio server is spawned per
+client, not supervised as a long-running service with a port.
+
+## Environment variables
+
+[`.env.example`](.env.example) documents every variable the server reads, with
+defaults and the two migration traps (`OBSIDIAN_ALLOW_WRITES`, which aborts
+startup if set at all, and `OBSIDIAN_GIT_AUTOCOMMIT`, which warns and maps to
+`OBSIDIAN_GIT_SYNC=commit`). Nothing in this project loads a `.env` file —
+there is no dotenv dependency, since an MCP server receives its environment
+from the client that spawns it. The file is documentation, and `--env-file`
+fodder for the Docker image.
+
+## Agent skill
+
+[`skills/obsidian-vault/SKILL.md`](skills/obsidian-vault/SKILL.md) is a
+copyable [Agent Skill](https://code.claude.com/docs/en/skills) — drop it in
+`~/.claude/skills/obsidian-vault/` (or a project's `.claude/skills/`) to give
+an agent workflow guidance for this server.
+
+It deliberately does **not** restate the shared conventions: the server already
+sends those to every client in its MCP `instructions` at initialize. The skill
+covers what that block can't — which tool answers which intent across the 46
+tools (25 read, 21 write), the anti-patterns worth avoiding (grepping for `- [ ]` instead
+of `list_tasks`; `patch_note` on a heading instead of `rename_section`), and
+multi-step recipes for fixing broken links, processing the daily note,
+bulk-retagging a folder, and restructuring without breaking the link graph.
 
 ## Acknowledgments
 
