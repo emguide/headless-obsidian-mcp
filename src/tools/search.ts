@@ -110,6 +110,16 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     "--json",
     "--type", "md",
     "--context", context_lines.toString(),
+    // Search exactly the corpus walkVault indexes, so search_notes and every
+    // index-backed tool agree on what is in the vault. ripgrep's defaults
+    // diverge from it in two ways: it honours .gitignore (the index does not,
+    // and git-repo vaults are the norm given OBSIDIAN_GIT_SYNC), and it skips
+    // hidden files (the index keeps them). Hidden DIRECTORIES and the
+    // machinery dirs stay excluded, matching walkVault's IGNORED_DIRS.
+    "--no-ignore",
+    "--hidden",
+    "--glob", "!**/.*/",
+    "--glob", "!node_modules/",
   ];
   if (!case_sensitive) baseArgs.push("--ignore-case");
   if (whole_word) baseArgs.push("--word-regexp");
