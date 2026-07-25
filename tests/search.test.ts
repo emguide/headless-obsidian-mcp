@@ -125,24 +125,23 @@ test("max_matches_per_file stops appending context lines once the cap is hit", a
   assert.ok(capped.matches_capped_in.includes("spaced"));
 
   // The last kept match's context_after must not exceed its own
-  // context_lines-bounded window. NOTE: this deliberately does NOT compare
-  // against the uncapped run's same-index match. That baseline is itself
-  // contaminated by a separate, pre-existing before/after-assignment quirk
-  // (context lines between two matches are always attributed to the EARLIER
-  // match's context_after, never the later match's context_before, because
-  // ripgrep's context events for a match's own trailing window and the next
-  // match's leading window are indistinguishable by line-number ordering
-  // alone at the time they stream in). That quirk affects every non-last
-  // match in an uncapped run identically and is out of scope for the
-  // per-file match-cap fix here — asserting equality against it would
-  // require reproducing exactly one leaked window rather than closing the
-  // leak, which contradicts the cap's own purpose.
+  // context_lines-bounded window. Context is now assigned by line number
+  // within the owning file, so a capped run's kept matches are byte-identical
+  // to the same matches in an uncapped run — the cap changes how many matches
+  // are returned, never the context attached to the ones that are.
   const lastKept = spacedCapped.matches[maxMatches - 1];
   assert.ok(
     lastKept.context_after.length <= contextLines,
     "context_after for the last kept match grew beyond its own context window " +
       "(bug: context lines from beyond the per-file cap kept appending to it)"
   );
+  for (let i = 0; i < maxMatches; i++) {
+    assert.deepEqual(
+      spacedCapped.matches[i],
+      spacedUncapped.matches[i],
+      `capped match ${i} must match the uncapped run's same match exactly`
+    );
+  }
 
   // None of the context text belonging exclusively to skipped (beyond-cap)
   // matches should appear anywhere in the capped file's kept matches.

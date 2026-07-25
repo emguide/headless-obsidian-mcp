@@ -149,18 +149,32 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
   const matchLimit = max_matches_per_file;       // 0 = unlimited
   const cappedFiles = new Set<string>();
 
-  let currentFile = '';
-  let currentMatches: SearchResult['matches'] = [];
-  let filesSeen = 0;    // distinct matching files encountered so far
-  let filesSkipped = 0; // distinct matching files dropped before the window by offset
-  let filesOmitted = 0;
-  let skippingCurrentFile = false; // true when the current file is outside the window (offset or limit)
-  let matchCapReachedForFile = false; // true once matchLimit reached within the current file
+  /**
+   * One file's raw rg events. Context is kept keyed by line number rather than
+   * appended to "the match seen so far": rg emits a match's LEADING context
+   * BEFORE the match event itself, so at a file boundary those events arrive
+   * while the previous file is still current. Attributing them positionally
+   * pushed the next file's leading lines onto the previous file's last match
+   * and dropped each file's own leading context.
+   */
+  interface RawFile {
+    path: string;
+    matches: { line_number: number; content: string }[];
+    context: Map<number, string>;
+  }
 
-  const flushCurrent = () => {
-    if (currentFile && currentMatches.length > 0) {
-      results.push({ path: currentFile, matches: currentMatches });
+  // --- Pass 1: group the event stream by the path each event carries --------
+  const rawFiles: RawFile[] = [];
+  const byPath = new Map<string, RawFile>();
+  const fileFor = (eventPath: string): RawFile => {
+    const relativePath = relative(vaultPath, eventPath).replace(/\.md$/, '');
+    let file = byPath.get(relativePath);
+    if (!file) {
+      file = { path: relativePath, matches: [], context: new Map() };
+      byPath.set(relativePath, file);
+      rawFiles.push(file);
     }
+    return file;
   };
 
   for (const line of lines) {
@@ -170,73 +184,63 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
     } catch {
       continue;
     }
+    const eventPath = parsed?.data?.path?.text;
+    if (typeof eventPath !== 'string') continue; // e.g. the trailing summary event
 
     if (parsed.type === 'match') {
-      const relativePath = relative(vaultPath, parsed.data.path.text).replace(/\.md$/, '');
-
-      if (currentFile !== relativePath) {
-        // New file boundary: flush the previous file's matches.
-        flushCurrent();
-        currentFile = relativePath;
-        currentMatches = [];
-        matchCapReachedForFile = false;
-
-        // Window the matching files: offset first (skip the leading `offset`
-        // files outright), then the file cap over the post-offset window.
-        if (filesSeen < offset) {
-          filesSkipped += 1;
-          skippingCurrentFile = true;
-        } else {
-          skippingCurrentFile = fileLimit > 0 && results.length >= fileLimit;
-          if (skippingCurrentFile) {
-            filesOmitted += 1;
-          }
-        }
-        filesSeen += 1;
-      }
-
-      if (skippingCurrentFile) {
-        continue;
-      }
-
       if (parsed.data.submatches && parsed.data.submatches.length > 0) {
-        if (matchLimit > 0 && currentMatches.length >= matchLimit) {
-          matchCapReachedForFile = true;
-          cappedFiles.add(relativePath);
-          continue;
-        }
-        currentMatches.push({
+        fileFor(eventPath).matches.push({
           line_number: parsed.data.line_number,
-          body_line: null, // annotated from the index after collection
           content: parsed.data.lines.text,
-          context_before: [],
-          context_after: []
         });
       }
     } else if (parsed.type === 'context') {
-      if (skippingCurrentFile || matchCapReachedForFile) {
-        continue;
-      }
-      if (currentMatches.length > 0) {
-        const lastMatch = currentMatches[currentMatches.length - 1];
-        if (parsed.data.line_number < lastMatch.line_number) {
-          lastMatch.context_before.push(parsed.data.lines.text);
-        } else if (
-          !(matchLimit > 0 && currentMatches.length >= matchLimit) ||
-          lastMatch.context_after.length < context_lines
-        ) {
-          // Once the match buffer is full, only accept trailing context that
-          // still fits the LAST KEPT match's own context window (bounded by
-          // context_lines). Anything beyond that window, once the buffer is
-          // full, is context_before leakage from the next (dropped) match's
-          // context events arriving ahead of that match's own match event.
-          lastMatch.context_after.push(parsed.data.lines.text);
-        }
-      }
+      fileFor(eventPath).context.set(parsed.data.line_number, parsed.data.lines.text);
     }
   }
 
-  flushCurrent();
+  /** Context lines in the inclusive line range [from, to], in line order. */
+  const contextRange = (ctx: Map<number, string>, from: number, to: number): string[] => {
+    const out: string[] = [];
+    for (let n = Math.max(1, from); n <= to; n++) {
+      const text = ctx.get(n);
+      if (text !== undefined) out.push(text);
+    }
+    return out;
+  };
+
+  // --- Pass 2: window the files, cap matches, attach each match's own context
+  let filesSkipped = 0; // distinct matching files dropped before the window by offset
+  let filesOmitted = 0; // distinct matching files dropped after it by limit
+  const matching = rawFiles.filter((f) => f.matches.length > 0);
+
+  for (let i = 0; i < matching.length; i++) {
+    const file = matching[i];
+    // Window the matching files: offset first (skip the leading `offset` files
+    // outright), then the file cap over the post-offset window.
+    if (i < offset) {
+      filesSkipped += 1;
+      continue;
+    }
+    if (fileLimit > 0 && results.length >= fileLimit) {
+      filesOmitted += 1;
+      continue;
+    }
+
+    const kept = matchLimit > 0 ? file.matches.slice(0, matchLimit) : file.matches;
+    if (kept.length < file.matches.length) cappedFiles.add(file.path);
+
+    results.push({
+      path: file.path,
+      matches: kept.map((m) => ({
+        line_number: m.line_number,
+        body_line: null, // annotated from the index after collection
+        content: m.content,
+        context_before: contextRange(file.context, m.line_number - context_lines, m.line_number - 1),
+        context_after: contextRange(file.context, m.line_number + 1, m.line_number + context_lines),
+      })),
+    });
+  }
 
   // Bridge ripgrep's file-absolute line numbers to the body-relative
   // convention of get_outline/list_tasks/set_task_state: body_line =
