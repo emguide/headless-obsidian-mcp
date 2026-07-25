@@ -37,10 +37,14 @@ test("search rejects an over-long pattern", async () => {
   );
 });
 
-test("search rejects a DoS-prone pattern", async () => {
+// There is no pre-flight complexity blocklist: rg's default engine is
+// linear-time (catastrophic backtracking cannot occur), and rg itself
+// rejects malformed or over-the-size-limit patterns at compile time. The
+// server's job is only to surface that rejection loudly.
+test("search surfaces rg's own rejection of an invalid pattern", async () => {
   await assert.rejects(
     () => searchNotes(fx.vaultPath, { pattern: "{1,999}xxxx{1,999}" }),
-    /complexity not allowed/
+    /Search failed/
   );
 });
 
