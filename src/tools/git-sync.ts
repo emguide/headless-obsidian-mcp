@@ -182,14 +182,23 @@ async function currentBranch(vaultPath: string): Promise<string> {
   return (await git(vaultPath, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
 }
 
-/** Check if a specific stage exists for a file in a merge conflict. */
+/**
+ * Check if a specific stage exists for a file in a merge conflict.
+ *
+ * Uses `cat-file -e`, which reports existence via exit status without writing
+ * the blob to stdout. `git show` would stream the whole object through the
+ * UTF-8 `git()` helper and blow its 1MB maxBuffer on any larger note or
+ * attachment; the resulting throw was indistinguishable from "stage absent",
+ * so a both-modified conflict on a >1MB file fell through to the unclassified
+ * branch and deleted the canonical path.
+ */
 async function checkStageExists(
   vaultPath: string,
   rel: string,
   stage: "2" | "3"
 ): Promise<boolean> {
   try {
-    await git(vaultPath, ["show", `:${stage}:${rel}`]);
+    await git(vaultPath, ["cat-file", "-e", `:${stage}:${rel}`]);
     return true;
   } catch {
     return false;
