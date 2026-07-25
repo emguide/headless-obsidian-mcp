@@ -12,8 +12,7 @@ import { getIndex } from "./vault-index.js";
 import { Condition } from "./property-match.js";
 import { resolveCandidates } from "./candidate-filter.js";
 import { resolveNotePath } from "./vault.js";
-import { writeResolved } from "./write.js";
-import { snapshotBeforeWrite } from "./git-guard.js";
+import { writeResolved, assertSyncableBeforeWrite, afterWrite } from "./write.js";
 
 export type BulkOperation =
   | { op: "add_tag"; tags: string[] }
@@ -209,7 +208,7 @@ export async function bulkEdit(
     };
   }
 
-  await snapshotBeforeWrite(vaultPath);
+  await assertSyncableBeforeWrite(vaultPath);
 
   const results: BulkNoteResult[] = [];
   for (const notePath of matched) {
@@ -228,10 +227,13 @@ export async function bulkEdit(
     }
   }
 
+  const appliedCount = results.filter((r) => r.ok).length;
+  await afterWrite(vaultPath, `bulk_edit: ${appliedCount} notes`);
+
   return {
     dry_run: false,
     matched_count: matched.length,
-    applied_count: results.filter((r) => r.ok).length,
+    applied_count: appliedCount,
     failed_count: results.filter((r) => !r.ok).length,
     results,
   };

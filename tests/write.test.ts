@@ -14,7 +14,6 @@ import {
   addNoteSection,
   replaceNoteSection,
 } from "../src/tools/write.js";
-import { GIT_AUTOCOMMIT_ENV } from "../src/tools/git-guard.js";
 import { makeVault, Fixture } from "./fixtures.js";
 
 const execFileAsync = promisify(execFile);
@@ -116,49 +115,42 @@ beforeEach(async () => {
   gitFx = await makeVault([{ path: "seed.md", content: "# Seed\n" }]);
 });
 afterEach(async () => {
-  delete process.env[GIT_AUTOCOMMIT_ENV];
+  delete process.env.OBSIDIAN_GIT_SYNC;
+  delete process.env.OBSIDIAN_GIT_AUTOCOMMIT;
   await gitFx.cleanup();
 });
 
-test("guard off: writes work with no git repo", async () => {
+test("sync off: writes work with no git repo", async () => {
   await writeNote(gitFx.vaultPath, { path: "x", content: "hi\n" });
   assert.equal(await read(gitFx.vaultPath, "x.md"), "hi\n");
 });
 
-test("guard on: snapshots dirty state, leaving the new write uncommitted", async () => {
+test("mode commit: the write is committed with a tool-derived message", async () => {
   await initRepo(gitFx.vaultPath);
-  // Make the tree dirty so there is something to snapshot.
-  await writeNote(gitFx.vaultPath, { path: "seed", content: "# Seed edited\n", overwrite: true });
   const before = (await git(gitFx.vaultPath, "rev-list", "--count", "HEAD")).trim();
-
-  process.env[GIT_AUTOCOMMIT_ENV] = "1";
+  process.env.OBSIDIAN_GIT_SYNC = "commit";
   await writeNote(gitFx.vaultPath, { path: "new", content: "# New\n" });
 
-  const afterCount = (await git(gitFx.vaultPath, "rev-list", "--count", "HEAD")).trim();
-  assert.equal(Number(afterCount), Number(before) + 1, "a snapshot commit was made");
-
-  // The snapshot captured the pre-write edit...
-  const head = await git(gitFx.vaultPath, "show", "HEAD:seed.md");
-  assert.equal(head, "# Seed edited\n");
-  // ...and the agent's own write is left uncommitted for review.
+  const after = (await git(gitFx.vaultPath, "rev-list", "--count", "HEAD")).trim();
+  assert.equal(Number(after), Number(before) + 1, "one commit for the write");
+  const subject = (await git(gitFx.vaultPath, "log", "-1", "--pretty=%s")).trim();
+  assert.match(subject, /^write_note: new \(created\)/);
+  // The change is committed (clean tree), not left uncommitted.
   const status = await git(gitFx.vaultPath, "status", "--porcelain");
-  assert.match(status, /new\.md/);
+  assert.equal(status.trim(), "");
 });
 
-test("guard on with a clean tree: no snapshot commit, write still happens", async () => {
+test("legacy OBSIDIAN_GIT_AUTOCOMMIT still enables commit-per-write", async () => {
   await initRepo(gitFx.vaultPath);
   const before = (await git(gitFx.vaultPath, "rev-list", "--count", "HEAD")).trim();
-
-  process.env[GIT_AUTOCOMMIT_ENV] = "1";
-  await writeNote(gitFx.vaultPath, { path: "clean", content: "# Clean\n" });
-
-  const afterCount = (await git(gitFx.vaultPath, "rev-list", "--count", "HEAD")).trim();
-  assert.equal(afterCount, before, "no commit when nothing to snapshot");
-  assert.equal(await read(gitFx.vaultPath, "clean.md"), "# Clean\n");
+  process.env.OBSIDIAN_GIT_AUTOCOMMIT = "1";
+  await writeNote(gitFx.vaultPath, { path: "legacy", content: "# L\n" });
+  const after = (await git(gitFx.vaultPath, "rev-list", "--count", "HEAD")).trim();
+  assert.equal(Number(after), Number(before) + 1);
 });
 
-test("guard on but not a git repo: fail-closed, nothing written", async () => {
-  process.env[GIT_AUTOCOMMIT_ENV] = "1";
+test("mode commit but not a git repo: fail-closed, nothing written", async () => {
+  process.env.OBSIDIAN_GIT_SYNC = "commit";
   await assert.rejects(
     () => writeNote(gitFx.vaultPath, { path: "blocked", content: "x" }),
     /not a git repository/

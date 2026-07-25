@@ -178,8 +178,10 @@ test("bulkEdit takes exactly one snapshot for a multi-note batch", async () => {
   await git(local.vaultPath, ["add", "-A"]);
   await git(local.vaultPath, ["commit", "--no-verify", "-m", "init"]);
 
-  // Leave the tree DIRTY so the guard has pre-existing state to snapshot.
-  // (On a clean tree snapshotBeforeWrite is a no-op — see git-guard.ts:43-45.)
+  // Leave the tree DIRTY so the commit-after-write funnel has pre-existing
+  // state to fold into its single end-of-batch commit alongside the batch's
+  // own changes (git-sync.ts's commitAfterWrite stages everything with `git
+  // add -A`, so both land in that one commit).
   await writeFile(join(local.vaultPath, "scratch.md"), "# scratch\n", "utf-8");
 
   const before = (await git(local.vaultPath, ["rev-list", "--count", "HEAD"])).stdout.trim();
@@ -196,8 +198,7 @@ test("bulkEdit takes exactly one snapshot for a multi-note batch", async () => {
   }
 
   const after = (await git(local.vaultPath, ["rev-list", "--count", "HEAD"])).stdout.trim();
-  // Exactly ONE snapshot commit — not one per matched note — captured the
-  // pre-existing dirty state. The batch writes themselves stay uncommitted.
+  // Exactly ONE commit for the whole batch — not one per matched note.
   assert.equal(Number(after) - Number(before), 1);
   await local.cleanup();
 });
