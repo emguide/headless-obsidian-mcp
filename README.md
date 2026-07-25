@@ -17,6 +17,7 @@ It reduces token cost and removes the need for your agent to understand Obsidian
 | **Audit** | Whole-vault stats, then drill into the actual orphaned notes, broken wikilinks, and dead heading anchors. |
 | **Edit** *(opt-in)* | Create, append, prepend, move, and delete notes. Change a tag, a frontmatter field, or one section without rewriting the note. Bulk-edit many notes in one call. |
 | **Protect** | Moving a note rewrites the wikilinks that point to it; renaming a heading rewrites inbound anchors. Every write reports any broken links it introduced. Deletes go to `.trash`. |
+| **Sync** *(opt-in)* | If the vault is a git repo, snapshot every write as a commit — optionally pulling and pushing a remote per write or on a background timer. Merge conflicts are resolved non-destructively: your version is always preserved. See [Git safety net](#git-safety-net-obsidian_git_sync). |
 
 Templates from Obsidian's core Templates plugin are supported (`{{title}}`, `{{date:FORMAT}}`, …); Templater scripting is not.
 
