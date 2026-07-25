@@ -81,8 +81,16 @@ npm test
 
 The tests build a throwaway fixture vault in a temp directory and cover link
 resolution and backlinks, tag aggregation and filtering, listing and recency,
-index cache invalidation, and the security guards (path traversal, pattern
-limits).
+index cache invalidation, and the security guards (path traversal, symlink
+escapes, frontmatter engine hardening, pattern limits).
+
+### Continuous integration
+
+Every pull request and every push to `main` runs `npm ci`, `npm run build` and
+`npm test` on Node 20 and 22 via GitHub Actions
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The runner installs
+`ripgrep` and configures a git identity, because the suite drives the real `rg`
+binary and real git repositories rather than stubs.
 
 ## Manual testing
 

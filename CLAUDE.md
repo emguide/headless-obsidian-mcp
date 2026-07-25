@@ -776,6 +776,18 @@ it truthy now warns and maps to `OBSIDIAN_GIT_SYNC=commit`. An explicit
 - `npm start` or `mise run start` - Run the compiled server (`dist/index.js`)
 - `npm test` - Run the test suite (Node's built-in `node:test` runner via tsx, no extra deps)
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+`npm ci` → `npm run build` → `npm test`, on Node 20 (the version `mise.toml`
+pins) and Node 22. The runner installs **ripgrep** explicitly — `search_notes`
+shells out to the real `rg` binary and its tests exercise it rather than a stub
+— and configures a git identity, since the `OBSIDIAN_GIT_SYNC` tests init real
+repositories, diverge them, and resolve genuine merge conflicts.
+
+`package.json` declares `engines.node >= 18`, but CI covers 20 and 22 only; add
+18 to the matrix or raise the floor if that gap matters.
+
 ### Vault index
 
 The knowledge-base tools (`list_notes`, `get_links`, `list_tags`, `find_by_tag`,
