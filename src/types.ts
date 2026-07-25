@@ -402,6 +402,17 @@ export interface ResolveNoteResult {
   resolved: string | null;
 }
 
+/**
+ * Outcome of resolving a WRITE target's name through the index. Unlike
+ * VaultIndex.resolve (which silently picks a shortest-path winner for an
+ * ambiguous bare basename), this distinguishes the ambiguous case so a write
+ * can fail loud instead of mutating the wrong note.
+ */
+export type WriteResolution =
+  | { kind: "resolved"; path: string }
+  | { kind: "ambiguous"; candidates: string[] }
+  | { kind: "unresolved" };
+
 export interface PropertySchemaEntry {
   key: string;
   count: number;
