@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import matter from "gray-matter";
+import { parseMatter } from "./matter-safe.js";
 import { resolveNotePath, parseHeadings, headingPaths, resolveSectionIndex } from "./vault.js";
 import { getIndex } from "./vault-index.js";
 import { noteNotFoundError, resolveNoteName } from "./not-found.js";
@@ -31,7 +31,7 @@ export async function readSection(
 
   const index = await getIndex(vaultPath);
   const canonical = resolveNoteName(index, notePath);
-  const fullPath = resolveNotePath(vaultPath, canonical); // guards traversal
+  const fullPath = await resolveNotePath(vaultPath, canonical); // guards traversal
   let info;
   try {
     info = await stat(fullPath);
@@ -47,7 +47,7 @@ export async function readSection(
   }
 
   const raw = await readFile(fullPath, "utf-8");
-  const body = matter(raw).content;
+  const body = parseMatter(raw).content;
   const lines = body.split("\n");
   const headings = parseHeadings(body);
   const paths = headingPaths(headings);

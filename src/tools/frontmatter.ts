@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import matter from "gray-matter";
+import { parseMatter } from "./matter-safe.js";
 import { assertVaultPath, resolveNotePath } from "./vault.js";
 import { getIndex } from "./vault-index.js";
 import { noteNotFoundError, resolveNoteName } from "./not-found.js";
@@ -22,13 +22,13 @@ export async function getFrontmatter(
   }
   const index = await getIndex(vaultPath);
   const canonical = resolveNoteName(index, notePath);
-  const fullPath = resolveNotePath(vaultPath, canonical);
+  const fullPath = await resolveNotePath(vaultPath, canonical);
   let raw: string;
   try {
     raw = await readFile(fullPath, "utf-8");
   } catch {
     throw await noteNotFoundError(vaultPath, notePath);
   }
-  const frontmatter = (matter(raw).data ?? {}) as Record<string, unknown>;
+  const frontmatter = parseMatter(raw).data;
   return { path: canonical, frontmatter };
 }

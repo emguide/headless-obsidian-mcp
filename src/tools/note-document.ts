@@ -1,4 +1,4 @@
-import matter from "gray-matter";
+import { parseMatter, stringifyMatter } from "./matter-safe.js";
 import {
   parseHeadings,
   headingPaths,
@@ -29,19 +29,28 @@ export class NoteDocument {
   private readonly originalBlock: string;
   private frontmatterDirty = false;
 
+  /** A leading byte-order mark, re-emitted verbatim when the block is rewritten. */
+  private readonly bom: string;
+
   private constructor(
     data: Record<string, unknown>,
     body: string,
-    originalBlock: string
+    originalBlock: string,
+    bom = ""
   ) {
     this.data = data;
     this.body = body;
     this.originalBlock = originalBlock;
+    this.bom = bom;
   }
 
-  // Matches a leading frontmatter fence and captures nothing; we only need its
-  // length so `block + body === raw`.
-  private static readonly FENCE = /^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/;
+  // Matches a leading frontmatter fence; match[0]'s length is what keeps
+  // `block + body === raw`, and match[1] captures a leading BOM so serialize
+  // can put it back. gray-matter strips a BOM before parsing, so a regex
+  // anchored at `---` saw no frontmatter where gray-matter saw plenty: readers
+  // reported a BOM note's frontmatter while writes parsed `{}` and then
+  // overwrote the real block, silently destroying tags.
+  private static readonly FENCE = /^(\uFEFF)?---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/;
 
   /** True when `raw` begins with a frontmatter fence — reuses the canonical
    * FENCE regex so callers never re-declare it and risk drift. */
@@ -56,14 +65,15 @@ export class NoteDocument {
     }
     const block = raw.slice(0, match[0].length);
     const body = raw.slice(match[0].length);
+    const bom = match[1] ?? "";
     // gray-matter caches parsed results by content string and returns the SAME
     // `data` object on repeat parses of identical text. Our write path mutates
     // doc.data in place, so without a clone those mutations would leak between
     // separate parses of same-content notes. structuredClone isolates each parse.
     // (Edge: a YAML !!binary value becomes a Uint8Array rather than a Buffer —
     // irrelevant for Obsidian frontmatter, which holds scalars and flat arrays.)
-    const data = structuredClone((matter(raw).data ?? {})) as Record<string, unknown>;
-    return new NoteDocument(data, body, block);
+    const data = structuredClone(parseMatter(raw).data) as Record<string, unknown>;
+    return new NoteDocument(data, body, block, bom);
   }
 
   /** Mark the frontmatter as changed so it is re-serialized on output. */
@@ -77,9 +87,9 @@ export class NoteDocument {
     }
     if (Object.keys(this.data).length === 0) {
       // Frontmatter emptied out — drop the block entirely.
-      return this.body;
+      return this.bom + this.body;
     }
-    return matter.stringify(this.body, this.data);
+    return this.bom + stringifyMatter(this.body, this.data);
   }
 }
 
@@ -143,13 +153,22 @@ export function removeTags(doc: NoteDocument, tags: string[]): string[] | null {
 
 /* ----------------------------------------------------------- validation -- */
 
-/** Scalar frontmatter values: what a property (or array element) may hold. */
+/**
+ * Scalar frontmatter values: what a property (or array element) may hold.
+ *
+ * `Date` counts. YAML parses an unquoted `created: 2026-07-25` — ordinary
+ * Obsidian frontmatter — into a Date, and rejecting it as a "nested object"
+ * refused every note carrying one, including any template whose frontmatter
+ * holds `date: {{date}}`. The index already treats Date as a first-class
+ * property type (`list_properties` reports "date").
+ */
 export function isScalar(v: unknown): boolean {
   return (
     v == null ||
     typeof v === "string" ||
     typeof v === "number" ||
-    typeof v === "boolean"
+    typeof v === "boolean" ||
+    v instanceof Date
   );
 }
 

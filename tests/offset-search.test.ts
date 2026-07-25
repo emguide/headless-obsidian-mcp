@@ -26,8 +26,8 @@ test("offset skips whole files and reports files_skipped; counts partition the m
   assert.equal(page.files_returned, 2);
   assert.equal(page.files_skipped, 1);
   assert.equal(page.files_omitted, 3);
-  // The three counts partition the full match set (ripgrep's file order is not
-  // stable across separate invocations, so assert the partition, not positions).
+  // The three counts partition the full match set. Results are sorted by path
+  // before windowing, so the partition is also positionally stable now.
   assert.equal(page.files_skipped + page.files_returned + page.files_omitted, 6);
   // Every returned file is a real match, and the window holds exactly `limit` of them.
   assert.equal(page.results.length, 2);
@@ -35,9 +35,10 @@ test("offset skips whole files and reports files_skipped; counts partition the m
 });
 
 test("files_skipped tracks the requested offset and returned files are always real matches", async () => {
-  // ripgrep's file order is not stable across separate invocations, so we assert
-  // only order-independent facts: the reported counts and that every returned
-  // file is a genuine match. (Counts are computed positionally within one call,
+  // Results are sorted by path before windowing, so pages are stable across
+  // invocations; these assertions stay order-independent anyway, covering the
+  // reported counts and that every returned file is a genuine match. (Counts
+  // are computed positionally within one call,
   // so they're deterministic for a given offset/limit regardless of order.)
   const all = await searchNotes(fx.vaultPath, { pattern: "needle", limit: 0 });
   const allPaths = new Set(all.results.map((r) => r.path));

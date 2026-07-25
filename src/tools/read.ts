@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import matter from "gray-matter";
+import { parseMatter } from "./matter-safe.js";
 import { Note, NoteMetadata, ReadNotesResult } from "../types.js";
 import { collectTags, resolveNotePath } from "./vault.js";
 import { getIndex, VaultIndex } from "./vault-index.js";
@@ -49,7 +49,7 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
       // no separator, so a legitimate note whose name merely contains ".." (an
       // ellipsis title like "And then...") was misclassified as an attack and,
       // since traversal fails the whole batch, poisoned every other path.
-      const fullPath = resolveNotePath(vaultPath, canonical);
+      const fullPath = await resolveNotePath(vaultPath, canonical);
 
       // Check file size before reading (max 10MB)
       const fileInfo = await stat(fullPath);
@@ -59,7 +59,7 @@ export async function readNotes(vaultPath: string, notePaths: string[]): Promise
 
       const content = await readFile(fullPath, "utf-8");
 
-      const { data: frontmatter, content: markdownContent } = matter(content);
+      const { data: frontmatter, content: markdownContent } = parseMatter(content);
 
       const tags = collectTags(frontmatter, markdownContent);
 

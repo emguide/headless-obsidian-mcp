@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import matter from "gray-matter";
+import { parseMatter } from "./matter-safe.js";
 import { extractLinkRefs, LinkRef } from "./vault.js";
 import type { VaultIndex } from "./vault-index.js";
 import type { LinkContextLine } from "../types.js";
@@ -47,7 +47,7 @@ export async function scanLinkLines(fullPath: string): Promise<ScannedLinkLine[]
   }
   let body: string;
   try {
-    body = matter(raw).content;
+    body = parseMatter(raw).content;
   } catch {
     return [];
   }

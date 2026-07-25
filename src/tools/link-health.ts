@@ -1,4 +1,4 @@
-import matter from "gray-matter";
+import { parseMatter } from "./matter-safe.js";
 import {
   extractLinkRefs,
   headingMatchesAnchor,
@@ -45,7 +45,7 @@ export function linkHealthOf(
   notePath: string,
   content: string
 ): LinkHealth {
-  const body = matter(content).content;
+  const body = parseMatter(content).content;
   const refs = extractLinkRefs(body);
   const selfHeadings = parseHeadings(body);
 

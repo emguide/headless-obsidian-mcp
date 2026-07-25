@@ -549,7 +549,7 @@ const TOOL_DEFINITIONS = [
       },
       {
         name: "list_properties",
-        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties. No limit: the full set is returned (offset still pages; truncated is always false).",
+        description: "List every frontmatter property key used across the vault with the number of notes using it and the distinct value types observed (string/number/boolean/array/null/date, plus object for nested YAML written by hand on disk — frontmatter writes reject nesting, reads do not), sorted by frequency. The vault's property schema; like list_tags but for arbitrary properties. No limit: the full set is returned (offset still pages; truncated is always false).",
         inputSchema: {
           type: "object",
           properties: {
@@ -628,7 +628,7 @@ const TOOL_DEFINITIONS = [
             },
             include_context: {
               type: "boolean",
-              description: "For kinds unresolved_links/broken_anchors: decorate each target with the source line(s) containing it, as { line, text } (call-time reads over the returned window only). Errors on kind orphans."
+              description: "For kinds unresolved_links/broken_anchors: decorate each target with the source line(s) containing it, as { line, text } (call-time reads over the returned window only). Errors on kinds orphans and conflicts (neither has links to contextualize)."
             }
           },
           required: ["kind"]
@@ -990,7 +990,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     switch (name) {
       case "search_notes": {
-        const params = args as unknown as SearchNotesParams;
+        const params = (args ?? {}) as unknown as SearchNotesParams;
         if (!params.pattern) {
           throw new Error("Pattern is required for search_notes");
         }
@@ -1006,7 +1006,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "search_notes_ranked": {
-        const params = args as unknown as RankedSearchParams;
+        const params = (args ?? {}) as unknown as RankedSearchParams;
         if (!params.query) {
           throw new Error("query is required for search_notes_ranked");
         }
@@ -1017,7 +1017,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "read_notes": {
-        const { paths } = args as unknown as { paths: string[] };
+        const { paths } = (args ?? {}) as unknown as { paths: string[] };
         if (!Array.isArray(paths) || paths.length === 0) {
           throw new Error("Paths array is required for read_notes");
         }
@@ -1061,7 +1061,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_links": {
-        const { path, include_context } = args as unknown as { path: string; include_context?: boolean };
+        const { path, include_context } = (args ?? {}) as unknown as { path: string; include_context?: boolean };
         if (!path || typeof path !== "string") {
           throw new Error("A note path is required for get_links");
         }
@@ -1072,7 +1072,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_outline": {
-        const { path } = args as unknown as { path: string };
+        const { path } = (args ?? {}) as unknown as { path: string };
         if (!path || typeof path !== "string") {
           throw new Error("A note path is required for get_outline");
         }
@@ -1083,7 +1083,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "read_section": {
-        const params = args as unknown as ReadSectionParams;
+        const params = (args ?? {}) as unknown as ReadSectionParams;
         if (!params.path || typeof params.path !== "string") {
           throw new Error("A note path is required for read_section");
         }
@@ -1130,7 +1130,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_frontmatter": {
-        const { path } = args as unknown as { path: string };
+        const { path } = (args ?? {}) as unknown as { path: string };
         if (!path || typeof path !== "string") {
           throw new Error("A note path is required for get_frontmatter");
         }
@@ -1139,7 +1139,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "resolve_note": {
-        const { query } = args as unknown as { query: string };
+        const { query } = (args ?? {}) as unknown as { query: string };
         if (!query || typeof query !== "string") {
           throw new Error("A query is required for resolve_note");
         }
@@ -1198,7 +1198,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "delete_note": {
-        const { path, permanent, include_context } = args as unknown as { path: string; permanent?: boolean; include_context?: boolean };
+        const { path, permanent, include_context } = (args ?? {}) as unknown as { path: string; permanent?: boolean; include_context?: boolean };
         if (!path || typeof path !== "string") {
           throw new Error("A note path is required for delete_note");
         }

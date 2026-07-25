@@ -54,19 +54,29 @@ function evaluate(have: unknown, cond: Condition): boolean {
     const present = have !== undefined;
     if (present !== c.exists) return false;
   }
+  // An absent key has no value to order or search, so every comparison and
+  // containment test fails. Without this an absent value stringified to
+  // "undefined" and was compared lexically: `{priority: {gt: 3}}` matched every
+  // note with NO priority at all, and `{k: {contains: "def"}}` matched on the
+  // "def" inside "undefined" — silently widening bulk_edit's selection too.
+  // `exists` is handled above, and `ne` below is deliberately satisfiable:
+  // a key that is absent is indeed not equal to the value.
+  const absent = have === undefined;
+
   if (c.eq !== undefined && !membership(have, c.eq)) return false;
   if (c.ne !== undefined && membership(have, c.ne)) return false;
   if (c.contains !== undefined) {
+    if (absent) return false;
     if (Array.isArray(have)) {
       if (!have.some((v) => eqLoose(v, c.contains))) return false;
     } else if (!String(have).toLowerCase().includes(String(c.contains).toLowerCase())) {
       return false;
     }
   }
-  if (c.gt !== undefined && !(compare(have, c.gt) > 0)) return false;
-  if (c.gte !== undefined && !(compare(have, c.gte) >= 0)) return false;
-  if (c.lt !== undefined && !(compare(have, c.lt) < 0)) return false;
-  if (c.lte !== undefined && !(compare(have, c.lte) <= 0)) return false;
+  if (c.gt !== undefined && (absent || !(compare(have, c.gt) > 0))) return false;
+  if (c.gte !== undefined && (absent || !(compare(have, c.gte) >= 0))) return false;
+  if (c.lt !== undefined && (absent || !(compare(have, c.lt) < 0))) return false;
+  if (c.lte !== undefined && (absent || !(compare(have, c.lte) <= 0))) return false;
   return true;
 }
 

@@ -182,8 +182,9 @@ individual tool descriptions state only their deviations from it.
   - `tags` (optional): Restrict to notes carrying these tags (leading `#` optional)
   - `match` (optional): Semantics of `tags` — `"any"` (default) or `"all"`
   - `where` (optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
-- **Output**: `{ results, truncated, files_returned, files_skipped, files_omitted, matches_capped_in }` — `results` is the array of matches (file paths without .md, plus context lines), bounded by the caps above; each match carries `line_number` (file-absolute) and `body_line` (1-based body-relative, frontmatter stripped — the same convention as `get_outline`/`list_tasks`/`set_task_state`, so a grep hit feeds `set_task_state` directly; `null` for hits inside the frontmatter block or in a file the index does not track); `files_skipped` is the number of matching files skipped before the window by `offset`, `files_omitted` the number dropped after it by `limit`; the fields report what was dropped so a truncated result isn't mistaken for a complete one (skipping forward via `offset` does not set `truncated`).
+- **Output**: `{ results, truncated, files_returned, files_skipped, files_omitted, matches_capped_in }` — `results` is the array of matches (file paths without .md, plus context lines), bounded by the caps above; each match carries `line_number` (file-absolute) and `body_line` (1-based body-relative, frontmatter stripped — the same convention as `get_outline`/`list_tasks`/`set_task_state`, so a grep hit feeds `set_task_state` directly; `null` for hits inside the frontmatter block or in a file the index does not track); `files_skipped` is the number of matching files skipped before the window by `offset`, `files_omitted` the number dropped after it by `limit`; the fields report what was dropped so a truncated result isn't mistaken for a complete one (skipping forward via `offset` does not set `truncated`). Results are ordered by path, so an `offset` window is stable across calls — ripgrep's own file order is nondeterministic and would otherwise let a second page repeat or skip files.
 - **Filtering**: When `folder`/`tags`/`where` are given, the candidate note set is resolved from the shared index first, then ripgrep runs only over those files (chunked to stay under `ARG_MAX` on large vaults) instead of scanning the whole vault. A filter that matches zero notes short-circuits to an empty result without invoking ripgrep at all.
+- **Corpus**: Searches exactly what the index walks — `.gitignore` is not honoured (the index ignores it too, and git-repo vaults are the norm under `OBSIDIAN_GIT_SYNC`) and hidden note *files* are included, while hidden *directories* and the machinery dirs (`.obsidian`, `.trash`, `.git`, `node_modules`) stay excluded. Without this, a gitignored note was invisible to a plain search but visible to every other tool — including a *filtered* search of the same pattern.
 - **Security**: Protected against flag injection (pattern is passed after `--`). Regex DoS is a non-issue by construction: ripgrep's default engine is linear-time (no backtracking), and a pattern exceeding its compile-time size limit fails loudly.
 
 ### search_notes_ranked
@@ -232,7 +233,7 @@ individual tool descriptions state only their deviations from it.
   - `unresolved_links`: Wikilink targets that do not resolve to any note
   - `backlinks`: Notes elsewhere in the vault that link to this one
   - With `include_context: true`, every row in all three arrays gains `context` (`{ line, text }` pairs): `outbound_links` rows become `{ target, path, context }`, `unresolved_links` rows become `{ target, context }` (bare strings without the flag), and `backlinks` rows become `{ path, context }` — the linking lines in each source note. Without the flag the shapes are unchanged.
-- **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links resolve by full relative path or by basename (Obsidian's default). When a bare `[[basename]]` matches several notes, it resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — matching Obsidian's shortest-path rule, so a bare link points to the same note vault-wide regardless of where it appears. A **slash-qualified** target (`[[folder/note]]`) resolves only by exact path: if that path names no note it is reported as unresolved — the basename fallback applies to slash-less names alone, so `[[wrong-folder/note]]` is a broken link, never a silent hop to a same-basename note elsewhere.
+- **Notes**: Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`. Links inside fenced code blocks are ignored (matching Obsidian and the fence-aware `get_outline`/`list_tasks` parsers), so a note documenting link syntax creates no phantom backlinks and no false `unresolved_links` finding; `move_note`/`rename_section` likewise never rewrite a link inside a code sample. Links resolve by full relative path or by basename (Obsidian's default). When a bare `[[basename]]` matches several notes, it resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — matching Obsidian's shortest-path rule, so a bare link points to the same note vault-wide regardless of where it appears. A **slash-qualified** target (`[[folder/note]]`) resolves only by exact path: if that path names no note it is reported as unresolved — the basename fallback applies to slash-less names alone, so `[[wrong-folder/note]]` is a broken link, never a silent hop to a same-basename note elsewhere.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
 ### get_outline
@@ -347,7 +348,7 @@ individual tool descriptions state only their deviations from it.
 ### list_properties
 - **Purpose**: The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
 - **Input**: `include_tags` (optional, default `true` — set `false` to omit the `tags` key, already covered by `list_tags`). `offset` (optional): Rows to skip before the window, for pagination (default `0`).
-- **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set. Index-backed.
+- **Output**: `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed for that key (`string`/`number`/`boolean`/`array`/`null`/`date`, plus `object` for nested YAML hand-written on disk — frontmatter *writes* reject nesting, reads do not), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set. Index-backed.
 
 ### list_property_values
 - **Purpose**: Distinct values of one frontmatter property with per-note counts — a faceted breakdown, e.g. to see every `status` value in use.
@@ -431,6 +432,7 @@ change a tag or a section without reading and rewriting the whole note.
 ### move_note
 - **Purpose**: Move or rename a note. By default every `[[wikilink]]` elsewhere in the vault that pointed to the old location is rewritten to the new one (full-path links become the new full path; bare-basename links become the new basename; aliases and `#anchors` are preserved), so the link graph is never broken.
 - **Input**: `from` (required), `to` (required), `overwrite` (optional, default `false`), `update_links` (optional, default `true`)
+- **Ownership**: a bare `[[basename]]` is rewritten only when it actually *resolves* to the moved note. With `a/log` and `b/log` in the vault a bare `[[log]]` resolves to `a/log` (shortest-path rule), so moving `b/log` leaves it alone instead of silently repointing it.
 - **Output**: `{ from, to, overwritten, updated_notes, updated_links }`
 - **Security**: Path traversal protected on both endpoints.
 
@@ -492,7 +494,7 @@ change a tag or a section without reading and rewriting the whole note.
 - **Purpose**: Rename a heading in a note and rewrite every inbound `[[note#heading]]` anchor across the vault to the new heading — the heading-level analogue of `move_note`, closing the last structural edit that could silently break the link graph.
 - **Input**: `path` (required), `from` (required — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `read_section`/`replace_section`), `to` (required — new heading text), `update_anchors` (optional, default `true` — rewrite inbound anchors elsewhere in the vault).
 - **Output**: `{ path, from, to, updated_notes, updated_links }` — `from`/`to` are the resolved old/new heading; `updated_notes` counts OTHER notes touched (the renamed note itself is always touched, so it's excluded); `updated_links` counts every anchor rewritten, including the renamed note's own self-references (`[[#Old]]`/`[[thisnote#Old]]`) alongside inbound anchors elsewhere.
-- **Anchor matching**: Literal case-insensitive (trimmed) text — NOT Obsidian slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud.
+- **Anchor matching**: Literal case-insensitive (trimmed) text — NOT Obsidian slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud. A bare `[[basename#anchor]]` is rewritten only when the basename resolves to the renamed note, and a *backlink note's own* `[[#anchor]]` self-link is never rewritten (that anchor addresses its own heading, not the renamed one) — while the renamed note's own self-links still are.
 - **Duplicate-leaf caveat**: If the renamed heading's leaf text is duplicated elsewhere in the same note (e.g. the same heading under a different parent), inbound anchors meant for the OTHER occurrence may also get rewritten — Obsidian anchors carry no parent context, so matching is by literal heading text alone.
 
 ### bulk_edit
@@ -506,11 +508,37 @@ change a tag or a section without reading and rewriting the whole note.
 - **Git**: One `afterWrite` commit for the whole batch, not one per note — `assertSyncableBeforeWrite` guards once up front, then every note in the batch is written (via `writeResolved`) and the batch is committed once at the end, so a partial batch still reviews and reverts as a single diff.
 - **Security**: Path traversal protected via the same guard as read_notes.
 
+**Path guard (shared)**: `resolveNotePath` / `resolveVaultFile`
+(`src/tools/vault.ts`) reject `..` traversal *and* any path that leaves the
+vault through a **symlink** — the deepest existing ancestor of the target is
+resolved with `realpath` and must stay under the vault's own realpath. A
+lexical check alone could not see this: a symlink `secret.md -> /etc/passwd`
+contains no `..`, so readers returned the target's contents and writers
+clobbered it. Both guards are async for this reason. A traversal attempt errors
+the whole call (it is never reported per-path the way a missing note is).
+
+**Write serialization**: every read-modify-write span holds a per-vault lock
+(`withVaultWriteLock`, `src/tools/write-lock.ts`). Git operations were already
+serialized by `withGitLock`, but the file edit itself was not: two concurrent
+calls could each read a note, each mutate their own copy, and each write — the
+second silently discarding the first (and two `write_note` calls could both
+pass the exists-check, defeating `overwrite:false`). The lock is per vault
+rather than per note because multi-note operations (`move_note`, `bulk_edit`,
+`rename_section`) span notes, and it is reentrant by async context so an outer
+operation can call inner helpers that take it again.
+
 **Structure notes**: Body-only edits (sections) preserve the frontmatter block
 byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML block in
 canonical form (block-style lists) but leave the body untouched. Headings inside
 fenced code blocks are ignored when locating sections. All writes are
 path-traversal protected via the same guard as read_notes.
+
+**Dates**: YAML parses an unquoted `created: 2026-07-25` into a date, which is
+a valid scalar (`list_properties` reports it as `date`). A date-only value is
+re-serialized in its original `YYYY-MM-DD` form, so an unrelated frontmatter
+edit never rewrites it to `2026-07-25T00:00:00.000Z`; a value that carries a
+time keeps its full ISO timestamp. Handled in `stringifyMatter`
+(`src/tools/matter-safe.ts`).
 
 **Validation**: Every frontmatter write rejects (1) nested objects/maps, (2)
 arrays containing non-scalar elements, and (3) markdown syntax in string values
@@ -528,9 +556,16 @@ Interop with the vault's existing **core Templates plugin** — the built-in one
 not Templater. The server reproduces the plugin's insert-time substitution
 faithfully; it never invents a template format. Supported placeholders:
 `{{title}}`, `{{date}}`, `{{time}}`, and the inline format overrides
-`{{date:FORMAT}}` / `{{time:FORMAT}}`. Format tokens are Moment.js-compatible
-(via `dayjs` + `advancedFormat` / `customParseFormat`), so `{{date:Do MMMM
-YYYY}}` renders exactly as it does in Obsidian. Any unrecognized `{{...}}` token
+`{{date:FORMAT}}` / `{{time:FORMAT}}`. Format tokens are Moment.js-compatible,
+so `{{date:Do MMMM YYYY}}` renders exactly as it does in Obsidian. One shared
+date engine (`src/tools/date-format.ts`) backs both these placeholders and
+daily-note filename formats: dayjs with the `advancedFormat`,
+`customParseFormat`, `weekOfYear`, `weekYear`, `dayOfYear`, `isoWeek`, and
+`localeData` plugins, plus a `formatMoment` wrapper that supplies the
+day-of-year tokens (`DDD`/`DDDD`) dayjs has no token for. Week tokens
+(`gggg-[W]ww`, a common weekly-note format) therefore render instead of
+throwing, and `DDD` yields the day of year rather than three concatenated
+day-of-month digits. Any unrecognized `{{...}}` token
 (e.g. Templater's `{{tp...}}`) **passes through literally** — never silently
 dropped. Templater's `<% %>` scripting, `tp.*` API, prompts, and system commands
 are explicitly **out of scope** (they have no faithful headless equivalent).
@@ -846,6 +881,8 @@ npm run query -- prepend "daily/2026-07-22" "> banner"  # Prepend to the body
 npm run query -- add-tag "projects/alpha" project active
 npm run query -- remove-tag "projects/alpha" stale
 npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
+npm run query -- set-frontmatter "projects/alpha" --set priority=3 --set done=true   # numbers/booleans are coerced
+npm run query -- set-frontmatter "projects/alpha" --set 'version="7"'                # quote to force a string
 npm run query -- add-property-values "projects/alpha" aliases a2 a3
 npm run query -- remove-property-values "projects/alpha" aliases a3
 npm run query -- rename-property "projects/alpha" author authors

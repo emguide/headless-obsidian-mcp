@@ -1,5 +1,5 @@
-import { readdir, stat } from "node:fs/promises";
-import { join, resolve, relative, sep } from "node:path";
+import { readdir, stat, realpath } from "node:fs/promises";
+import { join, resolve, relative, sep, dirname, isAbsolute } from "node:path";
 import { ParsedHeading, ParsedTask, TaskStatus, WritableTaskStatus } from "../types.js";
 
 /**
@@ -38,7 +38,10 @@ export function assertVaultPath(vaultPath: string): void {
  * guarding against path-traversal escapes. Mirrors the checks used by
  * read_notes so every tool that resolves a path behaves identically.
  */
-export function resolveNotePath(vaultPath: string, notePath: string): string {
+export async function resolveNotePath(
+  vaultPath: string,
+  notePath: string
+): Promise<string> {
   if (!notePath || typeof notePath !== "string") {
     throw new Error("Note path must be a non-empty string");
   }
@@ -49,7 +52,70 @@ export function resolveNotePath(vaultPath: string, notePath: string): string {
   if (relativePath.startsWith("..") || relativePath.includes(".." + sep)) {
     throw new Error("Invalid note path: path traversal not allowed");
   }
+  await assertNoSymlinkEscape(resolvedVault, fullPath, "note");
   return fullPath;
+}
+
+/** Cache of vault root -> its realpath; the root does not move mid-process. */
+const realVaultCache = new Map<string, string>();
+
+async function realVaultRoot(resolvedVault: string): Promise<string> {
+  const cached = realVaultCache.get(resolvedVault);
+  if (cached !== undefined) return cached;
+  let real: string;
+  try {
+    real = await realpath(resolvedVault);
+  } catch {
+    // Vault root missing or unreadable: nothing to resolve against, so leave
+    // the lexical guard as the only check rather than failing every call.
+    real = resolvedVault;
+  }
+  realVaultCache.set(resolvedVault, real);
+  return real;
+}
+
+/**
+ * Reject a path that leaves the vault through a symlink.
+ *
+ * The lexical checks above normalize `..` away, but they only ever see the
+ * requested name — a symlink `secret.md -> /etc/passwd` inside the vault has no
+ * `..` in it, so `relative()` sees `secret.md` and the guard passed. Readers
+ * then returned the target's contents and writers clobbered it, defeating the
+ * path-traversal guarantee the tools advertise.
+ *
+ * Resolve the deepest existing ancestor of the target (the target itself when
+ * it exists) and require it to stay under the vault's own realpath. The
+ * not-yet-existing remainder cannot contain a symlink, and its `..` segments
+ * were already rejected, so checking that ancestor is sufficient.
+ */
+async function assertNoSymlinkEscape(
+  resolvedVault: string,
+  fullPath: string,
+  kind: "note" | "file"
+): Promise<void> {
+  const realRoot = await realVaultRoot(resolvedVault);
+
+  let probe = fullPath;
+  for (;;) {
+    try {
+      const real = await realpath(probe);
+      const rel = relative(realRoot, real);
+      if (rel !== "" && (rel.startsWith("..") || rel.includes(".." + sep) || isAbsolute(rel))) {
+        throw new Error(
+          `Invalid ${kind} path: path traversal not allowed (symlink escapes the vault)`
+        );
+      }
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("path traversal not allowed")) {
+        throw err;
+      }
+      // Does not exist yet — check its parent instead.
+      const parent = dirname(probe);
+      if (parent === probe) return; // reached the filesystem root
+      probe = parent;
+    }
+  }
 }
 
 /**
@@ -67,7 +133,10 @@ export function canonicalName(notePath: string): string {
  * {@link resolveNotePath} this does not append a `.md` suffix, so it is used for
  * attachments and for the `.trash` folder when trashing a note.
  */
-export function resolveVaultFile(vaultPath: string, filePath: string): string {
+export async function resolveVaultFile(
+  vaultPath: string,
+  filePath: string
+): Promise<string> {
   if (!filePath || typeof filePath !== "string") {
     throw new Error("File path must be a non-empty string");
   }
@@ -77,6 +146,7 @@ export function resolveVaultFile(vaultPath: string, filePath: string): string {
   if (relativePath.startsWith("..") || relativePath.includes(".." + sep)) {
     throw new Error("Invalid file path: path traversal not allowed");
   }
+  await assertNoSymlinkEscape(resolvedVault, fullPath, "file");
   return fullPath;
 }
 
@@ -177,6 +247,48 @@ export function collectTags(
 // [[target#heading]], ![[target]]. Captures the inner reference.
 const WIKILINK_RE = /!?\[\[([^\]]+)\]\]/g;
 
+/**
+ * Character ranges covered by fenced code blocks, so wikilink handling can skip
+ * them the way {@link parseHeadings} and {@link parseTasks} already do. Obsidian
+ * ignores links inside code blocks; counting them produced phantom backlinks and
+ * permanent false `unresolved_links` findings for notes that merely *document*
+ * link syntax — findings no edit outside the fence could clear.
+ *
+ * Ranges rather than line flags, so a wikilink's match offset can be tested
+ * without changing the regex's existing (newline-tolerant) matching.
+ */
+function fencedRanges(content: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let offset = 0;
+  let inFence = false;
+  let fenceChar = "";
+  let start = 0;
+  for (const line of content.split("\n")) {
+    const lineStart = offset;
+    const lineEnd = offset + line.length + 1; // include the newline
+    const marker = line.match(/^\s*(```+|~~~+)/);
+    if (marker) {
+      const char = marker[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = char;
+        start = lineStart;
+      } else if (char === fenceChar) {
+        inFence = false;
+        ranges.push([start, lineEnd]);
+      }
+    }
+    offset = lineEnd;
+  }
+  if (inFence) ranges.push([start, offset]); // unterminated fence runs to EOF
+  return ranges;
+}
+
+/** Is `index` inside one of `ranges`? */
+function insideFence(ranges: Array<[number, number]>, index: number): boolean {
+  return ranges.some(([from, to]) => index >= from && index < to);
+}
+
 /** Reduce a raw wikilink body to just its note target (drop alias + heading). */
 function linkTarget(inner: string): string {
   // Strip display alias after "|", then any "#heading" / "#^block" anchor.
@@ -188,9 +300,11 @@ function linkTarget(inner: string): string {
 /** Extract all wikilink targets (alias/anchor stripped) from note content. */
 export function extractLinkTargets(content: string): string[] {
   const targets: string[] = [];
+  const fences = fencedRanges(content);
   let match: RegExpExecArray | null;
   WIKILINK_RE.lastIndex = 0;
   while ((match = WIKILINK_RE.exec(content)) !== null) {
+    if (insideFence(fences, match.index)) continue;
     const target = linkTarget(match[1]);
     if (target) targets.push(target);
   }
@@ -214,7 +328,13 @@ export function rewriteWikilinks(
   mapAnchor?: (target: string, anchor: string) => string | null
 ): { content: string; changed: number } {
   let changed = 0;
-  const next = content.replace(/(!?)\[\[([^\]]+)\]\]/g, (whole, bang: string, inner: string) => {
+  const fences = fencedRanges(content);
+  const next = content.replace(
+    /(!?)\[\[([^\]]+)\]\]/g,
+    (whole, bang: string, inner: string, index: number) => {
+    // A link inside a code fence is documentation, not a graph edge — leave it
+    // exactly as written so move_note/rename_section never edit code samples.
+    if (insideFence(fences, index)) return whole;
     const pipe = inner.indexOf("|");
     const left = pipe === -1 ? inner : inner.slice(0, pipe);
     const alias = pipe === -1 ? "" : inner.slice(pipe); // includes leading "|"
@@ -259,9 +379,11 @@ export interface LinkRef {
  */
 export function extractLinkRefs(content: string): LinkRef[] {
   const refs: LinkRef[] = [];
+  const fences = fencedRanges(content);
   let match: RegExpExecArray | null;
   WIKILINK_RE.lastIndex = 0;
   while ((match = WIKILINK_RE.exec(content)) !== null) {
+    if (insideFence(fences, match.index)) continue;
     const inner = match[1];
     const left = inner.split("|")[0];
     const hash = left.indexOf("#");

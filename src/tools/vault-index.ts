@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve, basename } from "node:path";
-import matter from "gray-matter";
+import { parseMatter } from "./matter-safe.js";
 import {
   walkVault,
   collectTags,
@@ -84,8 +84,29 @@ export class VaultIndex {
     this.vaultPath = resolve(vaultPath);
   }
 
-  /** Bring the index up to date with the filesystem, re-reading only changes. */
+  /** In-flight refresh, so overlapping callers share one pass. */
+  private refreshing: Promise<void> | null = null;
+
+  /**
+   * Bring the index up to date with the filesystem, re-reading only changes.
+   *
+   * Serialized: `getIndex` hands every caller the same instance and MCP tool
+   * handlers are async, so two refreshes could interleave at the `await
+   * buildEntry` points. A pass that walked before a file existed would then
+   * delete that file's entry — added by a later pass — because it was missing
+   * from the earlier pass's `seen` set, and the call would report a note that
+   * demonstrably existed as absent. Concurrent callers now await the in-flight
+   * pass instead of starting a competing one.
+   */
   async refresh(): Promise<void> {
+    if (this.refreshing) return this.refreshing;
+    this.refreshing = this.runRefresh().finally(() => {
+      this.refreshing = null;
+    });
+    return this.refreshing;
+  }
+
+  private async runRefresh(): Promise<void> {
     const files = await walkVault(this.vaultPath);
     const seen = new Set<string>();
 
@@ -321,7 +342,7 @@ export class VaultIndex {
     let body: string;
     try {
       const raw = await readFile(fullPath, "utf-8");
-      body = matter(raw).content;
+      body = parseMatter(raw).content;
     } catch {
       return "";
     }
@@ -354,7 +375,7 @@ async function buildEntry(f: VaultFile): Promise<IndexEntry> {
 
   try {
     const raw = await readFile(f.fullPath, "utf-8");
-    const parsed = matter(raw);
+    const parsed = parseMatter(raw);
     // Lines consumed by the frontmatter block, per gray-matter — the same
     // stripper whose body parseHeadings/parseTasks run on, so body-relative
     // line math stays consistent even on fences NoteDocument would swallow

@@ -318,6 +318,8 @@ Search through markdown files in your vault using ripgrep patterns.
 - `truncated`: `true` if any cap dropped results (skipping forward via `offset` does not set it)
 - `files_returned`: number of files in `results`
 - `files_skipped`: matching files skipped before the window by `offset`
+
+Results are ordered by path, so a given `offset`/`limit` window is stable across calls (ripgrep's own file order is nondeterministic).
 - `files_omitted`: matching files seen beyond the window (`limit`) and not returned
 - `matches_capped_in`: paths of files whose matches were capped
 
@@ -555,7 +557,7 @@ The vault's frontmatter schema — every property key in use, with how many note
 - `include_tags` (boolean, optional): Include the `tags` key (default: true; set false since it's already covered by `list_tags`)
 - `offset` (number, optional): Rows to skip before the window, for pagination (default 0)
 
-**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
+**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`/`object`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
 
 ### list_property_values
 
@@ -833,6 +835,8 @@ Apply one or more frontmatter mutations to many notes in a single call, under a 
 **Returns:** `{ dry_run, matched_count, applied_count, failed_count, results }`, where each `results` entry is `{ path, ok: true, changed }` or `{ path, ok: false, error }`. A per-note failure is isolated and reported; it never sinks the rest of the batch. `changed: false` marks a note whose operations were all no-ops. One git snapshot covers the whole batch, not one per note.
 
 > **Body vs. frontmatter fidelity:** section edits preserve the frontmatter block byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML in canonical form (block-style lists) but leave the body untouched. Headings inside fenced code blocks are ignored. All writes are path-traversal protected.
+
+> **Dates:** an unquoted `created: 2026-07-25` parses to a date and is a valid scalar. A date-only value round-trips in its original `YYYY-MM-DD` form, so an unrelated edit never rewrites it to `2026-07-25T00:00:00.000Z`; a value carrying a time keeps its full ISO timestamp.
 
 > **Validation:** every frontmatter write rejects nested objects/maps, arrays containing non-scalar elements, and markdown syntax in string values (bare URLs are allowed). Validation runs only on the keys a given write actually touches, so a pre-existing violation on an untouched key never blocks an unrelated edit. The content-writing tools (`write_note`, and the create path of `append_note`/`prepend_note`) validate any hand-written leading frontmatter block on these same rules — so creating a note by hand cannot bypass frontmatter integrity, and malformed YAML is rejected loudly rather than landing in the vault.
 

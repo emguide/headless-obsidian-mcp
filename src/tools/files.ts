@@ -36,8 +36,14 @@ export async function listFiles(
   const out: VaultFileEntry[] = [];
   for (const f of files) {
     if (folderPrefix && !f.path.startsWith(folderPrefix)) continue;
-    const dot = f.path.lastIndexOf(".");
-    const ext = dot >= 0 ? f.path.slice(dot + 1).toLowerCase() : "";
+    // Derive the extension from the BASENAME, not the whole relative path: an
+    // extensionless file inside a dot-containing folder (`img.assets/README`)
+    // otherwise picked up the folder's dot and reported a slash-containing,
+    // case-mangled "extension" ("assets/readme") that no filter could match.
+    // A leading-dot basename (`.gitignore`) is a hidden file, not an extension.
+    const base = f.path.slice(f.path.lastIndexOf("/") + 1);
+    const dot = base.lastIndexOf(".");
+    const ext = dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
     if (wantExt !== undefined && ext !== wantExt) continue;
     out.push({
       path: f.path,

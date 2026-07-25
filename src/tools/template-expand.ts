@@ -1,9 +1,4 @@
-import dayjs from "dayjs";
-import advancedFormat from "dayjs/plugin/advancedFormat.js";
-import customParseFormat from "dayjs/plugin/customParseFormat.js";
-
-dayjs.extend(advancedFormat);
-dayjs.extend(customParseFormat);
+import { dayjs, formatMoment } from "./date-format.js";
 
 export interface ExpandOptions {
   /** Value for {{title}} — the target note's basename. */
@@ -42,10 +37,10 @@ export function expand(text: string, opts: ExpandOptions): string {
   return text.replace(/\{\{([^}]*)\}\}/g, (whole, inner: string) => {
     const trimmed = inner.trim();
     if (trimmed === "title") return opts.title;
-    if (trimmed === "date") return d.format(dateFmt);
-    if (trimmed === "time") return d.format(timeFmt);
+    if (trimmed === "date") return formatMoment(d, dateFmt);
+    if (trimmed === "time") return formatMoment(d, timeFmt);
     const m = /^(date|time)\s*:\s*(.+)$/.exec(trimmed);
-    if (m) return d.format(m[2].trim());
+    if (m) return formatMoment(d, m[2].trim());
     return whole; // unknown token -> passthrough
   });
 }

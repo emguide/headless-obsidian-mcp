@@ -41,7 +41,7 @@ export async function getLinks(
 
   // Validate the path (guards against traversal escapes) before touching the
   // index; the resolved path itself is not needed once validated.
-  resolveNotePath(vaultPath, notePath);
+  await resolveNotePath(vaultPath, notePath);
 
   const index = await getIndex(vaultPath);
   const noteName = notePath.replace(/\.md$/, "");
