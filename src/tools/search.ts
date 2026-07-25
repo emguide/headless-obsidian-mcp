@@ -212,7 +212,14 @@ export async function searchNotes(vaultPath: string, params: SearchNotesParams):
   // --- Pass 2: window the files, cap matches, attach each match's own context
   let filesSkipped = 0; // distinct matching files dropped before the window by offset
   let filesOmitted = 0; // distinct matching files dropped after it by limit
-  const matching = rawFiles.filter((f) => f.matches.length > 0);
+  // Sorted by path so `offset` pages are stable. ripgrep's parallel walker
+  // emits files in a nondeterministic order that varies between invocations,
+  // and each paginated call re-runs it — so windowing raw emission order let
+  // page 2 repeat files from page 1 and skip others. Matches the index-backed
+  // tools' ordering (VaultIndex.getEntries).
+  const matching = rawFiles
+    .filter((f) => f.matches.length > 0)
+    .sort((a, b) => a.path.localeCompare(b.path));
 
   for (let i = 0; i < matching.length; i++) {
     const file = matching[i];

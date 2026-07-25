@@ -318,6 +318,8 @@ Search through markdown files in your vault using ripgrep patterns.
 - `truncated`: `true` if any cap dropped results (skipping forward via `offset` does not set it)
 - `files_returned`: number of files in `results`
 - `files_skipped`: matching files skipped before the window by `offset`
+
+Results are ordered by path, so a given `offset`/`limit` window is stable across calls (ripgrep's own file order is nondeterministic).
 - `files_omitted`: matching files seen beyond the window (`limit`) and not returned
 - `matches_capped_in`: paths of files whose matches were capped
 
