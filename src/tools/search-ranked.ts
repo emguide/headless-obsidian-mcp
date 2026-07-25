@@ -2,6 +2,7 @@ import { getIndex } from "./vault-index.js";
 import { assertVaultPath } from "./vault.js";
 import { RankedSearchParams, RankedSearchResult, ListResponse } from "../types.js";
 import { resolveCandidates, validateCandidateFilter } from "./candidate-filter.js";
+import { assertNonNegativeInt } from "./list-response.js";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 100;
@@ -25,12 +26,8 @@ export async function searchNotesRanked(
     throw new Error("query too long (max 1000 characters)");
   }
 
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
-  if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) {
-    throw new Error("offset must be a non-negative integer");
-  }
+  assertNonNegativeInt(limit, "limit");
+  assertNonNegativeInt(offset, "offset");
 
   let effectiveLimit: number | undefined;
   if (limit === undefined) {

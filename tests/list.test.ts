@@ -72,14 +72,14 @@ test("limit 0 returns every note, untruncated", async () => {
 test("rejects a negative limit", async () => {
   await assert.rejects(
     () => listNotes(fx.vaultPath, { limit: -1 }),
-    /positive integer/
+    /non-negative integer/
   );
 });
 
 test("rejects a non-integer limit", async () => {
   await assert.rejects(
     () => listNotes(fx.vaultPath, { limit: 1.5 }),
-    /positive integer/
+    /non-negative integer/
   );
 });
 

@@ -23,9 +23,7 @@ export async function listTasks(
 
   const { folder, tags, match, where, status, limit, offset } = params;
 
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   validateCandidateFilter({ tags, where, match });
 

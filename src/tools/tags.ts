@@ -60,9 +60,7 @@ export async function findByTag(
   if (match !== "any" && match !== "all") {
     throw new Error('match must be "any" or "all"');
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   validateCandidateFilter({ where });
 

@@ -1,4 +1,4 @@
-import { assertVaultPath } from "./vault.js";
+import { assertVaultPath, canonicalName } from "./vault.js";
 import { getIndex, entryToHeader } from "./vault-index.js";
 import { noteNotFoundMessage } from "./not-found.js";
 import { toListResponse, assertNonNegativeInt } from "./list-response.js";
@@ -16,11 +16,6 @@ import {
 
 /** Default cap for this module's list-style tools so an unbounded call is still bounded. */
 const DEFAULT_LIMIT = 100;
-
-/** Canonical vault name for a note path (forward slashes, no .md suffix). */
-function canonicalName(notePath: string): string {
-  return notePath.replace(/\\/g, "/").replace(/\.md$/, "");
-}
 
 /** Classify a frontmatter value into a coarse type label. */
 function typeOf(value: unknown): string {
@@ -81,9 +76,7 @@ export async function getPropertyValues(
   if (!key || typeof key !== "string") {
     throw new Error("key must be a non-empty string");
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   const index = await getIndex(vaultPath);
 
@@ -128,9 +121,7 @@ export async function queryNotes(
   if (match !== "all" && match !== "any") {
     throw new Error('match must be "all" or "any"');
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   validateCandidateFilter({ tags });
   const index = await getIndex(vaultPath);

@@ -1,4 +1,5 @@
 import { readFile, stat, readdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { basename, join } from "node:path";
 import process from "node:process";
 import { ListResponse } from "../types.js";
@@ -82,30 +83,45 @@ export interface TemplateHeader {
   modified: string;
 }
 
-/** Enumerate the markdown files directly in the template folder. */
+/**
+ * Enumerate the markdown files under the template folder, recursively. A
+ * template in a subfolder (`sub/name.md`) has its `name` reported as the
+ * folder-relative path (`sub/name`) — the exact string `readTemplate` accepts —
+ * so subfolder templates are both listed and offered in the "Available:" error.
+ */
 async function templateFiles(
   vaultPath: string,
   folder: string
 ): Promise<TemplateHeader[]> {
-  const dirFull = resolveVaultFile(vaultPath, folder);
-  let entries: string[] = [];
-  try {
-    entries = await readdir(dirFull);
-  } catch {
-    return [];
-  }
   const out: TemplateHeader[] = [];
-  for (const e of entries) {
-    if (!e.endsWith(".md")) continue;
-    const st = await stat(join(dirFull, e));
-    if (!st.isFile()) continue;
-    out.push({
-      path: `${folder}/${e}`,
-      name: e.replace(/\.md$/, ""),
-      size: st.size,
-      modified: new Date(st.mtimeMs).toISOString(),
-    });
-  }
+  // Walk `folder` depth-first, accumulating markdown files. `rel` is the path
+  // relative to the template folder (empty at the root); it becomes both the
+  // reported `name` (minus .md) and the tail of the vault-relative `path`.
+  const walk = async (rel: string): Promise<void> => {
+    const dirFull = resolveVaultFile(vaultPath, rel ? `${folder}/${rel}` : folder);
+    let entries: Dirent[] = [];
+    try {
+      entries = await readdir(dirFull, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        await walk(childRel);
+        continue;
+      }
+      if (!e.isFile() || !e.name.endsWith(".md")) continue;
+      const st = await stat(join(dirFull, e.name));
+      out.push({
+        path: `${folder}/${childRel}`,
+        name: childRel.replace(/\.md$/, ""),
+        size: st.size,
+        modified: new Date(st.mtimeMs).toISOString(),
+      });
+    }
+  };
+  await walk("");
   out.sort((a, b) => a.name.localeCompare(b.name));
   return out;
 }

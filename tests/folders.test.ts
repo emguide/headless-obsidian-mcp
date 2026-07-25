@@ -133,14 +133,14 @@ test("limit 0 returns every folder, untruncated", async () => {
 test("rejects a negative limit", async () => {
   await assert.rejects(
     () => listFolders(fx.vaultPath, { limit: -1 }),
-    /positive integer/
+    /non-negative integer/
   );
 });
 
 test("rejects a non-integer depth", async () => {
   await assert.rejects(
     () => listFolders(fx.vaultPath, { depth: 1.5 }),
-    /positive integer/
+    /non-negative integer/
   );
 });
 

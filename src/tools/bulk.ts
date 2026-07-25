@@ -8,8 +8,10 @@ import {
   renameProperty,
 } from "./note-document.js";
 import { getIndex } from "./vault-index.js";
+import { canonicalName } from "./vault.js";
 import { Condition } from "./property-match.js";
 import { resolveCandidates } from "./candidate-filter.js";
+import { assertNonNegativeInt } from "./list-response.js";
 import { readRaw, writeResolved } from "./write.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
 
@@ -109,10 +111,6 @@ export interface BulkSelect {
   limit?: number;
 }
 
-function canonicalName(notePath: string): string {
-  return notePath.replace(/\\/g, "/").replace(/\.md$/, "");
-}
-
 export async function resolveSelection(
   vaultPath: string,
   select: BulkSelect
@@ -146,10 +144,10 @@ export async function resolveSelection(
     tagMatch: match,   // bulk: match governs both tags...
     whereMatch: match, // ...and where
   });
-  if (select.limit !== undefined) {
-    if (!Number.isInteger(select.limit) || select.limit < 1) {
-      throw new Error("limit must be a positive integer");
-    }
+  // `limit: 0` is the vault-wide sentinel for "unbounded"; any other negative
+  // or non-integer value is rejected.
+  assertNonNegativeInt(select.limit, "limit");
+  if (select.limit !== undefined && select.limit > 0) {
     entries = entries.slice(0, select.limit);
   }
   return entries.map((e) => e.path);

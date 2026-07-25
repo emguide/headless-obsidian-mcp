@@ -30,11 +30,9 @@ export async function listNotes(
 
   const { folder, tags, match, where, limit, offset } = params;
 
-  // `limit: 0` is the sentinel for "unbounded"; any other non-positive or
+  // `limit: 0` is the sentinel for "unbounded"; any other negative or
   // non-integer value is rejected. Omitting `limit` applies DEFAULT_LIMIT.
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   validateCandidateFilter({ tags, where, match });
 

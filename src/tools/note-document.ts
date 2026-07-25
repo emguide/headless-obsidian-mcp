@@ -1,5 +1,9 @@
 import matter from "gray-matter";
-import { parseHeadings, headingPaths } from "./vault.js";
+import { parseHeadings, headingPaths, frontmatterTagList, resolveSectionIndex } from "./vault.js";
+
+// Re-exported so existing importers (write.ts) keep their `./note-document.js`
+// import path; the single definition lives in vault.js.
+export { frontmatterTagList };
 
 /**
  * An in-memory, editable view of a single note: its parsed frontmatter plus its
@@ -73,16 +77,6 @@ export class NoteDocument {
 }
 
 /* ------------------------------------------------------------------ tags -- */
-
-/** Read the frontmatter tag list, normalizing the `tags`/`tag`, array/string forms. */
-export function frontmatterTagList(data: Record<string, unknown>): string[] {
-  const raw = data.tags ?? data.tag;
-  if (raw == null) return [];
-  const list = Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/);
-  return list
-    .map((t) => String(t).trim().replace(/^#/, ""))
-    .filter((t) => t.length > 0);
-}
 
 function normalizeTag(tag: string): string {
   const clean = tag.trim().replace(/^#/, "");
@@ -381,27 +375,8 @@ function locateSectionAtLevel(
 function resolveSection(lines: string[], section: string): LocatedSection {
   const headings = findHeadings(lines);
   const paths = headingPaths(headings);
-  const wanted = section.trim();
-  const isPath = wanted.includes(">");
-  const norm = (p: string): string =>
-    p
-      .split(">")
-      .map((s) => s.trim())
-      .join(" > ");
-  const target = isPath ? norm(wanted) : wanted;
-
-  const matches = headings
-    .map((h, i) => ({ h, i, path: paths[i] }))
-    .filter((m) => (isPath ? m.path === target : m.h.text === wanted));
-
-  if (matches.length === 0) {
-    throw new Error(`Section "${section}" not found`);
-  }
-  if (matches.length > 1) {
-    const candidates = matches.map((m) => m.path).join(", ");
-    throw new Error(`Ambiguous section "${section}"; candidates: ${candidates}`);
-  }
-  return sectionBounds(headings, matches[0].i, lines.length);
+  const idx = resolveSectionIndex(headings, paths, section);
+  return sectionBounds(headings, idx, lines.length);
 }
 
 function splitBody(body: string): { lines: string[]; trailingNewline: boolean } {

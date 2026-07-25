@@ -21,9 +21,7 @@ export async function listFiles(
 ): Promise<ListResponse<VaultFileEntry>> {
   assertVaultPath(vaultPath);
   const { folder, extension, limit, offset } = params;
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
 
   const wantExt = extension

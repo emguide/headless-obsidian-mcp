@@ -67,6 +67,26 @@ test("resolveSelection folder scope with a filter", async () => {
   assert.deepEqual(paths, ["projects/alpha"]);
 });
 
+test("resolveSelection limit caps the match count", async () => {
+  const all = await resolveSelection(fx.vaultPath, { where: { status: { exists: true } } });
+  assert.ok(all.length > 1, "fixture should have >1 note with a status");
+  const capped = await resolveSelection(fx.vaultPath, { where: { status: { exists: true } }, limit: 1 });
+  assert.equal(capped.length, 1);
+});
+
+test("resolveSelection limit: 0 is unbounded (vault-wide convention)", async () => {
+  const all = await resolveSelection(fx.vaultPath, { where: { status: { exists: true } } });
+  const zero = await resolveSelection(fx.vaultPath, { where: { status: { exists: true } }, limit: 0 });
+  assert.deepEqual(zero, all);
+});
+
+test("resolveSelection rejects a negative limit", async () => {
+  await assert.rejects(
+    () => resolveSelection(fx.vaultPath, { where: { status: { exists: true } }, limit: -1 }),
+    /limit must be a non-negative integer/
+  );
+});
+
 test("resolveSelection rejects paths + filter together", async () => {
   await assert.rejects(
     () => resolveSelection(fx.vaultPath, { paths: ["a"], where: { status: "x" } }),

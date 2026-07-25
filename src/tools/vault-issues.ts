@@ -50,9 +50,7 @@ export async function listVaultIssues(
   if (kind !== "orphans" && kind !== "unresolved_links" && kind !== "broken_anchors") {
     throw new Error('kind must be "orphans", "unresolved_links", or "broken_anchors"');
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   if (include_context && kind === "orphans") {
     throw new Error(

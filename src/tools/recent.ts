@@ -35,9 +35,7 @@ export async function listRecentNotes(
   assertVaultPath(vaultPath);
 
   const { limit, since, date_field, folder, tags, match, where, offset } = params;
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   validateCandidateFilter({ tags, where, match });
 

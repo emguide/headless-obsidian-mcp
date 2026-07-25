@@ -65,9 +65,7 @@ export async function getRelatedNotes(
   if (!path || typeof path !== "string") {
     throw new Error("A note path is required for get_related_notes");
   }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
-    throw new Error("limit must be a positive integer");
-  }
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
   validateCandidateFilter({ tags, where, match });
 

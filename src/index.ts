@@ -1198,7 +1198,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "rename_section": {
         const result = await renameSectionInVault(VAULT_PATH, (args ?? {}) as unknown as RenameSectionParams);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
       case "apply_template": {
         const result = await applyTemplate(VAULT_PATH, (args ?? {}) as { template: string; path: string; overwrite?: boolean });
@@ -1220,7 +1220,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "set_task_state": {
-        const result = await setTaskState(VAULT_PATH, args as unknown as SetTaskStateParams);
+        const result = await setTaskState(VAULT_PATH, (args ?? {}) as unknown as SetTaskStateParams);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
 

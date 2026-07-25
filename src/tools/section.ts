@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import matter from "gray-matter";
-import { resolveNotePath, parseHeadings, headingPaths } from "./vault.js";
+import { resolveNotePath, parseHeadings, headingPaths, resolveSectionIndex } from "./vault.js";
 import { getIndex } from "./vault-index.js";
 import { noteNotFoundError, resolveNoteName } from "./not-found.js";
 import { ReadSectionParams, SectionResult } from "../types.js";
@@ -52,28 +52,8 @@ export async function readSection(
   const headings = parseHeadings(body);
   const paths = headingPaths(headings);
 
-  const wanted = section.trim();
-  const isPath = wanted.includes(">");
-  const norm = (p: string): string =>
-    p
-      .split(">")
-      .map((s) => s.trim())
-      .join(" > ");
-  const target = isPath ? norm(wanted) : wanted;
-
-  const matches = headings
-    .map((h, i) => ({ h, i, path: paths[i] }))
-    .filter((m) => (isPath ? m.path === target : m.h.text === wanted));
-
-  if (matches.length === 0) {
-    throw new Error(`Section "${section}" not found in ${notePath}`);
-  }
-  if (matches.length > 1) {
-    const candidates = matches.map((m) => m.path).join(", ");
-    throw new Error(`Ambiguous section "${section}"; candidates: ${candidates}`);
-  }
-
-  const { h, i } = matches[0];
+  const i = resolveSectionIndex(headings, paths, section, ` in ${notePath}`);
+  const h = headings[i];
   const bodyStart = h.line + 1;
   let bodyEnd = lines.length;
   for (let j = i + 1; j < headings.length; j++) {

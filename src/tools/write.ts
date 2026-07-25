@@ -9,6 +9,7 @@ import {
   headingMatchesAnchor,
   parseTasks,
   statusToMarker,
+  canonicalName,
   WRITABLE_TASK_STATUSES,
 } from "./vault.js";
 import { snapshotBeforeWrite } from "./git-guard.js";
@@ -64,11 +65,6 @@ export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
 /** Whether a tool name mutates the vault. */
 export function isWriteTool(name: string): boolean {
   return WRITE_TOOL_NAMES.has(name);
-}
-
-/** Canonical vault name for a note path (forward slashes, no .md suffix). */
-function canonicalName(notePath: string): string {
-  return notePath.replace(/\\/g, "/").replace(/\.md$/, "");
 }
 
 async function fileExists(fullPath: string): Promise<boolean> {

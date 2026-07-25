@@ -42,7 +42,11 @@ export function resolveCandidates(index: VaultIndex, f: CandidateFilter): IndexE
   const wantedTags = f.tags?.map((t) => String(t).replace(/^#/, "").toLowerCase());
 
   return index.getEntries().filter((entry) => {
-    if (folderPrefix && !(entry.path + "/").startsWith(folderPrefix)) {
+    // A note is *under* the folder iff its path begins with `folder/` — the
+    // same plain-prefix test list_files uses. Note the trailing slash: it keeps
+    // `folder: "projects"` from matching a root note `projects.md`, whose path
+    // is the bare `projects`.
+    if (folderPrefix && !entry.path.startsWith(folderPrefix)) {
       return false;
     }
     if (wantedTags) {

@@ -57,7 +57,7 @@ test("limit of 0 is unbounded (not rejected)", async () => {
   assert.equal(result.truncated, false);
 });
 
-test("negative limit is rejected (must be a positive integer)", async () => {
+test("negative limit is rejected (must be a non-negative integer)", async () => {
   await assert.rejects(
     () => listVaultIssues(fx.vaultPath, { kind: "unresolved_links", limit: -1 as any }),
     /limit must be/

@@ -75,7 +75,7 @@ test("throws for a note that does not exist", async () => {
 test("rejects a negative limit", async () => {
   await assert.rejects(
     () => getRelatedNotes(fx.vaultPath, { path: "projects/alpha", limit: -1 }),
-    /limit must be a positive integer/
+    /limit must be a non-negative integer/
   );
 });
 

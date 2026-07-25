@@ -473,7 +473,7 @@ change a tag or a section without reading and rewriting the whole note.
 ### bulk_edit
 - **Purpose**: Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot, with per-note result reporting. Turns "tag these 30 notes" from 30 round trips (and 30 auto-snapshot commits) into one.
 - **Input**:
-  - `select` (required): either `paths` (explicit array of note paths) **or** a filter — `where` (query_notes-style condition object) and/or `tags` (find_by_tag-style), optionally scoped by `folder` and combined via `match` (`"all"` default or `"any"`), plus an optional `limit`. Exactly one of `paths` or the filter form must be given — providing both errors, and providing neither errors.
+  - `select` (required): either `paths` (explicit array of note paths) **or** a filter — `where` (query_notes-style condition object) and/or `tags` (find_by_tag-style), optionally scoped by `folder` and combined via `match` (`"all"` default or `"any"`), plus an optional `limit` (cap on matched notes; `0` = unbounded, following the vault-wide convention). Exactly one of `paths` or the filter form must be given — providing both errors, and providing neither errors.
   - `operations` (required): an ordered, non-empty array of frontmatter-only mutations, applied in order to each matched note (e.g. rename then set the new key in one pass). Supported ops: `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property` — same shapes as the single-note tools of the same name. No section/body ops.
   - `dry_run` (optional): preview the matched notes and parsed operations with **zero writes and no git snapshot**. This previews the selection and operation shape only — it does not parse notes or predict per-note apply outcomes, so a note that will fail on commit (e.g. `rename_property` onto an existing key) still shows in the dry-run match set.
   - `expected_count` (optional): abort before any snapshot or write if the resolved match count differs — guards a filter that drifted between an agent's preview and its commit.
@@ -539,8 +539,12 @@ keep precedence, so existing behavior is unchanged.
 - **Input**: `limit` (optional, default `100`; `0` = unbounded), `offset`
   (optional, default `0`).
 - **Output**: `{ results, returned, skipped, omitted, truncated }` — `results`
-  is `[{ path, name, size, modified }]` (`name` = basename without `.md`,
-  `path` = vault-relative with `.md`, `modified` = ISO), sorted by `name`.
+  is `[{ path, name, size, modified }]`, sorted by `name`. The folder is walked
+  **recursively**, so a template in a subfolder appears too; its `name` is the
+  folder-relative path (`sub/Nested`, without `.md`) — exactly the string
+  `apply_template`/`insert_template` accept as `template` — and `path` is the
+  vault-relative path with `.md`. (`name` = basename without `.md` for a
+  top-level template; `modified` = ISO.)
 - **Errors**: Fails loud if no template folder is configured (setup problem, not
   "zero templates").
 

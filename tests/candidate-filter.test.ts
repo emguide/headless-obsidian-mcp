@@ -10,6 +10,9 @@ before(async () => {
     { path: "work/a.md", content: ["---", "status: active", "tags: [proj, urgent]", "---", "# A", "alpha"].join("\n") },
     { path: "work/b.md", content: ["---", "status: done", "tags: [proj]", "---", "# B", "beta"].join("\n") },
     { path: "home/c.md", content: ["---", "tags: [urgent]", "---", "# C", "gamma"].join("\n") },
+    // A root note sharing a folder's name — the folder filter must not match it.
+    { path: "projects.md", content: ["# Projects index", "root note"].join("\n") },
+    { path: "projects/inner.md", content: ["# Inner", "under projects"].join("\n") },
   ]);
 });
 after(() => fx.cleanup());
@@ -18,6 +21,14 @@ test("folder scopes to notes under the prefix", async () => {
   const idx = await getIndex(fx.vaultPath);
   const paths = resolveCandidates(idx, { folder: "work" }).map((e) => e.path).sort();
   assert.deepEqual(paths, ["work/a", "work/b"]);
+});
+
+test("folder does not match a same-named root note", async () => {
+  const idx = await getIndex(fx.vaultPath);
+  // `folder: "projects"` selects notes under projects/, never the root
+  // `projects.md` note itself.
+  const paths = resolveCandidates(idx, { folder: "projects" }).map((e) => e.path).sort();
+  assert.deepEqual(paths, ["projects/inner"]);
 });
 
 test("tags with tagMatch=all requires every tag", async () => {

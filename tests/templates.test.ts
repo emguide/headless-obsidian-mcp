@@ -78,6 +78,28 @@ test("listTemplates enumerates the folder, not other notes", async () => {
   }
 });
 
+test("listTemplates recurses into subfolders (folder-relative names)", async () => {
+  const fx = await vaultWithTemplates();
+  try {
+    await mkdir(join(fx.vaultPath, "Templates", "sub"), { recursive: true });
+    await writeFile(
+      join(fx.vaultPath, "Templates", "sub", "Nested.md"),
+      "# {{title}}\nnested\n",
+      "utf-8"
+    );
+    const res = await listTemplates(fx.vaultPath, {});
+    const names = res.results.map((r) => r.name).sort();
+    assert.deepEqual(names, ["Daily", "Meeting", "sub/Nested"]);
+    const nested = res.results.find((r) => r.name === "sub/Nested");
+    assert.equal(nested?.path, "Templates/sub/Nested.md");
+    // The listed name is exactly what readTemplate accepts.
+    const { raw } = await readTemplate(fx.vaultPath, "sub/Nested");
+    assert.match(raw, /nested/);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
 test("readTemplate returns raw text; unknown name lists candidates", async () => {
   const fx = await vaultWithTemplates();
   try {

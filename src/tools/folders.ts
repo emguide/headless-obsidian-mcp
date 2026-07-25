@@ -12,13 +12,6 @@ interface Agg {
   children: Set<string>;
 }
 
-/** Validate a limit/depth-style bound: undefined, or a non-negative integer. */
-function assertBound(value: number | undefined, label: string): void {
-  if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new Error(`${label} must be a positive integer`);
-  }
-}
-
 /**
  * Enumerate the vault's folders as a flat, bounded list — the folder-level
  * counterpart to list_notes. Derived entirely from the shared index's note
@@ -35,9 +28,9 @@ export async function listFolders(
   assertVaultPath(vaultPath);
 
   const { folder, depth, limit, offset } = params;
-  assertBound(limit, "limit");
+  assertNonNegativeInt(limit, "limit");
   assertNonNegativeInt(offset, "offset");
-  assertBound(depth, "depth");
+  assertNonNegativeInt(depth, "depth");
 
   const index = await getIndex(vaultPath);
 

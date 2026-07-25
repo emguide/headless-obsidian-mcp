@@ -53,6 +53,15 @@ export function resolveNotePath(vaultPath: string, notePath: string): string {
 }
 
 /**
+ * Canonical vault name for a note path: forward slashes, no `.md` suffix — the
+ * same identity field the header tools report. The single shared definition,
+ * imported by the write tools and the property/bulk readers.
+ */
+export function canonicalName(notePath: string): string {
+  return notePath.replace(/\\/g, "/").replace(/\.md$/, "");
+}
+
+/**
  * Resolve a user-supplied path (any file, not just a note) to an absolute path
  * inside the vault, guarding against path-traversal escapes. Unlike
  * {@link resolveNotePath} this does not append a `.md` suffix, so it is used for
@@ -134,8 +143,13 @@ export function extractInlineTags(content: string): string[] {
   return [...tags];
 }
 
-/** Normalize a frontmatter `tags`/`tag` value (array or delimited string) to a list. */
-function frontmatterTags(data: Record<string, unknown>): string[] {
+/**
+ * Normalize a frontmatter `tags`/`tag` value (array or delimited string) to a
+ * list. The single shared reader for the frontmatter tag list — imported by
+ * note-document.ts (and, through it, the write tools) so the read and write
+ * sides never disagree on what counts as a frontmatter tag.
+ */
+export function frontmatterTagList(data: Record<string, unknown>): string[] {
   const raw = data.tags ?? data.tag;
   if (raw == null) return [];
   const list = Array.isArray(raw) ? raw : String(raw).split(/[,\s]+/);
@@ -153,7 +167,7 @@ export function collectTags(
   content: string
 ): string[] {
   const tags = new Set<string>([
-    ...frontmatterTags(frontmatter),
+    ...frontmatterTagList(frontmatter),
     ...extractInlineTags(content),
   ]);
   return [...tags].sort((a, b) => a.localeCompare(b));
@@ -324,6 +338,48 @@ export function headingPaths(headings: ParsedHeading[]): string[] {
 
 export function firstHeading(content: string): string | undefined {
   return parseHeadings(content)[0]?.text;
+}
+
+/**
+ * Resolve a section reference to a single heading index, fail-loud. `section`
+ * is a bare heading (`Log`) or a `" > "`-joined heading-path (`Projects > Log`),
+ * detected by the presence of `>`. A bare heading that matches more than one
+ * heading throws an ambiguity error listing the candidate full paths; a
+ * heading-path matches the fully-qualified path exactly. Throws when nothing
+ * matches (`notFoundSuffix` is appended to that message, e.g. ` in <note>`).
+ *
+ * The single shared matcher for both read_section (section.ts) and the write
+ * side's section edits (note-document.ts), so the two never disagree on which
+ * heading a reference addresses; each caller computes its own body bounds from
+ * the returned index.
+ */
+export function resolveSectionIndex(
+  headings: readonly { text: string }[],
+  paths: readonly string[],
+  section: string,
+  notFoundSuffix = ""
+): number {
+  const wanted = section.trim();
+  const isPath = wanted.includes(">");
+  const norm = (p: string): string =>
+    p
+      .split(">")
+      .map((s) => s.trim())
+      .join(" > ");
+  const target = isPath ? norm(wanted) : wanted;
+
+  const matches = headings
+    .map((h, i) => ({ h, i, path: paths[i] }))
+    .filter((m) => (isPath ? m.path === target : m.h.text === wanted));
+
+  if (matches.length === 0) {
+    throw new Error(`Section "${section}" not found${notFoundSuffix}`);
+  }
+  if (matches.length > 1) {
+    const candidates = matches.map((m) => m.path).join(", ");
+    throw new Error(`Ambiguous section "${section}"; candidates: ${candidates}`);
+  }
+  return matches[0].i;
 }
 
 /** Ordered writable statuses (excludes "other"). */
