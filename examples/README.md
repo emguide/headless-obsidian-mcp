@@ -35,7 +35,7 @@ supported but leaves you no undo beyond `.trash` (which only covers
 Any selector policy works in that `env` block — `"reads,tasks.write"` for an
 agent that can read everything but only tick checkboxes, `"all,-bulk,-delete_note"`
 for everything minus the destructive ones. See
-[Tool policy](../README.md#tool-policy-obsidian_tools) for the grammar, and
+[Enabling writes](../README.md#enabling-writes) for the grammar, and
 [`.env.example`](../.env.example) for every variable the server reads.
 
 ## Docker notes

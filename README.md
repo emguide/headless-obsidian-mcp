@@ -1,992 +1,84 @@
+<p align="center">
+  <img src="logo.png" alt="Headless Obsidian MCP" width="140">
+</p>
+
 # Headless Obsidian MCP
 
-A headless MCP (Model Context Protocol) server for interacting with Obsidian vaults. It gives AI assistants Obsidian's power — full-text search, the link graph, tags, and structure-aware editing — without the GUI, making your knowledge base a first-class agent tool.
+An [MCP](https://modelcontextprotocol.io) server that gives AI assistants full access to an Obsidian vault — search, the link graph, tags, and structure-aware editing — without needing a running copy of Obsidian.  Ideal for a headless server running your Hermes or OpenClaw agents.
 
-## Features
+It reduces token cost and removes the need for your agent to understand Obsidian vault conventions, so your agent can read your vault as a knowledge base rather than a folder of text files: `[[wikilinks]]` resolve the way Obsidian resolves them, tags unify inline `#tags` with frontmatter, and edits are surgical (change one section or one tag without rewriting the note). 
 
-- **Search Notes**: Full-text search through your Obsidian vault using ripgrep
-- **Ranked Search**: BM25-ranked full-text search — most relevant notes first, with a matched snippet
-- **Read Notes**: Parse and extract content, metadata, and tags from notes
-- **List Notes**: Discover the vault as lightweight headers — a table of contents for agents
-- **List Files**: Discover non-markdown files (attachments, images, PDFs), filterable by folder and extension
-- **Link Graph**: Resolve `[[wikilinks]]` and backlinks to traverse related notes
-- **Tag Index**: Aggregate all tags with counts and retrieve notes by tag
-- **Related Notes**: Associative recall — rank the notes most related to a given one (shared tags + link graph), no embeddings required
-- **Recency & Metadata**: Surface the most recent notes, filtered by frontmatter; read a note's frontmatter alone or get whole-vault stats
-- **Vault Hygiene**: Drill down from whole-vault stats into the actual orphaned notes and broken wikilinks
-- **Property Search**: Discover the vault's frontmatter schema, list a property's distinct values, and query notes by frontmatter condition (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `exists`, `contains`)
-- **Write & Edit** (opt-in): Create, overwrite, append, prepend, and delete notes — disabled by default, enabled via the `OBSIDIAN_TOOLS` policy (e.g. `OBSIDIAN_TOOLS=all`), which can also expose any custom subset of tools
-- **Structure-aware edits**: Add/remove tags, set frontmatter, add/remove/rename frontmatter properties, add/append/replace sections, and literal find/replace patches without rewriting the whole note — saving agent tokens
-- **Frontmatter validation**: Writes reject nested objects, arrays of non-scalars, and markdown syntax in string values, keeping properties queryable and flat
-- **Move & rename**: Move notes (rewriting the wikilinks that point to them) or arbitrary attachment files
-- **Folder CRUD** (opt-in): Create, move/rename, and delete folders (`create_folder`, `move_folder`, `delete_folder`) alongside the read-side `list_folders`. Moving a folder rewrites the folder-qualified wikilinks pointing into it; deleting one is trash-safe and refuses a non-empty folder without `recursive`. Each reports `git_warning` when `OBSIDIAN_GIT_SYNC` is off, since a folder operation can move or delete an arbitrary subtree with nothing to roll back to
-- **Link-graph safety on writes**: Every content write reports the resulting note's `unresolved_links` and `broken_anchors`, so a typo'd `[[wikilink]]` surfaces immediately instead of silently rotting the graph (report-only, like delete's `dangled_backlinks`)
-- **Templates** (opt-in): Apply the vault's existing core Templates-plugin templates — discover them (`list_templates`), create a note from one (`apply_template`), or insert one into an existing note (`insert_template`), with faithful `{{title}}`/`{{date}}`/`{{time}}` and `{{date:FORMAT}}` substitution (Templater scripting is not supported)
-- **Daily notes**: Resolve "today"/"yesterday"/any date to its canonical daily-note path from the Daily Notes core plugin's own config (`resolve_daily_note`) — folder, date format, and template come from the vault, not from out-of-band knowledge
-- **Trash-safe delete**: Deletes move to the vault's `.trash` by default, so they're recoverable
-- **Git sync**: Optionally commit every write, and/or pull+push a remote per write or on a background timer (`OBSIDIAN_GIT_SYNC`), with non-destructive conflict handling
-- **Cross-platform**: Works on Windows, macOS, and Linux
-- **Frontmatter Support**: Extracts YAML frontmatter as structured metadata
-- **Tag Extraction**: Automatically identifies and extracts Obsidian tags
+**Read-only by default.** Out of the box the server exposes only read tools; writing is opt-in through a single environment variable.
 
-## Prerequisites
+## What it can do
 
-- [Node.js](https://nodejs.org/) 20 or newer (18 is end-of-life and not tested)
-- [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg` command)
-- An Obsidian vault with markdown files
+| | |
+|---|---|
+| [**Find**](docs/TOOLS.md#search) | Literal/regex search via ripgrep ([`search_notes`](docs/TOOLS.md#search_notes)), plus BM25 relevance-ranked full-text search with snippets ([`search_notes_ranked`](docs/TOOLS.md#search_notes_ranked)). Resolve a human name ("Alpha Project") or a date ("yesterday") to a note path ([`resolve_note`](docs/TOOLS.md#resolve_note), [`resolve_daily_note`](docs/TOOLS.md#resolve_daily_note)). |
+| [**Browse**](docs/TOOLS.md#notes) | List [notes](docs/TOOLS.md#list_notes), [folders](docs/TOOLS.md#list_folders), [attachments](docs/TOOLS.md#list_files), [tags](docs/TOOLS.md#list_tags), and [frontmatter properties](docs/TOOLS.md#list_properties). Read a note's [outline](docs/TOOLS.md#get_outline) or [one section](docs/TOOLS.md#read_section) without loading the whole thing. |
+| [**Traverse**](docs/TOOLS.md#links) | Resolve `[[wikilinks]]` and backlinks ([`get_links`](docs/TOOLS.md#get_links)). Rank the notes most related to a given one — shared tags and link-graph structure, no embeddings ([`get_related_notes`](docs/TOOLS.md#get_related_notes)). |
+| [**Query**](docs/TOOLS.md#query_notes) | Filter notes by [frontmatter conditions](docs/TOOLS.md#query_notes) (`eq`, `gt`, `contains`, …), by [tag](docs/TOOLS.md#find_by_tag), or by [recency](docs/TOOLS.md#list_recent_notes). Every note-selecting tool accepts the same [`folder` / `tags` / `where` filters](docs/TOOLS.md#filter-vocabulary). |
+| [**Audit**](docs/TOOLS.md#vault) | [Whole-vault stats](docs/TOOLS.md#get_vault_stats), then [drill into](docs/TOOLS.md#list_vault_issues) the actual orphaned notes, broken wikilinks, and dead heading anchors. |
+| [**Edit**](docs/TOOLS.md#write-tools) *(opt-in)* | [Create, append, prepend, move, and delete notes](docs/TOOLS.md#creating-and-replacing-notes). Change [a tag](docs/TOOLS.md#add_tag--remove_tag), [a frontmatter field](docs/TOOLS.md#frontmatter-edits), or [one section](docs/TOOLS.md#section-edits) without rewriting the note. [Bulk-edit](docs/TOOLS.md#bulk_edit) many notes in one call. Create, move, and delete [folders](docs/TOOLS.md#create_folder) too. See [Enabling writes](#enabling-writes). |
+| [**Protect**](docs/TOOLS.md#guarantees-shared-by-every-write) | [Moving a note](docs/TOOLS.md#move_note) rewrites the wikilinks that point to it; [renaming a heading](docs/TOOLS.md#rename_section) rewrites inbound anchors. Every write [reports any broken links it introduced](docs/TOOLS.md#link-integrity-on-writes). [Deletes](docs/TOOLS.md#delete_note) go to `.trash`. |
+| **Sync** *(opt-in)* | If the vault is a git repo, snapshot every write as a commit — optionally pulling and pushing a remote per write or on a background timer. Merge conflicts are resolved non-destructively: your version is always preserved. See [Git safety net](#git-safety-net-obsidian_git_sync). |
 
-## Setup
+Templates from Obsidian's core [Templates plugin](docs/TOOLS.md#templates) are supported (`{{title}}`, `{{date:FORMAT}}`, …); Templater scripting is not.
 
-1. Clone or download this project
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Build the TypeScript sources:
-   ```bash
-   npm run build
-   ```
-4. Set the `OBSIDIAN_VAULT_PATH` environment variable:
-   ```bash
-   export OBSIDIAN_VAULT_PATH="/path/to/your/obsidian/vault"
-   ```
-5. Run the server:
-   ```bash
-   # Using npm
-   npm start
+**[→ Full tool reference](docs/TOOLS.md)** — all 49 tools with parameters and return shapes.
 
-   # Using mise (if you have mise installed)
-   mise run start
-   ```
+## Quick start
 
-## Development
-
-For development with file watching (uses [tsx](https://github.com/privatenumber/tsx), no build step required):
+Requires [Node.js](https://nodejs.org/) 20+, [ripgrep](https://github.com/BurntSushi/ripgrep), and an Obsidian vault.
 
 ```bash
-# Using npm
-npm run dev
-
-# Using mise
-mise run dev
+git clone <this-repo> && cd headless-obsidian-mcp
+npm install && npm run build
+export OBSIDIAN_VAULT_PATH="/path/to/your/vault"
+npm start
 ```
 
-## Tests
+Then point an MCP client at it. For **Claude Desktop** (`~/.config/claude/claude_desktop_config.json` on macOS/Linux, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
-Run the automated test suite (Node's built-in `node:test` runner via tsx — no
-extra dependencies):
-
-```bash
-npm test
+```json
+{
+  "mcpServers": {
+    "obsidian": {
+      "command": "node",
+      "args": ["/absolute/path/to/headless-obsidian-mcp/dist/index.js"],
+      "env": {
+        "OBSIDIAN_VAULT_PATH": "/absolute/path/to/your/vault"
+      }
+    }
+  }
+}
 ```
 
-The tests build a throwaway fixture vault in a temp directory and cover link
-resolution and backlinks, tag aggregation and filtering, listing and recency,
-index cache invalidation, and the security guards (path traversal, symlink
-escapes, frontmatter engine hardening, pattern limits).
+Restart the client and the server appears as `obsidian`. To let the agent edit the vault, add `"OBSIDIAN_TOOLS": "all"` to that `env` block — see [Enabling writes](#enabling-writes).
 
-### Continuous integration
-
-Every pull request and every push to `main` runs `npm ci`, `npm run build` and
-`npm test` on Node 20 and 22 via GitHub Actions
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The runner installs
-`ripgrep` and configures a git identity, because the suite drives the real `rg`
-binary and real git repositories rather than stubs.
-
-## Manual testing
-
-You can also exercise the MCP server using the included query CLI tool. It runs directly from
-the TypeScript sources via `tsx`, so no build step is required:
-
-```bash
-# Search for notes containing a pattern (case-insensitive by default)
-npm run query -- search "productivity"
-
-# Case-sensitive search
-npm run query -- search "TODO" --case-sensitive
-
-# Search for whole words only
-npm run query -- search "test" --whole-word
-
-# Multiline search
-npm run query -- search "pattern.*spans.*lines" --multiline
-
-# Search with custom context lines (default: 5)
-npm run query -- search "pattern" --context 10
-
-# Search scoped to a folder, tags, or frontmatter condition
-npm run query -- search "kubernetes" --tag work --match all
-npm run query -- search "alpha" --where '{"status":"active"}'
-
-# BM25-ranked full-text search (most relevant notes first)
-npm run query -- search-ranked "kubernetes networking"
-npm run query -- search-ranked "kubernetes networking" --limit 5
-npm run query -- search-ranked "kubernetes" --limit 100 --offset 100  # hits 101-200 (page past the cap)
-
-# BM25-ranked search scoped to a folder, tags, or frontmatter condition
-npm run query -- search-ranked "kubernetes" --folder work --tag active --match all
-npm run query -- search-ranked "kubernetes" --where '{"status":"active"}'
-
-# Read specific notes (returns { notes, errors } — one bad path won't fail the batch)
-npm run query -- read "daily-notes/2024-01-15"
-npm run query -- read "note1" "folder/note2"
-
-# List notes as lightweight headers (optionally scoped by folder/tags/where)
-npm run query -- list
-npm run query -- list --folder projects --limit 20
-npm run query -- list --tag work --match all --where '{"status":"active"}'
-npm run query -- list --limit 20 --offset 20        # second page (skipped: 20)
-
-# Show outbound links, unresolved links, and backlinks for a note
-npm run query -- links "projects/alpha"
-npm run query -- links "projects/alpha" --include-context
-
-# List all tags with note counts
-npm run query -- tags
-
-# Find notes by tag (default: any; --all requires every tag), narrowed by folder/where
-npm run query -- find-by-tag productivity
-npm run query -- find-by-tag productivity project --all
-npm run query -- find-by-tag work --folder projects --where '{"status":"active"}'
-
-# List the most recent notes (by mtime, or a frontmatter date field), scoped by folder/tags/where
-npm run query -- recent --limit 10
-npm run query -- recent --date-field updated --since 2024-01-01
-npm run query -- recent --folder work --tag active --where '{"status":"active"}'
-
-# Find the notes most related to a given one (ranked, with reasons); scope the candidate pool
-npm run query -- related "projects/alpha"
-npm run query -- related "projects/alpha" --limit 5
-npm run query -- related "projects/alpha" --folder work --tag active
-
-# Read just a note's frontmatter, or summarize the whole vault
-npm run query -- frontmatter "projects/alpha"
-npm run query -- stats
-
-# Resolve a human name (title/alias/basename) to a note path
-npm run query -- resolve "Alpha Project"
-
-# Resolve a date to its daily-note path (Daily Notes plugin config)
-npm run query -- daily
-npm run query -- daily yesterday
-npm run query -- daily 2026-07-01
-
-# Report the server's own configuration (template folder/formats, daily notes, write flags, vault path)
-npm run query -- config
-npm run query -- config template
-npm run query -- config daily
-npm run query -- config sync                             # Git-sync mode/interval/remote/last_sync/last_error
-
-# Vault hygiene: orphaned notes, broken wikilinks, dead heading anchors, and unreconciled sync conflicts (drill-down from stats)
-npm run query -- vault-issues orphans
-npm run query -- vault-issues unresolved_links --limit 50
-npm run query -- vault-issues broken_anchors --limit 50
-npm run query -- vault-issues unresolved_links --include-context
-npm run query -- vault-issues conflicts
-
-# List non-markdown files (attachments/images), optionally scoped/filtered
-npm run query -- files --folder assets --extension png
-
-# Folder tree with note counts, optionally scoped/depth-limited
-npm run query -- folders
-npm run query -- folders --folder projects --depth 1
-
-# Frontmatter schema, distinct values, and condition queries
-npm run query -- properties
-npm run query -- property-values status
-npm run query -- query --where '{"status":"active","priority":{"gt":3}}'
-npm run query -- query --where '{"status":"active"}' --folder projects --tag work
-npm run query -- get-property "projects/alpha" status
-
-# Heading outline, and read a single section (index-backed outline; section reads the file)
-npm run query -- outline "projects/alpha"
-npm run query -- read-section "projects/alpha" "Log"
-npm run query -- read-section "projects/alpha" "Projects > Log" --include-subsections
-
-# Checkbox tasks across the vault, optionally scoped/filtered by folder/tags/where/status
-npm run query -- tasks
-npm run query -- tasks --folder projects --status open
-npm run query -- tasks --tag work --status open in_progress
-
-# --- Writing ---
-
-# Create a note (inline, from a --file, or from stdin)
-npm run query -- write "inbox/idea" "# Idea\n\nbody"
-npm run query -- write "inbox/idea" --file draft.md --overwrite
-
-# Append or prepend text to a note (prepend inserts after any frontmatter)
-npm run query -- append "daily/2026-07-22" "one more thing"
-npm run query -- prepend "daily/2026-07-22" "> top banner"
-
-# Tags and frontmatter (no whole-note rewrite)
-npm run query -- add-tag "projects/alpha" project active
-npm run query -- remove-tag "projects/alpha" stale
-npm run query -- set-frontmatter "projects/alpha" --set status=done --unset draft
-npm run query -- add-property-values "projects/alpha" aliases a2 a3
-npm run query -- remove-property-values "projects/alpha" aliases a3
-npm run query -- rename-property "projects/alpha" author authors
-
-# Bulk frontmatter edit across many notes (one git snapshot for the batch)
-npm run query -- bulk-edit --select '{"where":{"status":"draft"}}' \
-  --operations '[{"op":"add_tag","tags":["review"]},{"op":"set_frontmatter","set":{"status":"active"}}]' --dry-run
-
-# Sections (heading-scoped edits)
-npm run query -- add-section "projects/alpha" "Next steps" "- ship it"
-npm run query -- append-to-section "projects/alpha" "Log" "did a thing"
-npm run query -- replace-section "projects/alpha" "Summary" "new summary"
-npm run query -- rename-section "projects/alpha" "Old Heading" "New Heading"
-npm run query -- rename-section "projects/alpha" "Old" "New" --no-update-anchors
-
-# Move / rename a note (rewrites wikilinks that point to it)
-npm run query -- move "projects/alpha" "archive/alpha"
-npm run query -- move "projects/alpha" "archive/alpha" --no-update-links
-
-# Move an arbitrary file (attachment/image); no link rewriting
-npm run query -- move-file "assets/old.png" "assets/new.png"
-
-# Folder CRUD (create/move/delete; warns when OBSIDIAN_GIT_SYNC is off)
-npm run query -- create-folder "archive/2026"
-npm run query -- move-folder "projects" "archive/projects"     # rewrites folder-qualified links
-npm run query -- move-folder "projects" "archive/projects" --no-update-links
-npm run query -- delete-folder "scratch"                       # empty folders only
-npm run query -- delete-folder "archive/2025" --recursive      # trash-safe subtree delete
-npm run query -- delete-folder "archive/2025" --recursive --permanent
-npm run query -- delete-folder "archive/2025" --recursive --require-git   # refuse if sync is off
-
-# Literal find/replace patch on a note
-npm run query -- patch "projects/alpha" "old text" "new text"
-npm run query -- patch "projects/alpha" "TODO" "DONE" --all
-
-# Set one checkbox task's state (by text and/or line)
-npm run query -- set-task-state "projects/alpha" --text "ship it" --status done
-npm run query -- set-task-state "projects/alpha" --line 12 --status in_progress
-
-# Delete a note (trash-safe by default; recoverable from .trash)
-npm run query -- delete "inbox/idea"
-npm run query -- delete "inbox/idea" --permanent
-npm run query -- delete "inbox/idea" --include-context
-
-# For content that begins with "-" (markdown lists), pipe it via stdin or --file:
-printf -- '- one\n- two' | npm run query -- add-section "projects/alpha" "Todo"
-
-# Commit the write to git (see Configuration; legacy OBSIDIAN_GIT_AUTOCOMMIT=1 still works but maps to "commit")
-OBSIDIAN_GIT_SYNC=commit npm run query -- add-tag "projects/alpha" review
-
-# Use verbose mode to see the request being sent
-npm run query -- --verbose search "pattern"
-npm run query -- --verbose read "note1"
-```
-
-If you use mise, the equivalent commands are `mise run query -- search "productivity"`, etc.
-
-The query tool calls the MCP server tools directly and returns the raw JSON responses, making it useful for testing and debugging.
-
-## Tools
-
-### Naming conventions
-
-Tool names follow a fixed verb taxonomy — a new tool reuses an existing verb rather than coining a synonym, so the name predicts the tool's scope and addressing:
-
-- **`get_`** — one addressed thing: a note by path (`get_links`, `get_outline`, `get_frontmatter`, `get_property`, `get_related_notes`) or the vault as a single object (`get_vault_stats`).
-- **`list_`** — enumerate a vault-wide collection, optionally scoped or parameterized (`list_notes`, `list_files`, `list_folders`, `list_tags`, `list_properties`, `list_property_values`, `list_recent_notes`, `list_vault_issues`). A required argument does not demote it to `get_`.
-- **`search_`** text-queries content; **`read_`** returns body text; **`resolve_`** maps a human name to a path.
-- **`find_by_X`** retrieves by one named criterion (`find_by_tag`); **`query_`** retrieves by a condition object (`query_notes`), whose `where` is the single condition language reused by every note-filtering tool.
-- **Writes** name the mutation. `_property_values` is per-note under `add_`/`remove_` and vault-wide under `list_`; the verb, not the noun, carries the scope. **`create_`** is the folder-only create verb (`create_folder`): `write_` implies content, which a folder has none of.
-
-`list_notes`, `find_by_tag`, `query_notes`, and `list_recent_notes` are deliberately separate: they match different data (unified tags vs. frontmatter-only) and carry different semantics (recency ordering), so they are not merged. They differ in intent, not in what they can be scoped by — every note-selecting tool reuses the same `folder` / `tags` / `where` / `match` filters (see [Filter vocabulary](#filter-vocabulary-shared) above). A new vault-hygiene check becomes a `kind` of `list_vault_issues`.
-
-**Pagination (`offset`).** Every envelope-returning tool (all the list-style tools plus `search_notes` and `search_notes_ranked`) accepts an optional `offset` (default `0`). The returned rows are a window `[offset, offset + limit)` over the full result set. The envelope reports both edges of what was dropped: `skipped` (rows before the window, from `offset`) and `omitted` (rows after it, from `limit`), so `total = skipped + returned + omitted` and `truncated` (`omitted > 0`) still answers "is there a next page?". An `offset` past the end is not an error (empty `results`, `skipped = total`); `offset` must be a non-negative integer. `search_notes` uses the parallel field names `files_skipped` / `files_omitted` over files. `search_notes_ranked` keeps its 100-row cap on a single `limit`, but `offset` pages past it — `offset: 100, limit: 100` returns ranked hits 101–200 without re-fetching everything via `limit: 0`. To keep the agent-facing tool list small, this convention is stated once in the server's MCP `instructions` (sent to clients at initialize); individual tool descriptions state only their deviations from it.
-
-<a name="filter-vocabulary-shared"></a>
-**Filter vocabulary (shared).** Every note-selecting tool — `search_notes`, `search_notes_ranked`, `list_notes`, `list_recent_notes`, `find_by_tag`, `query_notes`, `get_related_notes`, and `bulk_edit.select` — accepts the same optional candidate filters: `folder` (path prefix), `tags` (with `match` `"any"` default / `"all"`), and `where` (frontmatter conditions, `query_notes` syntax). An absent filter imposes no constraint, so a scoped question ("active notes in `projects/` tagged `#work`") is a single call rather than a fetch-wide-then-filter-in-context join. On a tool whose primary filter is already tags (`find_by_tag`) or where (`query_notes`), `match` governs that primary filter and the added secondary filter applies with its own default (tags: `any`, where: `all`). Each tool keeps its distinct core (unified tag set, ordering, frontmatter conditions, relatedness scoring); they differ only in intent.
-
-<a name="link-integrity-on-writes"></a>
-**Link-integrity on writes (shared).** Every content-writing tool — `write_note`, `append_note`, `prepend_note`, `patch_note`, `add_section`, `append_to_section`, `replace_section`, `set_task_state` — returns, alongside its normal fields, `unresolved_links` (wikilink targets in the *resulting* note that resolve to no vault note) and `broken_anchors` (`[[note#heading]]` links whose note resolves but whose heading anchor matches nothing, as `{ target, anchor }`). Both are **report-only** — the write is never blocked or modified, exactly like `delete_note`'s `dangled_backlinks` — so an agent learns immediately when a write introduces a broken `[[wikilink]]` instead of discovering it later via `list_vault_issues`. The report covers the whole resulting note (not just the changed span); empty arrays mean the write left the graph intact. Block-ref anchors (`#^id`) are never flagged.
-
-<a name="link-context"></a>
-**Link context (shared, opt-in).** `get_links`, `delete_note`, and `list_vault_issues` (kinds `unresolved_links`/`broken_anchors`) accept `include_context: true`, decorating each reported link row with `context` — the source line(s) containing that link, as `{ line, text }` pairs. `line` is 1-based and **body-relative** (frontmatter stripped, the same convention as `get_outline`/`list_tasks`); `text` is the line verbatim, so it can be fed straight into `patch_note`'s `find`. This answers "who references this note, and why" in one call — a `search_notes` on the basename cannot distinguish resolved links from text mentions or from same-basename links to a different note. Context lines are identified with the same wikilink parser and resolution the index uses, and are computed by call-time file reads (the index does not retain body text — same precedent as `read_section`); on `list_vault_issues` only the returned window is read, so a bounded call reads a bounded number of files. Opt-in so a heavily-backlinked hub note stays cheap by default.
-
-<a name="not-found-suggestions"></a>
-**Folder-write git posture (shared).** The three folder-write tools — `create_folder`, `move_folder`, `delete_folder` — each return `git_warning` alongside their normal fields: a non-null message means `OBSIDIAN_GIT_SYNC` is `off`, so the operation was not snapshotted and cannot be rolled back; `null` means a mode is active and the change was committed. **Report-only** — the operation still runs, exactly like `delete_note`'s `dangled_backlinks`. Passing `require_git: true` escalates the warning into a refusal raised *before* any filesystem change. Only these three carry it, because only these three have a blast radius the arguments do not bound: every note-level write names the single path it touches, while one `delete_folder` can take an arbitrary subtree.
-
-**Not-found suggestions (shared).** Every path-addressed tool that errors on a missing note appends up to 3 did-you-mean candidates to the error message — `Note not found: projects/alfa. Did you mean: projects/alpha?`. Candidates reuse `resolve_note`'s exact matching (case-insensitive title/alias/basename equality against the shared index), so the common near-misses — wrong case, wrong or missing folder prefix, a title or alias passed as the path — are corrected in one round trip, with **no fuzzy matching**: a name with no exact-match identity gets the bare message unchanged. Errors stay errors — a candidate is never silently substituted for the requested path. Applies to the write tools' missing-note errors, the single-note readers (`get_frontmatter`, `get_property`, `get_outline`, `get_links`, `read_section`, `get_related_notes`), and `read_notes`' per-path `errors` entries (missing files only). `move_file` is excluded (attachments are not indexed).
-
-**Note addressing (shared).** Every single-note reader — `get_frontmatter`, `get_property`, `get_outline`, `get_links`, `read_section`, `read_notes`, `get_related_notes` — resolves its `path` argument the same way: through the shared index, so a bare basename (`alpha` → `projects/alpha`) or a wrong-case path (`Projects/Alpha`) reaches the same note through all of them. This is Obsidian's wikilink resolution: exact path first, then — for a **slash-less** name only — the shortest-path basename fallback; a slash-qualified path that names no note stays unresolved (never a hop to a same-basename note elsewhere), and a **title or alias** is not a resolvable address here (that is `resolve_note`'s job). A name that resolves to nothing falls through to the literal path and errors with the did-you-mean candidates above. The same `VaultIndex.resolve` defines the link graph and `unresolved_links`, so "what links to this note" and "what does this name address" never disagree — and a broken `[[wrong-folder/alpha]]` is reported unresolved instead of silently pointing at `projects/alpha`, keeping `move_note`'s link rewriting consistent with the graph.
-
-**Note addressing on writes (shared).** Every edit-existing write tool — `add_tag`/`remove_tag`, `set_frontmatter`, `add`/`remove_property_values`, `rename_property`, `patch_note`, `add_section`/`append_to_section`/`replace_section`, `rename_section`, `set_task_state`, `delete_note`, `move_note` (its `from`), `bulk_edit`'s per-note paths, `append_note`/`prepend_note` without `create`, and `insert_template` — resolves its target the same way readers do: a bare basename or wrong-case path through the shared index (`VaultIndex.resolveForWrite` via `resolveWriteTarget` in `src/tools/not-found.ts`) before touching disk. The one divergence: an **ambiguous** bare basename fails loud — `Ambiguous note name: log. Candidates: daily/log, projects/log. Pass the full path.` — instead of silently picking the shortest-path note the way readers/`get_links` do, since a wrong-note write mutates the wrong file, not just a wasted read. Same limits as readers: a title or alias is not a resolvable write address (`resolve_note`'s job), and a slash-qualified miss (`wrong-folder/alpha`) gets no basename fallback — a not-found error with did-you-mean candidates, same as today. Create paths stay literal: `write_note`, `apply_template`, and the `create: true` branches of `append_note`/`prepend_note` address the literal path, so a bare name always creates the note you named, never an existing folder note. This also hardened `move_note`/`rename_section`, whose source resolution previously picked a shortest-path winner silently on an ambiguous `from`. Stated once here; write-tool descriptions carry no repetition.
-
-### search_notes
-
-Search through markdown files in your vault using ripgrep patterns.
-
-**Parameters:**
-- `pattern` (string, required): Search pattern for ripgrep (max 1000 chars)
-- `case_sensitive` (boolean, optional): Case sensitive search (default: false)
-- `whole_word` (boolean, optional): Match whole words only
-- `multiline` (boolean, optional): Enable multiline matching
-- `context_lines` (number, optional): Number of context lines to show (default: 5, max: 100)
-- `limit` (number, optional): Maximum number of files to return (default: 20, 0 = unlimited — no hard maximum)
-- `max_matches_per_file` (number, optional): Maximum matches to return per file (default: 20, 0 = unlimited)
-- `offset` (number, optional): Matching files to skip before the window, for pagination (default 0; reported as `files_skipped`)
-- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
-- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
-- `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
-
-**Returns:** An object bounding the result set:
-- `results`: Array of search results, each with `path` (relative, without .md) and `matches` (line numbers + context); each match carries `line_number` (file-absolute) and `body_line` (1-based body-relative, frontmatter stripped — the same convention as `get_outline`/`list_tasks`/`set_task_state`, so a grep hit feeds `set_task_state` directly; `null` for hits inside the frontmatter block or in a file the index does not track)
-- `truncated`: `true` if any cap dropped results (skipping forward via `offset` does not set it)
-- `files_returned`: number of files in `results`
-- `files_skipped`: matching files skipped before the window by `offset`
-
-Results are ordered by path, so a given `offset`/`limit` window is stable across calls (ripgrep's own file order is nondeterministic).
-- `files_omitted`: matching files seen beyond the window (`limit`) and not returned
-- `matches_capped_in`: paths of files whose matches were capped
-
-When `folder`/`tags`/`where` are given, the candidate notes are resolved from the shared index first and ripgrep runs only over those files (chunked for large vaults); a filter matching zero notes returns empty without invoking ripgrep.
-
-### search_notes_ranked
-
-Full-text search ranked by BM25 relevance — the most relevant notes first, rather than every literal match. Complements `search_notes` (literal/regex, unranked); it doesn't replace it.
-
-**Parameters:**
-- `query` (string, required): Free-text query (max 1000 chars)
-- `limit` (number, optional): Maximum number of results (default 100; `limit: 0` = unbounded; a positive limit is capped at 100)
-- `offset` (number, optional): Ranked hits to skip before the window, for pagination (default 0). With the 100-row cap, `offset: 100` reaches hits 101–200 without `limit: 0`.
-- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
-- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
-- `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is an array of note headers (same shape as `list_notes`) extended with:
-- `score`: BM25 relevance score (higher = more relevant)
-- `snippet`: A short matched excerpt
-
-`returned`/`omitted`/`truncated` report how many rows came back vs. were dropped by the limit, so a truncated result isn't mistaken for a complete one.
-
-Note: tokenization is ASCII/English-oriented (lowercased, split on non-alphanumeric, stemmed), so non-Latin scripts (e.g. CJK) and accented characters aren't well indexed here — use `search_notes` for literal non-ASCII matching.
-
-Scopes to a candidate set via the same `folder`/`tags`/`where`/`match` filters as `search_notes` (resolved from the shared index first, then ranked over just those notes), so "the most relevant note about X among my work notes" is expressible.
-
-### read_notes
-
-Read and parse one or more notes from your vault.
-
-**Parameters:**
-- `paths` (array, required): Array of relative note paths (with or without .md extension, max 50)
-
-**Returns:** `{ notes, errors }`
-- `notes`: Array of note objects for every path read successfully, each with:
-  - `path`: Relative path without .md extension (same identity field as the header tools)
-  - `contents`: Markdown body verbatim (frontmatter removed; inline `#tags` in the body are preserved)
-  - `frontmatter`: Parsed frontmatter as JSON object (same field name as `get_frontmatter`)
-  - `tags`: The note's full tag set — frontmatter `tags:` unified with inline `#tags`
-- `errors`: `[{ path, error }]` for paths that couldn't be read (missing or too large) — one bad path no longer fails the whole batch
-
-A path-traversal attempt still errors the entire call; only missing/oversized files are reported per-path in `errors`.
-
-### list_notes
-
-List notes in the vault as lightweight headers, without full contents. Use it to discover what exists before searching or reading.
-
-**Parameters:**
-- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
-- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
-- `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
-- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (`path`, `title` (frontmatter title or basename), `tags`, `headline` (first markdown heading), `size`, `modified` (ISO timestamp)), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
-
-### get_links
-
-Resolve the Obsidian link graph for a note.
-
-**Parameters:**
-- `path` (string, required): Relative note path (with or without .md extension)
-- `include_context` (boolean, optional): Decorate every link row with the source line(s) containing it (see [Link context](#link-context))
-
-**Returns:** An object with:
-- `note`: Canonical path of the inspected note
-- `outbound_links`: Resolved `[[wikilinks]]`, each with the raw `target` and resolved `path`
-- `unresolved_links`: Wikilink targets that resolve to no note
-- `backlinks`: Notes elsewhere in the vault that link to this one
-
-With `include_context: true`, every row in all three arrays gains `context` (`{ line, text }` pairs): `outbound_links` rows become `{ target, path, context }`, `unresolved_links` rows become `{ target, context }` (bare strings without the flag), and `backlinks` rows become `{ path, context }` — the linking lines in each source note, so "who references this note, and why" is one call. Without the flag the shapes are unchanged.
-
-Handles `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `![[embeds]]`; links resolve by full relative path or basename. A bare `[[basename]]` that matches several notes resolves to the one closest to the vault root (fewest path segments), ties broken alphabetically — Obsidian's shortest-path rule, so the same bare link points to the same note vault-wide. A slash-qualified target (`[[folder/note]]`) resolves only by exact path: if that path names no note it is unresolved — the basename fallback is for slash-less names alone, so `[[wrong-folder/note]]` is a broken link, not a silent hop to a same-basename note elsewhere.
-
-### get_outline
-
-A note's heading structure without its body — the outline. Closes the "check what sections exist, then edit the right one" loop without reading the whole note. Index-backed (no file read); headings inside fenced code blocks are excluded.
-
-**Parameters:**
-- `path` (string, required): Relative note path (with or without `.md`)
-
-**Returns:** `{ path, outline }` where each outline entry is `{ heading, level, path, line, ambiguous }`. `path` is the full `" > "`-joined heading-path (e.g. `Projects > Log`) — the disambiguating address; `line` is 1-based; `ambiguous` is `true` when the bare heading text repeats in the note.
-
-### read_section
-
-Read a single section of a note without loading the whole note — the read-side complement of `append_to_section`/`replace_section`. Reads the file at call time (the index does not retain body text).
-
-**Parameters:**
-- `path` (string, required): Relative note path (with or without `.md`)
-- `section` (string, required): A bare heading, or a `" > "`-joined heading-path like `Projects > Log`
-- `include_subsections` (boolean, optional): Include nested subsections in the returned content (default: false)
-
-**Returns:** `{ path, section, level, content }`. `section` is the resolved full heading-path; `content` is the heading line plus its own body (nested subsections excluded unless `include_subsections` is set). Frontmatter is never included.
-
-A bare heading resolves when unique; an ambiguous bare heading errors loudly, listing the candidate full paths so you can retry with the exact one (mirrors `patch_note`'s fail-loud behavior).
-
-### list_tasks
-
-The structured checkbox-task surface — every `- [ ]` task in the vault as parsed rows, replacing a hand-rolled `- [ ]` regex through `search_notes`. Index-backed (no per-call file reads).
-
-**Parameters:**
-- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
-- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
-- `where` (object, optional): Restrict to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
-- `status` (array, optional): Status names to match, any-of (`"open"`, `"done"`, `"in_progress"`, `"cancelled"`, `"forwarded"`, `"other"`); omitted = all statuses
-- `limit` (number, optional): Maximum number of tasks to return (default 100; `limit: 0` = unbounded)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of task rows: `{ path, text, status, marker, line, section }`. `text` is the task text after the checkbox; `status` is the named state; `marker` is the raw checkbox character verbatim; `line` is **1-based and body-relative** (frontmatter stripped) — the same convention as `get_outline`/`read_section`, so a task's `line` cross-references directly against an outline's `line`; `section` is the `" > "`-joined heading-path the task falls under, or `null` when it sits above every heading.
-
-### list_tags
-
-Aggregate every tag across the vault, unifying inline `#tags` (including nested `#parent/child`) and frontmatter `tags:`.
-
-Inline `#tags` inside fenced code blocks are ignored, matching Obsidian and the fence-aware heading/task/wikilink parsers — a note that merely *documents* tag syntax creates no phantom vault tags. Every tag consumer (`list_tags`, `find_by_tag`, `read_notes`' `tags`, the shared `tags` filter) shares that extraction, so they never disagree.
-
-**Parameters:**
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ tag, count }` sorted by frequency. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
-
-### find_by_tag
-
-Find notes matching one or more tags.
-
-**Parameters:**
-- `tags` (array, required): Tags to match (with or without leading `#`)
-- `match` (string, optional): `"any"` (default) or `"all"` — governs the tag set only
-- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `where` (object, optional): Additional frontmatter conditions (same syntax as `query_notes`); all must hold
-- `limit` (number, optional): Maximum number of notes to return (default 100; `limit: 0` = unbounded)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
-
-### list_recent_notes
-
-List notes ordered by recency, newest first.
-
-**Parameters:**
-- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-- `since` (string, optional): Only include notes on or after this ISO date
-- `date_field` (string, optional): Frontmatter field to sort by instead of filesystem mtime (e.g. `updated`)
-- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `tags` (array, optional): Restrict to notes carrying these tags (leading `#` optional)
-- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
-- `where` (object, optional): Frontmatter filters, e.g. `{ "status": "active" }` or `{ "priority": { "gt": 3 } }` (same condition syntax as `query_notes`)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
-
-### get_related_notes
-
-Find the notes most related to a given note and rank them — associative recall over the vault, computed entirely from the shared index with no embeddings or model. Relatedness is a transparent weighted blend of four signals: a **direct link** in either direction (weight 4), each **shared tag** (weight 3), each **shared out-link** (a note both link to — co-reference, weight 2), and each **shared backlink** (a note that links to both — co-citation, weight 2). Notes with no connecting signal are omitted.
-
-**Parameters:**
-- `path` (string, required): Relative note path (with or without `.md`)
-- `folder` (string, optional): Restrict the scored candidate pool to notes under this folder
-- `tags` (array, optional): Restrict candidates to notes carrying these tags (leading `#` optional)
-- `match` (string, optional): Semantics of `tags` — `"any"` (default) or `"all"`
-- `where` (object, optional): Restrict candidates to notes whose frontmatter satisfies these conditions (same syntax as `query_notes`)
-- `limit` (number, optional): Maximum number of related notes to return (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-The `folder`/`tags`/`where`/`match` filters scope the candidate pool that gets scored (the source note is never itself a candidate), so "what work notes relate to X?" is one call.
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`) extended with `score`, `reasons` (why each note surfaced), `shared_tags`, `shared_links`, `shared_backlinks`, and `linked`, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of related notes (notes with at least one connecting signal) dropped by the limit, and `truncated` is `true` when `omitted > 0`.
-
-### get_frontmatter
-
-Read just a note's parsed frontmatter (YAML metadata), without its body — a cheap way to inspect status, aliases, dates, or custom fields before reading or editing the whole note.
-
-**Parameters:**
-- `path` (string, required): Relative note path (with or without `.md`)
-
-**Returns:** `{ path, frontmatter }` where `frontmatter` is the parsed YAML as an object (empty when the note has none).
-
-### get_vault_stats
-
-Summarize the whole vault in a single call, derived entirely from the shared index.
-
-**Parameters:** none
-
-**Returns:** `{ notes, total_size_bytes, distinct_tags, tag_assignments, tagged_notes, untagged_notes, resolved_links, unresolved_links, notes_with_links, orphan_notes, conflict_notes, last_modified, first_modified }`. `orphan_notes` counts notes with neither inbound nor outbound resolved links; `conflict_notes` counts unreconciled git-sync conflict copies (see [Git sync](#git-sync-obsidian_git_sync)); the time bounds are ISO timestamps (`null` for an empty vault).
-
-### list_vault_issues
-
-Vault-hygiene findings the index already knows about but that `get_vault_stats` only counts — the drill-down from a stat to the actual rows.
-
-**Parameters:**
-- `kind` (string, required): `"orphans"`, `"unresolved_links"`, `"broken_anchors"`, or `"conflicts"`
-- `limit` (number, optional): Cap on the number of returned rows/groups (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-- `include_context` (boolean, optional): For the two link kinds, decorate each target with the source line(s) containing it — `{ target, context }` / `{ target, anchor, context }` — so you can see what the broken reference says before deciding how to fix it (see [Link context](#link-context); only the returned window is read). Errors on `kind: "orphans"` and `kind: "conflicts"` (neither has links to contextualize).
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results`' shape depends on `kind`:
-- `"orphans"`: Array of note headers (same shape as `list_notes`) — notes with no inbound and no outbound resolved links (the same predicate behind `get_vault_stats`'s `orphan_notes`)
-- `"unresolved_links"`: Array of `{ source, targets }` grouped by source note — `targets` is the raw wikilink targets in that note that resolve to nothing. `returned`/`omitted`/`truncated` for this kind count **groups (source notes), not individual targets**.
-- `"broken_anchors"`: `[[note#heading]]` links whose target note resolves but whose heading anchor matches no heading in that note — the complement of `unresolved_links` ("note resolves, heading doesn't"). Array of `{ source, targets: [{ target, anchor }] }` grouped by source note; `returned`/`omitted`/`truncated` count groups (source notes), not individual anchors, same as `unresolved_links`. Block-ref anchors (`#^id`) and links to unresolved notes are excluded.
-- `"conflicts"`: Array of `{ path, original, created }` — unreconciled git-sync conflict copies. `path` is the copy note (`<note> (conflicted YYYY-MM-DD HHMMSS)`), `original` the canonical note path it diverged from, `created` the copy's file mtime (ISO). One row per copy.
-
-`returned` is `results.length`, `omitted` is the number of rows/groups dropped by the limit, and `truncated` is `true` when `omitted > 0`. For the full/unbounded result (`limit: 0`, or the default when the row/group count is ≤ 100), the `orphans` `results.length` equals `get_vault_stats`'s `orphan_notes`; the sum of every `targets` length under `unresolved_links`'s `results` equals `get_vault_stats`'s `unresolved_links` count; `conflicts`' `results.length` equals `get_vault_stats`'s `conflict_notes`. A group-limited result naturally shows fewer. Index-backed.
-
-### list_files
-
-List non-markdown files in the vault (attachments, images, PDFs) — the counterpart to `list_notes` for everything it deliberately excludes.
-
-**Parameters:**
-- `folder` (string, optional): Restrict to files under this folder (relative to the vault root)
-- `extension` (string, optional): Filter by extension, leading dot optional and case-insensitive (e.g. `png` or `.PNG`)
-- `limit` (number, optional): Maximum number of files to return (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of file entries (`path`, `size`, `modified`, `extension`) — `path` is vault-relative with the extension preserved, `modified` is an ISO timestamp, `extension` is lowercased without the dot — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of files dropped by the limit, and `truncated` is `true` when `omitted > 0`. Markdown files are never returned; does not touch the vault index.
-
-### list_folders
-
-Enumerate the vault's folders so an agent can see the shape of the vault before searching or reading — the folder-level counterpart to `list_notes` (notes) and `list_files` (attachments).
-
-**Parameters:**
-- `folder` (string, optional): Restrict to folders under this folder (relative to the vault root)
-- `depth` (number, optional): Relative depth cap — `1` = immediate children of the scope (top-level folders when no `folder` is given)
-- `limit` (number, optional): Maximum number of folders to return (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of `{ path, notes, total_notes, subfolders }` sorted by `path` — `notes` counts notes directly in the folder, `total_notes` counts notes recursively under it, `subfolders` counts direct child folders — bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of folders dropped by the limit, and `truncated` is `true` when `omitted > 0`. Notes-only: a folder containing only attachments does not appear (use `list_files`). Root-level notes contribute no folder row. Index-backed.
-
-### list_properties
-
-The vault's frontmatter schema — every property key in use, with how many notes use it and what value types it takes. Like `list_tags` but for arbitrary properties.
-
-**Parameters:**
-- `include_tags` (boolean, optional): Include the `tags` key (default: true; set false since it's already covered by `list_tags`)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0)
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }` — `results` is the array of `{ key, count, types }` where `types` is the distinct value types observed (`string`/`number`/`boolean`/`array`/`null`/`date`/`object`), sorted by `count` descending then `key`. There is no `limit`, so `truncated` is always `false` and `omitted` is always `0`; `offset`/`skipped` still let you page through the full set.
-
-### list_property_values
-
-Distinct values of one frontmatter property, with per-note counts — a faceted breakdown of every value a key takes across the vault.
-
-**Parameters:**
-- `key` (string, required): The property key
-- `limit` (number, optional): Maximum number of values to return (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-**Returns:** `{ key, results, returned, skipped, omitted, truncated }`. `results` is `[{ value, count }]`, sorted by `count` descending, bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of values dropped by the limit, and `truncated` is `true` when `omitted > 0`. Array-valued properties count each element once per note.
-
-### query_notes
-
-Find notes by frontmatter condition — generalizes the `where` filter in `list_recent_notes` into its own tool.
-
-**Parameters:**
-- `where` (object, required): `key -> condition` map. A condition is a bare scalar (equality / array-membership) or an operator object `{ eq, ne, gt, gte, lt, lte, exists, contains }`
-- `match` (string, optional): `"all"` (default) or `"any"` — governs the `where` conditions only
-- `folder` (string, optional): Restrict to notes under this folder (relative to the vault root)
-- `tags` (array, optional): Additionally restrict to notes carrying these tags (leading `#` optional); any of them
-- `limit` (number, optional): Maximum number of notes to return (default `100`; pass `0` for unbounded — no cap)
-- `offset` (number, optional): Rows to skip before the window, for pagination (default 0; skipping past the end returns an empty result, not an error)
-
-Comparisons are type-aware: numeric when both sides parse as numbers, chronological when both parse as dates, otherwise case-insensitive string compare.
-
-**Returns:** `{ results, returned, skipped, omitted, truncated }`. `results` is the array of note headers (same shape as `list_notes`), bounded by `limit` (default `100`). `returned` is `results.length`, `omitted` is the number of notes dropped by the limit, and `truncated` is `true` when `omitted > 0`.
-
-### get_property
-
-Read a single frontmatter property from one note — cheaper than reading the whole note or its full frontmatter when only one field is needed.
-
-**Parameters:**
-- `path` (string, required): Relative note path (with or without `.md`)
-- `key` (string, required): The property key
-
-**Returns:** `{ path, key, value, present }` where `present` distinguishes an absent key from a key explicitly set to `null`.
-
-### resolve_note
-
-Map a human-facing note name to its canonical path. Humans refer to notes by title or alias; every other tool addresses by path — this closes that gap directly, removing the search-then-guess round trip of running `search_notes_ranked` and eyeballing the top hit.
-
-**Parameters:**
-- `query` (string, required): The human-facing name (title, alias, or basename) to resolve
-
-**Returns:** `{ query, matches, resolved }`. `matches` is an array of `{ path, title, matched_on }` sorted by path, where `matched_on` is `"title" | "alias" | "basename"`; a note matching on more than one field appears once, labeled with its strongest field (precedence `title > alias > basename`). `resolved` is the single path when exactly one note matches, else `null` (ambiguous or no match) — the tool never guesses among candidates.
-
-Matching is exact and case-insensitive against frontmatter `title`, each frontmatter `aliases[]` entry (a single string or an array), and the file basename. No partial/substring/fuzzy matching — that is `search_notes_ranked`'s job. A no-match is a normal empty result, not an error. Index-backed.
-
-### resolve_daily_note
-
-Map a calendar date to its canonical daily-note path — the date analogue of `resolve_note`. The answer comes from the **Daily Notes core plugin's own config** (`.obsidian/daily-notes.json`: `folder`, `format`, `template`), so "append this to today's note" and "what did I log yesterday" need no out-of-band knowledge of the vault's structure and keep working when the user changes the folder or date format in Obsidian.
-
-**Parameters:**
-- `date` (string, optional): `"YYYY-MM-DD"`, or a keyword `"today"` (default) / `"yesterday"` / `"tomorrow"` (case-insensitive). Anything else errors loudly, listing the accepted forms.
-
-**Returns:** `{ date, path, exists, template }`. `date` is the resolved ISO day; `path` the canonical note path (no `.md`; slashes in the configured format nest folders, e.g. `YYYY/MM/YYYY-MM-DD`, exactly as in Obsidian); `exists` whether that note is on disk; `template` the configured daily template as a vault-relative path, or `null`.
-
-Missing config keys take Obsidian's own defaults (vault root, `YYYY-MM-DD`, no template). `OBSIDIAN_DAILY_FOLDER` overrides the folder for headless setups; with neither the config file nor the env var present the tool fails loud rather than guessing. Read-only by design — existing tools do the rest: `apply_template` (which accepts the returned `template` path) or `write_note` to create the note, `append_note`/`append_to_section` to log into it, `read_notes`/`read_section` to read it. Note that `{{date}}`/`{{time}}` in an applied template expand with the current moment, not the resolved day — exact Obsidian parity for today, a caveat when creating past/future notes.
-
-### get_config
-
-Report the server's own configuration — how it is set up, not what is in the vault (that's `get_vault_stats`). Answers "where is the template folder?", "are writes enabled?", "which vault am I pointed at?" in one call.
-
-**Parameters:**
-- `section` (string, optional): `"template" | "daily" | "writes" | "sync" | "vault" | "tools"` — return just that section, unwrapped. Omit for the whole object. An unknown section errors, listing the valid ones.
-
-**Returns:** `{ template, daily, writes, sync, vault, tools }` (or one unwrapped section). `template` is `{ folder, date_format, time_format }` — `folder` is `null` when no template folder is configured (this tool does not throw, unlike the template tools); `date_format`/`time_format` are the effective formats a bare `{{date}}`/`{{time}}` renders as (configured value, else Obsidian's `YYYY-MM-DD` / `HH:mm`). `daily` is `{ folder, format, template }` — the Daily Notes configuration `resolve_daily_note` runs on, reported leniently (`folder: null` when unconfigured, `""` when configured at the vault root). `writes` is `{ writes_enabled, git_sync }` — `writes_enabled` is derived (`true` iff the tool policy exposes at least one write tool); `git_sync` is the active `OBSIDIAN_GIT_SYNC` mode (`"off" | "commit" | "every-write" | "timer"`). `sync` is `{ mode, interval, remote, last_sync, last_error }` — the effective sync mode, interval (seconds), and remote name, plus `last_sync`/`last_error`, which track only the **background timer's** own attempts (`timer` mode): the ISO timestamp of its last successful tick (`null` if none yet) and the message from its most recent failed tick (`null` if the last one succeeded or none has run). In `commit`/`every-write` mode both stay `null` — there's no background timer, and a failed `every-write` pull/push throws back to the write call instead (see [Git sync](#git-sync-obsidian_git_sync)). `vault` is `{ path }` — the configured `OBSIDIAN_VAULT_PATH` (configuration only, not vault contents). `tools` is `{ policy, exposed, excluded }` — the raw `OBSIDIAN_TOOLS` value (`null` when unset) and the sorted exposed/excluded tool names.
-
-Read-only and never excludable by `OBSIDIAN_TOOLS` — it's how an agent discovers the active tool policy, so it's always exposed.
-
-### write_note
-
-Create a note, or overwrite an existing one.
-
-**Parameters:**
-- `path` (string, required): Relative note path (with or without .md extension)
-- `content` (string, required): Note content. May include a leading frontmatter block (validated), or pass frontmatter via the `frontmatter` param and give body-only content here.
-- `overwrite` (boolean, optional): Allow replacing an existing note (default: false — refuses to clobber)
-- `frontmatter` (object, optional): Structured frontmatter fields, validated and serialized canonically. When given, `content` is the body only. Supplying frontmatter both here and inline in `content` is an error.
-
-**Returns:** `{ path, created, unresolved_links, broken_anchors }` — the two link-health fields report the resulting note's graph integrity (wikilink targets that resolve to nothing, and `[[note#heading]]` links whose heading matches nothing). Report-only, like `delete_note`'s `dangled_backlinks`; see [Link-integrity on writes](#link-integrity-on-writes).
-
-### append_note
-
-Append text to the end of a note.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `content` (string, required): Text to append. When this call creates the note (`create:true` on a missing note), a leading frontmatter block is validated; appending to an existing note treats a leading `---` as body text.
-- `create` (boolean, optional): Create the note if it does not exist (default: false)
-
-**Returns:** `{ path, created, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)).
-
-### prepend_note
-
-Prepend text to the start of a note's body. Any frontmatter block is preserved and the text is inserted after it (never before the YAML fence).
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `content` (string, required): Text to prepend. When this call creates the note (`create:true` on a missing note), a leading frontmatter block is validated; when prepending to an existing note the text is inserted after any frontmatter, so it is never treated as frontmatter.
-- `create` (boolean, optional): Create the note if it does not exist (default: false)
-
-**Returns:** `{ path, created, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)).
-
-### delete_note
-
-Delete a note. **Trash-safe by default:** the note is moved to the vault's `.trash` folder (Obsidian's convention, ignored by the index) so the deletion is recoverable; repeated trashings of the same name get a numeric suffix. Errors if the note does not exist.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `permanent` (boolean, optional): Unlink the file outright instead of trashing it (default: false)
-- `include_context` (boolean, optional): Decorate each dangled backlink with the source line(s) linking to the deleted note (see [Link context](#link-context))
-
-**Returns:** `{ path, deleted, trashed, trash_path?, dangled_backlinks }` — `dangled_backlinks` lists the notes that linked to the deleted note and now have a broken `[[wikilink]]` (reported only; those notes are not modified). With `include_context: true` its rows become `{ path, context }`, computed against the pre-delete index (where the note still resolves), so the broken references can be fixed without re-reading each source.
-
-### move_note
-
-Move or rename a note. By default every `[[wikilink]]` elsewhere in the vault that pointed to the old location is rewritten to the new one — full-path links become the new full path, bare-basename links become the new basename, and aliases and `#anchors` are preserved — so the link graph is never broken.
-
-**Parameters:**
-- `from` (string, required): Current relative note path (with or without `.md`)
-- `to` (string, required): New relative note path
-- `overwrite` (boolean, optional): Allow replacing an existing note at the destination (default: false)
-- `update_links` (boolean, optional): Rewrite wikilinks that point to this note (default: true)
-
-**Returns:** `{ from, to, overwritten, updated_notes, updated_links }`
-
-### move_file
-
-Move or rename an arbitrary file (attachments, images, or notes referenced by literal path). Treats the path literally — no `.md` is appended and no wikilinks are rewritten.
-
-**Parameters:**
-- `from` (string, required): Current relative file path (with extension)
-- `to` (string, required): New relative file path (with extension)
-- `overwrite` (boolean, optional): Allow replacing an existing file at the destination (default: false)
-
-**Returns:** `{ from, to, overwritten }`
-
-### create_folder
-
-Create a folder (and any missing parents) — the "C" of folder CRUD, whose "R" is `list_folders`. Fails loud if anything already exists at the path (folder *or* file): a create that silently succeeded on an existing folder would hide a typo.
-
-Two honest limits follow from folders being *implicit* in the vault model. The new folder holds no notes, so **`list_folders` will not show it** until one lands there (its rows come from indexed note paths, not from directories on disk). And **git does not track empty directories**, so with sync enabled this commits nothing rather than failing. It still earns its place: it materializes the directory so a subsequent `move_file` or attachment write has a destination.
-
-**Parameters:**
-- `path` (string, required): Folder path relative to the vault root
-- `require_git` (boolean, optional): Refuse the operation when `OBSIDIAN_GIT_SYNC` is off, instead of proceeding with a warning (default: false)
-
-**Returns:** `{ path, created, git_warning }`
-
-### move_folder
-
-Move or rename a folder and everything under it, rewriting the wikilinks that pointed into it — the folder-level analogue of `move_note`.
-
-Only **folder-qualified** links (`[[projects/alpha]]`) are rewritten, because a folder move preserves every basename: `[[alpha]]` still names the same note afterwards. The one residual case is a bare link whose shortest-path winner the move changes (two notes sharing a basename, one moving nearer the root) — Obsidian re-resolves such a link the same way, so it is left alone rather than pinned to one side. Links inside fenced code blocks are never rewritten. Notes *inside* the moved folder are rewritten too, and are read at their new location.
-
-There is no `overwrite`: an existing destination is refused outright, since merging two subtrees is not a rename. Moving a folder into its own descendant, or onto itself, is likewise refused.
-
-**Parameters:**
-- `from` (string, required): Existing folder path relative to the vault root
-- `to` (string, required): Destination folder path; must not already exist
-- `update_links` (boolean, optional): Rewrite folder-qualified wikilinks pointing into the folder (default: true)
-- `require_git` (boolean, optional): Refuse when `OBSIDIAN_GIT_SYNC` is off (default: false)
-
-**Returns:** `{ from, to, moved_notes, moved_files, updated_notes, updated_links, git_warning }`
-
-### delete_folder
-
-Delete a folder and everything under it. **Trash-safe by default**: the subtree moves to the vault's `.trash` (Obsidian's convention, ignored by the index) so the deletion stays recoverable, with the same numeric-suffix disambiguation as `delete_note`. `permanent: true` unlinks outright.
-
-A non-empty folder is **refused unless `recursive: true`** — this is the only tool on the surface whose blast radius is not bounded by an explicit list of paths, so the caller states the intent to delete contents rather than discovering it afterwards. Emptiness is judged from a disk walk, not the index: the index skips hidden and machinery directories, so an index-derived listing would call a folder holding hidden data empty.
-
-`dangled_backlinks` lists notes *outside* the folder that linked to notes *inside* it and now have a broken `[[wikilink]]` — report-only, exactly like `delete_note`'s field of the same name. A link from one deleted note to another is not dangling, so sources inside the folder are excluded.
-
-**Parameters:**
-- `path` (string, required): Folder path relative to the vault root
-- `recursive` (boolean, optional): Required to delete a folder that is not empty (default: false)
-- `permanent` (boolean, optional): Permanently delete instead of moving the subtree to `.trash` (default: false)
-- `require_git` (boolean, optional): Refuse when `OBSIDIAN_GIT_SYNC` is off (default: false)
-
-**Returns:** `{ path, deleted, trashed, trash_path?, deleted_notes, deleted_files, dangled_backlinks, git_warning }`
-
-**Folder path guards (shared by all three).** Beyond the traversal and symlink guards every path gets, folder operands carry two refusals of their own: the **vault root** is never an operand (`""`, `"."`, `"/"` — deleting it would be a vault wipe), and neither are **hidden or machinery directories** (`.obsidian`, `.trash`, `.git`, `node_modules`, or any leading-dot folder). A file addressed as a folder errors with a pointer to `move_file`/`delete_note`.
-
-### patch_note
-
-Apply a literal find/replace patch to a note's raw text. The match is an exact string (never a regex — no injection or catastrophic-backtracking risk). Errors if the text to find is absent, so a stale patch fails loudly rather than silently doing nothing.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `find` (string, required): Exact literal text to find
-- `replace` (string, required): Replacement text
-- `all` (boolean, optional): Replace every occurrence instead of only the first (default: false)
-
-With `all` false, a `find` that occurs more than once errors (reporting the count) rather than silently patching the first — set `all: true` to replace every occurrence, or narrow `find` until it is unique.
-
-**Returns:** `{ path, replacements, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)). A patch that swaps a wikilink target for a typo surfaces it here immediately.
-
-### set_task_state
-
-Change one checkbox task's state, rewriting only the marker character — the write-side complement of `list_tasks`.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `text` (string, optional): Exact task text to match (the part after the checkbox)
-- `line` (number, optional): 1-based, body-relative line — a tiebreak alongside `text`, or a positional address on its own
-- `status` (string, required): Target state — a **writable** status only: `"open"`, `"done"`, `"in_progress"`, `"cancelled"`, `"forwarded"`. `"other"` is rejected (no canonical marker to write).
-
-At least one of `text`/`line` is required. Addressing is fail-loud, mirroring `patch_note`: `text` alone with zero matches errors "not found"; more than one match errors, listing the candidate line numbers so you can retry with `line`; `line` alone addresses whatever task is on that line; both given requires `text` to match the task found at `line`, or the call errors.
-
-**Returns:** `{ path, line, text, status, marker, changed, unresolved_links, broken_anchors }` — `line`/`text` echo the resolved task, `marker` is the raw character written, `changed` is `false` (no write, no git snapshot) when the task was already in the requested state; the link-health fields are report-only (see [Link-integrity on writes](#link-integrity-on-writes)).
-
-### add_tag / remove_tag
-
-Add or remove tags in a note's frontmatter without rewriting the note. Adds are idempotent; storage is normalized to a `tags:` array.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `tags` (array, required): Tags to add/remove (with or without leading `#`)
-
-**Returns:** `{ path, tags }` — the resulting tag list.
-
-### set_frontmatter
-
-Set and/or unset frontmatter fields while leaving the body untouched.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `set` (object, optional): Fields to set, e.g. `{ "status": "done" }`
-- `unset` (array, optional): Frontmatter keys to remove
-
-**Returns:** `{ path, changed }`
-
-### add_property_values / remove_property_values
-
-Add or remove values from an array-valued frontmatter property without rewriting the whole note. Adding is idempotent (no duplicates); an absent key is created as a new array, and an existing scalar is promoted to `[old, ...new]`. Removing shrinks the array and drops the key entirely once it has no values left.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `key` (string, required): The property key
-- `values` (array, required): Values to add/remove
-
-**Returns:** `{ path, key, values }` — the resulting list.
-
-### rename_property
-
-Rename a frontmatter key in place, preserving its value and its position in the YAML. Errors if `from` is absent or `to` already exists.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `from` (string, required): Existing property key
-- `to` (string, required): New property key
-
-**Returns:** `{ path, from, to }`
-
-### add_section
-
-Insert a new heading + content. Appends at the end by default, or immediately after the section named by `after`. Errors on a duplicate heading at the same level.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `heading` (string, required): Heading text (without leading `#`)
-- `content` (string, required): Body text for the new section
-- `level` (number, optional): Heading level 1–6 (default: 2)
-- `after` (string, optional): Insert after this section — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`
-
-**Returns:** `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)).
-
-### append_to_section
-
-Append text under an existing heading (before the next heading), leaving the rest of the note untouched.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `heading` (string, required): Section to append to — a bare heading or a `" > "`-joined heading-path (e.g. `Projects > Log`)
-- `content` (string, required): Text to append
-- `create` (boolean, optional): Create the section if missing (default: false) — recovers a *missing bare* heading only
-
-Addressing mirrors `read_section`'s fail-loud scheme: an ambiguous bare `heading` (one that repeats in the note) errors, listing the candidate full heading-paths so you can retry with the exact one and edit the right section. `create` recovers a *missing bare* heading only; an ambiguous one is never silently created, and a *heading-path* (`Projects > Log`) with no existing target **fails loud** — a heading-path addresses a section inside existing structure and cannot be created, so it is refused rather than written as a literal `## Projects > Log` heading. (`insert_template`'s `create_section` inherits this guard.)
-
-**Returns:** `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)).
-
-### replace_section
-
-Replace the body under an existing heading (the heading line is kept). Errors if the section is missing.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `heading` (string, required): Section to replace — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `append_to_section`
-- `content` (string, required): New body text
-
-**Returns:** `{ path, heading, unresolved_links, broken_anchors }` — link-health for the resulting note (report-only; see [Link-integrity on writes](#link-integrity-on-writes)).
-
-### rename_section
-
-Rename a heading in a note and rewrite every inbound `[[note#heading]]` anchor across the vault to the new heading — the heading-level analogue of `move_note`, closing the last structural edit that could silently break the link graph.
-
-**Parameters:**
-- `path` (string, required): Relative note path
-- `from` (string, required): Heading to rename — a bare heading or a `" > "`-joined heading-path, resolved with the same fail-loud ambiguity behavior as `read_section`/`replace_section`
-- `to` (string, required): New heading text
-- `update_anchors` (boolean, optional): Rewrite inbound `[[note#heading]]` anchors elsewhere in the vault (default: true)
-
-**Returns:** `{ path, from, to, updated_notes, updated_links }` — `from`/`to` are the resolved old/new heading; `updated_notes` counts OTHER notes touched (the renamed note itself is always touched, so it's excluded); `updated_links` counts every anchor rewritten, including the renamed note's own self-references (`[[#Old]]`/`[[thisnote#Old]]`) alongside inbound anchors elsewhere.
-
-Anchor matching is literal, case-insensitive (trimmed) text — not Obsidian's slug normalization. Block-ref anchors (`#^id`) are never rewritten. An ambiguous or missing `from` fails loud.
-
-If the renamed heading's leaf text is duplicated elsewhere in the same note (e.g. the same heading under a different parent), inbound anchors meant for the OTHER occurrence may also get rewritten — Obsidian anchors carry no parent context, so matching is by literal heading text alone.
-
-### bulk_edit
-
-Apply one or more frontmatter mutations to many notes in a single call, under a single git snapshot, with per-note result reporting. Turns "tag these 30 notes" from 30 round trips (and 30 auto-snapshot commits) into one.
-
-**Parameters:**
-- `select` (object, required): either `paths` (array of explicit note paths) **or** a filter — any combination of `where` (query_notes-style condition object), `tags` (find_by_tag-style), and `folder` (path prefix). A `folder` on its own is a valid filter (it selects every note under that folder). `match` (`"any"` default or `"all"`) governs how multiple `tags` combine (the primary filter only, matching every other note-selecting tool); `where` conditions always combine as `all`. Plus an optional `limit` (cap on matched notes; `0` = unbounded, following the vault-wide convention). Exactly one of `paths` or the filter form must be given — providing both errors, and providing neither errors.
-- `operations` (array, required): ordered, non-empty list of frontmatter-only mutations applied in turn to each matched note (e.g. `rename_property` then `set_frontmatter` on the new key, in one pass). Supported ops: `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property` — same shapes as the single-note tools. No section/body ops.
-- `dry_run` (boolean, optional): preview the matched notes and operations with zero writes and no git snapshot. This previews the selection and operation shape only — it does not parse notes or predict per-note apply outcomes, so a note that will fail on commit (e.g. `rename_property` onto an existing key) still shows in the dry-run match set.
-- `expected_count` (number, optional): abort before any snapshot or write if the resolved match count differs — guards a filter that drifted between an agent's preview and its commit.
-
-**Returns:** `{ dry_run, matched_count, applied_count, failed_count, results }`, where each `results` entry is `{ path, ok: true, changed }` or `{ path, ok: false, error }`. A per-note failure is isolated and reported; it never sinks the rest of the batch. `changed: false` marks a note whose operations were all no-ops. One git snapshot covers the whole batch, not one per note.
-
-> **Body vs. frontmatter fidelity:** section edits preserve the frontmatter block byte-for-byte; frontmatter edits (tags, fields) re-serialize the YAML in canonical form (block-style lists) but leave the body untouched. Headings inside fenced code blocks are ignored. All writes are path-traversal protected.
-
-> **Dates:** an unquoted `created: 2026-07-25` parses to a date and is a valid scalar. A date-only value round-trips in its original `YYYY-MM-DD` form, so an unrelated edit never rewrites it to `2026-07-25T00:00:00.000Z`; a value carrying a time keeps its full ISO timestamp.
-
-> **Validation:** every frontmatter write rejects nested objects/maps, arrays containing non-scalar elements, and markdown syntax in string values (bare URLs are allowed). Validation runs only on the keys a given write actually touches, so a pre-existing violation on an untouched key never blocks an unrelated edit. The content-writing tools (`write_note`, and the create path of `append_note`/`prepend_note`) validate any hand-written leading frontmatter block on these same rules — so creating a note by hand cannot bypass frontmatter integrity, and malformed YAML is rejected loudly rather than landing in the vault.
-
-## Example Usage
-
-Once connected to an MCP client, you can:
-
-```javascript
-// Search for notes containing "productivity" (bounded: 20 files, 20 matches/file by default)
-await search_notes({
-  pattern: "productivity",
-  case_sensitive: false,
-  limit: 20,             // 0 for unlimited
-  max_matches_per_file: 20
-});
-
-// Read specific notes
-await read_notes({
-  paths: ["daily-notes/2024-01-15", "projects/my-project"]
-});
-
-// Orient: list notes under a folder
-await list_notes({ folder: "projects", limit: 20 });
-
-// Traverse: follow the link graph
-await get_links({ path: "projects/my-project" });
-
-// Recall: what else is relevant to this note?
-await get_related_notes({ path: "projects/my-project", limit: 5 });
-
-// Retrieve by curation: notes tagged both #project and #active
-await find_by_tag({ tags: ["project", "active"], match: "all" });
-
-// Stay current: recent notes, active only
-await list_recent_notes({ limit: 10, where: { status: "active" } });
-
-// Create a note (won't clobber unless overwrite: true)
-await write_note({ path: "inbox/idea", content: "# Idea\n\nbody" });
-
-// Surgical edits — no whole-note rewrite
-await add_tag({ path: "projects/alpha", tags: ["review"] });
-await set_frontmatter({ path: "projects/alpha", set: { status: "done" } });
-await append_to_section({ path: "projects/alpha", heading: "Log", content: "shipped" });
-
-// Bulk frontmatter edit across many notes, one git snapshot
-await bulk_edit({
-  select: { where: { status: "draft" } },
-  operations: [
-    { op: "add_tag", tags: ["review"] },
-    { op: "set_frontmatter", set: { status: "active" } }
-  ],
-  dry_run: true
-});
-```
+Ready-to-copy configs for Claude Desktop, Claude Code, and Docker are in [`examples/`](examples/).
 
 ## Configuration
 
-The server requires the `OBSIDIAN_VAULT_PATH` environment variable to be set to your Obsidian vault directory.
+Only `OBSIDIAN_VAULT_PATH` is required. [`.env.example`](.env.example) documents all eight variables the server reads.
 
-### Tool policy (`OBSIDIAN_TOOLS`)
+> Nothing here loads a `.env` file — an MCP server inherits its environment from the client that spawns it. Set variables in your client's `env` block (or pass `--env-file` to Docker).
 
-One env var selects exactly which tools the server exposes — by domain group,
-by read/write mode, or by individual tool. Out of the box (variable unset) the
-server is **read-only** (default policy `reads`): the twenty-four write tools
-are hidden from the tool list and any call to one is rejected.
+### Enabling writes
+
+`OBSIDIAN_TOOLS` selects exactly which tools the server exposes. Unset, it means `reads`: the 24 write tools are hidden from the tool list, and calling one is rejected.
 
 ```bash
-export OBSIDIAN_TOOLS="all"                              # everything
-export OBSIDIAN_TOOLS="-templates,-tasks"                # reads minus templates/tasks
-export OBSIDIAN_TOOLS="reads,tasks.write,sections.write" # read all, write tasks+sections
-export OBSIDIAN_TOOLS="all,-bulk,-delete_note"           # everything but the scary ones
-export OBSIDIAN_TOOLS="search,notes.read"                # minimal search-and-read agent
+OBSIDIAN_TOOLS="all"                              # everything
+OBSIDIAN_TOOLS="reads,tasks.write,sections.write" # read all; write only tasks and sections
+OBSIDIAN_TOOLS="all,-bulk,-delete_note"           # everything except the destructive ones
+OBSIDIAN_TOOLS="-templates,-tasks"                # reads, minus two groups
+OBSIDIAN_TOOLS="search,notes.read"                # minimal search-and-read agent
 ```
 
-Selectors are case-insensitive and evaluated **left to right** (plain token
-adds, `-` prefix subtracts): `all` / `reads` / `writes` (meta-groups); a domain
-group; `<group>.read` / `<group>.write` (one mode-slice); or an individual tool
-name. Evaluation starts from the empty set — unless the *first* token
-subtracts, in which case it starts from the default policy `reads`, so
-`-templates` trims the read surface and can never silently expose writes.
+Selectors are case-insensitive and applied left to right — a plain token adds, a `-` prefix subtracts. Valid tokens are the meta-groups `all` / `reads` / `writes`, a domain group, a mode slice like `notes.write`, or an individual tool name. Evaluation starts from nothing, *unless the first token subtracts*, in which case it starts from `reads` — so `-templates` trims the read surface and can never accidentally expose writes.
 
-The 11 domain groups (every gated tool belongs to exactly one):
+The eleven domain groups:
 
 | Group | Read | Write |
 |---|---|---|
@@ -1002,165 +94,62 @@ The 11 domain groups (every gated tool belongs to exactly one):
 | `vault` | get_vault_stats, list_vault_issues | — |
 | `bulk` | — | bulk_edit |
 
-`get_config` is groupless and **always exposed** — its `tools` section reports
-the active policy and the exposed/excluded tool names, so an agent can always
-discover why a tool is absent.
+`get_config` sits in no group and is always exposed — its `tools` section reports the active policy, so an agent can discover why a tool is missing.
 
-Beyond agent control, the policy also trims token usage: every excluded tool is
-a schema the MCP client never has to carry in context.
+Excluding tools also saves tokens: an excluded tool is a schema the client never carries in context.
 
-**Fail-loud:** an unknown selector, a policy that selects no tools, or the
-retired `OBSIDIAN_ALLOW_WRITES` variable being set at all aborts startup with a
-message listing the valid vocabulary (or a migration hint — use
-`OBSIDIAN_TOOLS=all` where you previously set `OBSIDIAN_ALLOW_WRITES=1`). The
-policy gates the MCP server; the query CLI is the operator's own tool and is
-not affected by it.
+An unknown selector, or a policy that selects nothing, aborts startup with the valid vocabulary listed. The policy gates the MCP server only; the query CLI is the operator's own tool and ignores it.
 
-**Classification integrity.** Two invariants are machine-enforced, because a
-silent failure of either would expose a tool the operator meant to gate. The
-server refuses to start if a defined tool belongs to no group, or if a group
-names a tool the server doesn't define. And a test derives, from the source,
-which request handlers actually reach a vault-mutating function, then asserts
-that set equals the declared write tools exactly — so a new tool that changes
-the vault but is left off that list fails CI rather than being classified
-read-only and exposed under the default read-only policy.
+### Git safety net (`OBSIDIAN_GIT_SYNC`)
 
-### Git sync (`OBSIDIAN_GIT_SYNC`)
+If your vault is a git repository, the server can snapshot every write:
 
-`OBSIDIAN_GIT_SYNC` selects one of four modes:
+| Mode | Behavior |
+|---|---|
+| `off` *(default)* | No git involvement. |
+| `commit` | Commits after every write, with a message naming the tool. No remote. |
+| `every-write` | Commits, then pulls and pushes the remote after each write. |
+| `timer` | Commits per write; pulls and pushes on a background interval instead. |
 
-- `off` (default) — no git involvement.
-- `commit` — every write is committed (`git add -A && git commit`) right after
-  it lands, with a tool-derived commit message. No remote interaction. This is
-  the old "git safety net" behavior.
-- `every-write` — commits like `commit`, then also pulls (merge) and pushes the
-  configured remote after every write, so the vault stays in sync with a shared
-  remote continuously.
-- `timer` — commits like `commit`; pulling and pushing happens instead on a
-  background interval rather than per write.
+`OBSIDIAN_GIT_SYNC_INTERVAL` sets the `timer` cadence in seconds (default `300`); `OBSIDIAN_GIT_REMOTE` names the remote (default `origin`).
 
-`OBSIDIAN_GIT_SYNC_INTERVAL` sets the `timer` interval in seconds (default
-`300`, floored at `1`); `OBSIDIAN_GIT_REMOTE` sets the remote to pull/push
-(default `origin`).
+The guard is **fail-closed**: in any mode but `off`, a write is refused *before* touching disk if the vault isn't a usable git repo, and a failed post-write commit throws — a write never lands without its snapshot. The lone exception is the background timer tick, whose failures are recorded in `get_config`'s `sync.last_error` rather than thrown, since no write is in flight to fail.
 
-The guard is **fail-closed**: in any mode other than `off`, a write is refused
-before touching the filesystem if the vault isn't a usable git repository, and
-the post-write commit throws if it fails — so a write never lands without its
-snapshot. The one exception is the background timer tick in `timer` mode: a
-failed scheduled pull/push is recorded in `get_config`'s `sync.last_error`
-rather than thrown, since there's no in-flight write for it to block.
-
-**Conflicts never block or discard.** When a pull (`every-write`'s per-write
-pull, or `timer`'s background tick) hits a real merge conflict, it's resolved
-automatically per file: if both sides modified the note, the local version is
-kept aside as a
-`<note> (conflicted YYYY-MM-DD HHMMSS)` copy and the canonical path takes the
-remote version; if the remote deleted it while you modified it locally, the
-same conflict-copy preserves your version and the canonical path is deleted;
-if you deleted it locally while the remote modified it, the remote version is
-simply restored (no copy — there was nothing local to preserve). Find
-unreconciled copies with `list_vault_issues kind:"conflicts"` or the
-`conflict_notes` count on `get_vault_stats`.
-
-Leave `OBSIDIAN_GIT_SYNC` unset (or `off`) to disable git involvement entirely.
-The legacy `OBSIDIAN_GIT_AUTOCOMMIT` flag still works — setting it truthy warns
-and maps to `OBSIDIAN_GIT_SYNC=commit` — but an explicit `OBSIDIAN_GIT_SYNC`
-always takes precedence.
-
-## Claude Desktop Integration
-
-To use this MCP server with Claude Desktop, first build the project (`npm install && npm run build`), then add it to your Claude configuration file:
-
-**macOS/Linux**: `~/.config/claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "obsidian": {
-      "command": "node",
-      "args": ["/path/to/headless-obsidian-mcp/dist/index.js"],
-      "env": {
-        "OBSIDIAN_VAULT_PATH": "/path/to/your/obsidian/vault"
-      }
-    }
-  }
-}
-```
-
-**Using the start script (installs and builds automatically on first run):**
-```json
-{
-  "mcpServers": {
-    "obsidian": {
-      "command": "/path/to/headless-obsidian-mcp/start-server.sh",
-      "env": {
-        "OBSIDIAN_VAULT_PATH": "/path/to/your/obsidian/vault"
-      }
-    }
-  }
-}
-```
-
-This uses the included `start-server.sh` script, which changes to the project directory, installs dependencies and builds if needed, then runs `node dist/index.js`.
-
-Replace the paths with:
-- `/path/to/headless-obsidian-mcp`: The absolute path to this project directory
-- `/path/to/your/obsidian/vault`: The absolute path to your Obsidian vault
-
-To allow the agent to modify your vault, add `"OBSIDIAN_TOOLS": "all"` to the `env` block above (with the variable unset the server is read-only). Any selector policy works here — e.g. `"OBSIDIAN_TOOLS": "reads,tasks.write"` for a read-everything, write-only-tasks agent; see [Tool policy](#tool-policy-obsidian_tools). To also commit every write to git (and optionally sync a remote), add `"OBSIDIAN_GIT_SYNC": "commit"` (or `"every-write"` / `"timer"`); see [Git sync](#git-sync-obsidian_git_sync).
-
-After updating the configuration, restart Claude Desktop. The server will appear as "obsidian" and provide the read tools (`search_notes`, `search_notes_ranked`, `read_notes`, `list_notes`, `get_links`, `get_outline`, `read_section`, `list_tasks`, `list_tags`, `find_by_tag`, `list_recent_notes`, `get_related_notes`, `get_frontmatter`, `get_config`, `get_vault_stats`, `list_vault_issues`, `list_files`, `list_folders`, `list_templates`, `list_properties`, `list_property_values`, `query_notes`, `get_property`, `resolve_note`, `resolve_daily_note`). With write tools selected in `OBSIDIAN_TOOLS` it also provides them (`write_note`, `append_note`, `prepend_note`, `delete_note`, `move_note`, `move_file`, `patch_note`, `set_task_state`, `add_tag`, `remove_tag`, `set_frontmatter`, `add_property_values`, `remove_property_values`, `rename_property`, `add_section`, `append_to_section`, `replace_section`, `rename_section`, `bulk_edit`, `apply_template`, `insert_template`, `create_folder`, `move_folder`, `delete_folder`).
-
-Ready-to-copy versions of both blocks — plus a Claude Code project-scope
-`.mcp.json` and a Docker variant — live in [`examples/`](examples/).
+**Conflicts are never blocking or destructive.** On a real merge conflict, per file: if both sides changed the note, your version is preserved as a `<note> (conflicted YYYY-MM-DD HHMMSS)` copy and the canonical path takes the remote's; if the remote deleted a note you'd modified, the same copy preserves your version; if you deleted a note the remote modified, the remote version is restored. Find unreconciled copies with `list_vault_issues kind:"conflicts"`.
 
 ## Docker
 
-The [`Dockerfile`](Dockerfile) builds a multi-stage `node:20-alpine` image with
-**ripgrep** and **git** installed: `search_notes` shells out to the real `rg`
-binary, and every `OBSIDIAN_GIT_SYNC` mode other than `off` refuses writes
-without a usable git repository, so both are hard runtime dependencies rather
-than conveniences.
+The [`Dockerfile`](Dockerfile) builds a multi-stage `node:20-alpine` image with ripgrep and git installed — both are hard runtime dependencies, not conveniences.
 
 ```bash
 docker build -t headless-obsidian-mcp .
 docker run -i --rm -v "$HOME/vault:/vault:ro" headless-obsidian-mcp
 ```
 
-`-i` is load-bearing — this is a stdio server, and without an open stdin the
-transport never comes up. The image mounts the vault at `/vault` by default and
-runs as the unprivileged `node` user; for writes, drop the `:ro` and add
-`--user "$(id -u):$(id -g)"` so files land owned by you. See
-[`examples/mcp.docker.json`](examples/mcp.docker.json) for the client config.
+`-i` is load-bearing: this is a stdio server, and without an open stdin the transport never comes up. The vault mounts at `/vault` and the container runs as the unprivileged `node` user. For writes, drop `:ro` and add `--user "$(id -u):$(id -g)"` so new files land owned by you. Client config: [`examples/mcp.docker.json`](examples/mcp.docker.json).
 
-There is no `docker-compose.yml` by design: an MCP stdio server is spawned per
-client, not supervised as a long-running service with a port.
+There's no `docker-compose.yml` by design — an MCP stdio server is spawned per client, not supervised as a service.
 
-## Environment variables
+## Development
 
-[`.env.example`](.env.example) documents every variable the server reads, with
-defaults and the two migration traps (`OBSIDIAN_ALLOW_WRITES`, which aborts
-startup if set at all, and `OBSIDIAN_GIT_AUTOCOMMIT`, which warns and maps to
-`OBSIDIAN_GIT_SYNC=commit`). Nothing in this project loads a `.env` file —
-there is no dotenv dependency, since an MCP server receives its environment
-from the client that spawns it. The file is documentation, and `--env-file`
-fodder for the Docker image.
+```bash
+npm run dev     # watch mode via tsx, no build step
+npm run build   # compile to dist/
+npm test        # node:test via tsx
+npm run query   # query CLI — see docs/CLI.md
+```
+
+`mise run <task>` works for each if you use [mise](https://mise.jdx.dev/).
+
+The [query CLI](docs/CLI.md) calls the tools directly and prints raw JSON, which makes it the fastest way to try something without wiring up a client.
+
+Tests build a throwaway fixture vault in a temp directory and cover link resolution, tag aggregation, listing and recency, index cache invalidation, and the security guards (path traversal, symlink escapes, frontmatter hardening). [CI](.github/workflows/ci.yml) runs build and tests on Node 20 and 22 for every PR and push to `main`, installing real ripgrep and a git identity — the suite drives the actual `rg` binary and real repositories rather than stubs.
+
+Design rationale, tool-naming taxonomy, and the invariants that keep the tool surface coherent live in [CLAUDE.md](CLAUDE.md).
 
 ## Agent skill
 
-[`skills/obsidian-vault/SKILL.md`](skills/obsidian-vault/SKILL.md) is a
-copyable [Agent Skill](https://code.claude.com/docs/en/skills) — drop it in
-`~/.claude/skills/obsidian-vault/` (or a project's `.claude/skills/`) to give
-an agent workflow guidance for this server.
-
-It deliberately does **not** restate the shared conventions: the server already
-sends those to every client in its MCP `instructions` at initialize. The skill
-covers what that block can't — which tool answers which intent across the 46
-tools (25 read, 24 write), the anti-patterns worth avoiding (grepping for `- [ ]` instead
-of `list_tasks`; `patch_note` on a heading instead of `rename_section`), and
-multi-step recipes for fixing broken links, processing the daily note,
-bulk-retagging a folder, and restructuring without breaking the link graph.
+[`skills/obsidian-vault/SKILL.md`](skills/obsidian-vault/SKILL.md) is a copyable [Agent Skill](https://code.claude.com/docs/en/skills) — drop it in `~/.claude/skills/obsidian-vault/` to give an agent workflow guidance for this server: which tool answers which intent, anti-patterns worth avoiding, and multi-step recipes for fixing broken links, processing the daily note, and restructuring without breaking the graph.
 
 ## Acknowledgments
 

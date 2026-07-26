@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Spec:** `docs/superpowers/specs/2026-07-24-task-surface-design.md` — the authority; consult it for any ambiguity.
+- **Spec:** `design/specs/2026-07-24-task-surface-design.md` — the authority; consult it for any ambiguity.
 - **ESM imports:** every intra-project import uses a `.js` suffix (e.g. `from "./vault.js"`), even though sources are `.ts`.
 - **`TaskStatus`** = `"open" | "done" | "in_progress" | "cancelled" | "forwarded" | "other"`.
 - **`WritableTaskStatus`** = `"open" | "done" | "in_progress" | "cancelled" | "forwarded"` (excludes `other`).

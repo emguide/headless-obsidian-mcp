@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(grep -oE '\\\\.command\\\\\\(\"[a-z-]+\"' src/query-cli.ts | sed 's/.command\\(\"//;s/\"//' | sort > /tmp/actual_cmds.txt && cat /tmp/actual_cmds.txt | tr '\\\\n' ' ')",
+      "Read(//tmp/**)",
+      "Bash(ls -la /Users/david/.claude/skills/ 2>/dev/null | head -30; echo \"=== superpowers dirs ===\"; find /Users/david/.claude -maxdepth 3 -iname \"*superpower*\" -type d 2>/dev/null)",
+      "Read(//Users/david/.claude/skills/**)",
+      "Read(//Users/david/.claude/**)",
+      "Bash(OBSIDIAN_VAULT_PATH=/tmp npm run query -- --help)",
+      "Bash(echo \"=== exit: $? ===\")"
+    ]
+  }
+}
