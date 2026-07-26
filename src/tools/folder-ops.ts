@@ -113,13 +113,21 @@ async function pathExists(fullPath: string): Promise<boolean> {
   }
 }
 
-/** Require an existing directory, distinguishing "missing" from "not a folder". */
-async function assertDirectory(fullPath: string, folder: string): Promise<void> {
+/**
+ * Require an existing directory, distinguishing "missing" from "not a folder".
+ * `label` names the operand, so a two-operand caller (move_folder) says which
+ * side is missing rather than leaving the caller to guess.
+ */
+async function assertDirectory(
+  fullPath: string,
+  folder: string,
+  label = "Folder"
+): Promise<void> {
   let info;
   try {
     info = await stat(fullPath);
   } catch {
-    throw new Error(`Folder not found: ${folder}`);
+    throw new Error(`${label} not found: ${folder}`);
   }
   if (!info.isDirectory()) {
     throw new Error(`Not a folder: ${folder} (it is a file — use move_file or delete_note)`);
@@ -258,7 +266,7 @@ async function moveFolderImpl(
 
   const fromFull = await resolveVaultFile(vaultPath, fromFolder);
   const toFull = await resolveVaultFile(vaultPath, toFolder);
-  await assertDirectory(fromFull, fromFolder);
+  await assertDirectory(fromFull, fromFolder, "Source folder");
   if (await pathExists(toFull)) {
     throw new Error(
       `Destination already exists: ${toFolder}. move_folder never merges or ` +

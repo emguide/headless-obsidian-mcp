@@ -515,7 +515,10 @@ async function moveNoteImpl(
     throw new Error("Source and destination are the same note");
   }
   if (!(await fileExists(fromFull))) {
-    throw await noteNotFoundError(vaultPath, fromResolved);
+    // Name the operand: with two paths in play, a bare "Note not found" reads
+    // as ambiguous — a caller whose `to` already exists cannot tell whether the
+    // complaint is about the source or the destination, and retries blindly.
+    throw await noteNotFoundError(vaultPath, fromResolved, "Source note not found");
   }
   const destExisted = await fileExists(toFull);
   if (destExisted && !overwrite) {
@@ -627,7 +630,7 @@ async function moveFileImpl(
     throw new Error("Source and destination are the same file");
   }
   if (!(await fileExists(fromFull))) {
-    throw new Error(`File not found: ${normalizeFilePath(from)}`);
+    throw new Error(`Source file not found: ${normalizeFilePath(from)}`);
   }
   const destExisted = await fileExists(toFull);
   if (destExisted && !overwrite) {

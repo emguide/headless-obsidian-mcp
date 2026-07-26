@@ -551,6 +551,8 @@ All writes funnel through a single guarded path that resolves and path-guards th
 
 **Dates.** An unquoted `created: 2026-07-25` parses to a date and is a valid scalar. A date-only value round-trips in its original `YYYY-MM-DD` form — an unrelated edit never rewrites it to `2026-07-25T00:00:00.000Z`. A value carrying a time keeps its full ISO timestamp.
 
+**Empty values.** A top-level `""` is written as a bare `key:`, matching Obsidian's own property editor rather than js-yaml's `key: ''`. It reads back as `null` — Obsidian shows an empty string and a null as the same empty property, so a pre-existing `key: ''` becoming null on the next frontmatter write changes nothing a user sees. Applies to values the server serializes (the `frontmatter` param and every structured edit), not to a frontmatter block you supply inline in `content`, which is written verbatim. Array elements stay quoted (`- ''`), since a bare `-` means null.
+
 **Validation.** Every frontmatter write rejects (1) nested objects, (2) arrays containing non-scalars, and (3) markdown syntax in string values (bare URLs are fine). Validation runs only on the keys a write actually touches, so a pre-existing violation elsewhere never blocks an unrelated edit. The content-writing tools validate any hand-written leading frontmatter block on the same rules — creating a note by hand can't bypass frontmatter integrity, and malformed YAML is rejected loudly rather than landing in the vault.
 
 ---

@@ -130,7 +130,11 @@ Covered sites: the write funnel's not-found paths (`patch_note`, `delete_note`,
 `get_property`, `get_outline`, `get_links`, `read_section`,
 `get_related_notes`), and `read_notes`' per-path `errors` entries (missing
 files only — a too-large file gets no suggestions). `move_file` is excluded
-(attachments are not indexed).
+(attachments are not indexed). The **two-operand** movers name the operand that
+failed — `Source note not found: …`, `Source file not found: …`, `Source folder
+not found: …` — because a bare "not found" alongside a `to` that *does* exist
+reads as ambiguous, and a caller who mistakes it for a destination complaint
+retries the same call unchanged.
 
 **Note addressing (shared).** Every single-note reader — `get_frontmatter`,
 `get_property`, `get_outline`, `get_links`, `read_section`, `read_notes`,
@@ -596,6 +600,20 @@ re-serialized in its original `YYYY-MM-DD` form, so an unrelated frontmatter
 edit never rewrites it to `2026-07-25T00:00:00.000Z`; a value that carries a
 time keeps its full ISO timestamp. Handled in `stringifyMatter`
 (`src/tools/matter-safe.ts`).
+
+**Empty values**: A top-level frontmatter value of `""` is serialized as a bare
+`key:` (no trailing space), not `key: ''` — what Obsidian's own property editor
+writes, so a note this server creates is byte-shaped like an Obsidian-authored
+one. Unlike the date rule above, this one is **not** a fixed point: a bare key
+reads back as `null`, so a pre-existing `key: ''` on disk becomes null the next
+time any frontmatter write re-serializes that note. That is accepted rather
+than avoided — Obsidian presents an empty string and a null as the same empty
+property, so nothing a user sees changes (whereas a date silently becoming a
+full timestamp did). Applies to what the server *serializes* — the `frontmatter`
+param and every structured frontmatter edit — never to a hand-written block
+supplied inline in `content`, which is validated and written verbatim. Array
+elements are left quoted (`- ''`): a bare `-` in a list means null. Handled in
+`stringifyMatter` alongside the date rule.
 
 **Validation**: Every frontmatter write rejects (1) nested objects/maps, (2)
 arrays containing non-scalar elements, and (3) markdown syntax in string values

@@ -65,6 +65,26 @@ test("moveNote errors on a missing source and on a no-op move", async () => {
   await local.cleanup();
 });
 
+test("a missing source names itself as the source, even when the destination exists", async () => {
+  // The reported confusion: renaming onto a name that already exists, with a
+  // mistyped `from`, produced a bare "Note not found: <from>" — which reads as
+  // if it might be complaining about the destination, so the caller retries the
+  // same call. Both operands are paths; the message has to say which one failed.
+  const local = await makeVault([{ path: "People/Jane.md", content: "# Jane\n" }]);
+  await assert.rejects(
+    () => moveNote(local.vaultPath, { from: "People/People/Jane", to: "People/Jane" }),
+    (err: Error) => {
+      assert.match(err.message, /^Source note not found: People\/People\/Jane/);
+      return true;
+    }
+  );
+  await assert.rejects(
+    () => moveFile(local.vaultPath, { from: "a/gone.png", to: "b/there.png" }),
+    /Source file not found: a\/gone\.png/
+  );
+  await local.cleanup();
+});
+
 test("a slash-qualified target with no matching note is unresolved, not a hidden backlink", async () => {
   // Root cause of the move_note desync the reviewer found: the index used to
   // apply its basename fallback even to slash-qualified targets, so

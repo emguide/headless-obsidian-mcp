@@ -150,8 +150,9 @@ test("a missing folder is a plain not-found", async () => {
     /Folder not found: no-such-folder/
   );
   await assert.rejects(
+    // Two operands in play, so the message names the one that is missing.
     () => moveFolder(fx.vaultPath, { from: "no-such-folder", to: "x" }),
-    /Folder not found: no-such-folder/
+    /Source folder not found: no-such-folder/
   );
 });
 
