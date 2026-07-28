@@ -19,13 +19,13 @@ It reduces token cost and removes the need for your agent to understand Obsidian
 | [**Traverse**](docs/TOOLS.md#links) | Resolve `[[wikilinks]]` and backlinks ([`get_links`](docs/TOOLS.md#get_links)). Rank the notes most related to a given one — shared tags and link-graph structure, no embeddings ([`get_related_notes`](docs/TOOLS.md#get_related_notes)). |
 | [**Query**](docs/TOOLS.md#query_notes) | Filter notes by [frontmatter conditions](docs/TOOLS.md#query_notes) (`eq`, `gt`, `contains`, …), by [tag](docs/TOOLS.md#find_by_tag), or by [recency](docs/TOOLS.md#list_recent_notes). Every note-selecting tool accepts the same [`folder` / `tags` / `where` filters](docs/TOOLS.md#filter-vocabulary). |
 | [**Audit**](docs/TOOLS.md#vault) | [Whole-vault stats](docs/TOOLS.md#get_vault_stats), then [drill into](docs/TOOLS.md#list_vault_issues) the actual orphaned notes, broken wikilinks, and dead heading anchors. |
-| [**Edit**](docs/TOOLS.md#write-tools) *(opt-in)* | [Create, append, prepend, move, and delete notes](docs/TOOLS.md#creating-and-replacing-notes). Change [a tag](docs/TOOLS.md#add_tag--remove_tag), [a frontmatter field](docs/TOOLS.md#frontmatter-edits), or [one section](docs/TOOLS.md#section-edits) without rewriting the note. [Bulk-edit](docs/TOOLS.md#bulk_edit) many notes in one call. See [Enabling writes](#enabling-writes). |
+| [**Edit**](docs/TOOLS.md#write-tools) *(opt-in)* | [Create, append, prepend, move, and delete notes](docs/TOOLS.md#creating-and-replacing-notes). Change [a tag](docs/TOOLS.md#add_tag--remove_tag), [a frontmatter field](docs/TOOLS.md#frontmatter-edits), or [one section](docs/TOOLS.md#section-edits) without rewriting the note. [Bulk-edit](docs/TOOLS.md#bulk_edit) many notes in one call. Create, move, and delete [folders](docs/TOOLS.md#create_folder) too. See [Enabling writes](#enabling-writes). |
 | [**Protect**](docs/TOOLS.md#guarantees-shared-by-every-write) | [Moving a note](docs/TOOLS.md#move_note) rewrites the wikilinks that point to it; [renaming a heading](docs/TOOLS.md#rename_section) rewrites inbound anchors. Every write [reports any broken links it introduced](docs/TOOLS.md#link-integrity-on-writes). [Deletes](docs/TOOLS.md#delete_note) go to `.trash`. |
 | **Sync** *(opt-in)* | If the vault is a git repo, snapshot every write as a commit — optionally pulling and pushing a remote per write or on a background timer. Merge conflicts are resolved non-destructively: your version is always preserved. See [Git safety net](#git-safety-net-obsidian_git_sync). |
 
 Templates from Obsidian's core [Templates plugin](docs/TOOLS.md#templates) are supported (`{{title}}`, `{{date:FORMAT}}`, …); Templater scripting is not.
 
-**[→ Full tool reference](docs/TOOLS.md)** — all 46 tools with parameters and return shapes.
+**[→ Full tool reference](docs/TOOLS.md)** — all 49 tools with parameters and return shapes.
 
 ## Quick start
 
@@ -66,7 +66,7 @@ Only `OBSIDIAN_VAULT_PATH` is required. [`.env.example`](.env.example) documents
 
 ### Enabling writes
 
-`OBSIDIAN_TOOLS` selects exactly which tools the server exposes. Unset, it means `reads`: the 21 write tools are hidden from the tool list, and calling one is rejected.
+`OBSIDIAN_TOOLS` selects exactly which tools the server exposes. Unset, it means `reads`: the 24 write tools are hidden from the tool list, and calling one is rejected.
 
 ```bash
 OBSIDIAN_TOOLS="all"                              # everything
@@ -90,7 +90,7 @@ The eleven domain groups:
 | `properties` | get_frontmatter, list_properties, list_property_values, query_notes, get_property | set_frontmatter, add_property_values, remove_property_values, rename_property |
 | `tasks` | list_tasks | set_task_state |
 | `templates` | list_templates | apply_template, insert_template |
-| `files` | list_files, list_folders | move_file |
+| `files` | list_files, list_folders | move_file, create_folder, move_folder, delete_folder |
 | `vault` | get_vault_stats, list_vault_issues | — |
 | `bulk` | — | bulk_edit |
 

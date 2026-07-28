@@ -91,7 +91,7 @@ test("tools section reports policy, exposed, and excluded", async () => {
     assert.ok(cfg.tools.exposed.includes("search_notes"));
     assert.ok(cfg.tools.excluded.includes("write_note"));
     assert.equal(cfg.tools.exposed.length, 25);
-    assert.equal(cfg.tools.excluded.length, 21);
+    assert.equal(cfg.tools.excluded.length, 24);
     // sorted, disjoint, complete
     assert.deepEqual(cfg.tools.exposed, [...cfg.tools.exposed].sort());
     assert.deepEqual(cfg.tools.excluded, [...cfg.tools.excluded].sort());
@@ -103,7 +103,7 @@ test("tools section reports policy, exposed, and excluded", async () => {
       "get_config", "list_notes", "list_recent_notes", "read_notes",
       "resolve_daily_note", "resolve_note", "search_notes", "search_notes_ranked",
     ]);
-    assert.equal(cfg.tools.excluded.length, 45 - 7);
+    assert.equal(cfg.tools.excluded.length, 48 - 7);
   } finally {
     await fx.cleanup();
   }

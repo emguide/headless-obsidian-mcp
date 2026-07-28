@@ -206,6 +206,15 @@ npm run query -- move "projects/alpha" "archive/alpha" --no-update-links
 # Move an attachment; no link rewriting
 npm run query -- move-file "assets/old.png" "assets/new.png"
 
+# Folder CRUD (each warns when OBSIDIAN_GIT_SYNC is off)
+npm run query -- create-folder "archive/2026"
+npm run query -- move-folder "projects" "archive/projects"   # rewrites folder-qualified links
+npm run query -- move-folder "projects" "archive/projects" --no-update-links
+npm run query -- delete-folder "scratch"                     # empty folders only
+npm run query -- delete-folder "archive/2025" --recursive    # trash-safe subtree delete
+npm run query -- delete-folder "archive/2025" --recursive --permanent
+npm run query -- delete-folder "archive/2025" --recursive --require-git   # refuse if sync is off
+
 # Templates
 npm run query -- template-apply "Daily" "journal/2026-07-23"
 npm run query -- template-insert "Meeting" "journal/2026-07-23" \

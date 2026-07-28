@@ -112,6 +112,31 @@ function isDateOnly(value: unknown): value is Date {
 const DATE_TOKEN_PREFIX = "__obsidian_mcp_date_";
 
 /**
+ * Placeholder for a top-level empty-string value, restored to a bare `key:`.
+ *
+ * js-yaml dumps `""` as `key: ''`, but Obsidian's own property editor writes an
+ * empty property as a bare `key:` — so every note this server created carried a
+ * quoting artifact no Obsidian-authored note has, which agents were hand-patching
+ * away after each write. Both forms render identically in Obsidian (`''` is an
+ * empty text property, a bare key is null), so the difference is cosmetic in
+ * effect but persistent in the file.
+ *
+ * The round-trip consequence is deliberate and accepted: reading a bare `key:`
+ * back yields `null`, not `""`, so a pre-existing `key: ''` on disk becomes null
+ * the next time any frontmatter write re-serializes that note. Unlike the
+ * date-only case above — where a silent rewrite turned `2026-07-25` into a full
+ * ISO timestamp, visibly changing the value — an empty string and null present
+ * the same empty property to the user.
+ *
+ * Array elements are left alone: a bare `-` in a list means null, and an empty
+ * list entry is not the case this addresses.
+ */
+const EMPTY_TOKEN = "__obsidian_mcp_empty__";
+
+/** Shared prefix of both placeholders, for one collision check. */
+const TOKEN_PREFIX = "__obsidian_mcp_";
+
+/**
  * Serialize a body plus frontmatter data back to note text (YAML only).
  *
  * Date-only values round-trip in their original `YYYY-MM-DD` form rather than
@@ -127,8 +152,7 @@ export function stringifyMatter(
   // If the token prefix somehow occurs in the real content, restoring it would
   // corrupt that text — fall back to plain serialization instead.
   const collides =
-    body.includes(DATE_TOKEN_PREFIX) ||
-    JSON.stringify(data).includes(DATE_TOKEN_PREFIX);
+    body.includes(TOKEN_PREFIX) || JSON.stringify(data).includes(TOKEN_PREFIX);
 
   const encode = (value: unknown): unknown => {
     if (!collides && isDateOnly(value)) {
@@ -139,15 +163,33 @@ export function stringifyMatter(
     return value;
   };
 
+  let emptied = false;
   const prepared: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
-    prepared[key] = Array.isArray(value) ? value.map(encode) : encode(value);
+    if (Array.isArray(value)) {
+      prepared[key] = value.map(encode);
+      continue;
+    }
+    if (!collides && value === "") {
+      emptied = true;
+      prepared[key] = EMPTY_TOKEN;
+      continue;
+    }
+    prepared[key] = encode(value);
   }
 
   let out = matter.stringify(body, prepared, {
     engines: SAFE_ENGINES,
     language: "yaml",
   });
+
+  if (emptied) {
+    // Consume the separating space too, so the line is `key:` rather than
+    // `key: ` — the trailing whitespace parses identically but reads as a diff
+    // artifact. The token is unique (guarded by `collides`), so a global
+    // replace cannot reach real content.
+    out = out.replace(new RegExp(`:[ \\t]*'?"?${EMPTY_TOKEN}"?'?`, "g"), ":");
+  }
 
   if (dates.length > 0) {
     // Drop any quoting js-yaml added, so the restored date stays a YAML date.

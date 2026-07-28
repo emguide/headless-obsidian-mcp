@@ -79,11 +79,11 @@ test("default exposure is the read surface plus get_config", async () => {
   }
 });
 
-test("OBSIDIAN_TOOLS=all exposes all 46 tools", async () => {
+test("OBSIDIAN_TOOLS=all exposes all 49 tools", async () => {
   const fx = await makeVault([{ path: "a.md", content: "# A\n" }]);
   try {
     const names = await toolNames(fx.vaultPath, { OBSIDIAN_TOOLS: "all" });
-    assert.equal(names.length, 46);
+    assert.equal(names.length, 49);
     assert.ok(names.includes("bulk_edit"));
   } finally {
     await fx.cleanup();

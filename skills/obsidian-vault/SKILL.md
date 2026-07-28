@@ -1,6 +1,6 @@
 ---
 name: obsidian-vault
-description: Working in an Obsidian vault through the headless-obsidian-mcp server — which of its 46 tools answers which intent, and the multi-step recipes (fix broken links, process the daily note, bulk-retag a folder, restructure without breaking the graph). Use when the connected MCP server exposes tools like search_notes_ranked, get_links, list_vault_issues, or bulk_edit.
+description: Working in an Obsidian vault through the headless-obsidian-mcp server — which of its 49 tools answers which intent, and the multi-step recipes (fix broken links, process the daily note, bulk-retag a folder, restructure without breaking the graph). Use when the connected MCP server exposes tools like search_notes_ranked, get_links, list_vault_issues, or bulk_edit.
 ---
 
 # Working an Obsidian vault
@@ -51,6 +51,9 @@ Writing (present only when the operator's `OBSIDIAN_TOOLS` policy exposes them):
 | Rename a heading | `rename_section` (rewrites inbound `#anchors`) |
 | The same change across many notes | `bulk_edit` |
 | Remove a note | `delete_note` (trash-safe by default) |
+| Create a folder | `create_folder` (invisible to `list_folders` until it holds a note) |
+| Rename or relocate a folder | `move_folder` (rewrites inbound folder-qualified links) |
+| Remove a folder | `delete_folder` (trash-safe; `recursive:true` if not empty) |
 
 ### Anti-patterns
 
@@ -70,6 +73,12 @@ context or breaks the link graph.
   `[[note#heading]]`. Use `rename_section`.
 - **Don't** move a note with `move_file` — it rewrites no wikilinks. `move_file`
   is for attachments; `move_note` is for notes.
+- **Don't** empty a folder note-by-note to get rid of it. `delete_folder
+  recursive:true` takes the subtree in one trash-safe call and reports the
+  outside backlinks it dangled; a `delete_note` loop leaves the directory
+  behind and gives you N separate reports to reconcile.
+- **Don't** reach for `move_file` to relocate a folder's contents. `move_folder`
+  moves the whole subtree and rewrites the folder-qualified `[[links]]` into it.
 - **Don't** guess a path from a search hit when the user gave you a name.
   `resolve_note` answers exactly, and returns `null` rather than guessing when
   the name is ambiguous.
@@ -184,6 +193,28 @@ Use the link-aware tool for each structural change, in this order:
 Before a `delete_note`, check `get_links` for backlinks. The delete reports
 `dangled_backlinks` but does **not** repair them — that's your follow-up work,
 and `include_context:true` gives you the lines to patch.
+
+### Restructure folders safely
+
+Folder operations are the one place where a single call can move or delete an
+arbitrary subtree, so they report their git posture rather than assuming it:
+
+```
+get_config sync                          → is a git mode actually active?
+move_folder from:"projects" to:"archive/projects"
+delete_folder path:"archive/2025" recursive:true
+```
+
+Read `git_warning` on the result. Non-null means `OBSIDIAN_GIT_SYNC` is off and
+there is **no snapshot to roll back to** — the operation still happened. When
+that is unacceptable, pass `require_git:true` and the call is refused *before*
+touching the filesystem instead.
+
+Two behaviours worth knowing before you plan a restructure. `move_folder`
+rewrites only *folder-qualified* links (`[[projects/alpha]]`); bare `[[alpha]]`
+links need no rewrite because the basename survives the move. And
+`delete_folder`'s `dangled_backlinks`, like `delete_note`'s, is a report — the
+linking notes are never repaired for you.
 
 ## When something fails
 

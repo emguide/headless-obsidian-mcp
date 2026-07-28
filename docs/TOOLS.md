@@ -100,6 +100,16 @@ Both are **report-only**: the write is never blocked or modified, exactly like `
 
 Opt-in so a hub note with 200 backlinks stays cheap by default. Context comes from call-time file reads; on `list_vault_issues` only the returned window is read.
 
+### Folder-write git posture
+
+The three folder-write tools — `create_folder`, `move_folder`, `delete_folder` — each return `git_warning` alongside their normal fields: a non-null message means `OBSIDIAN_GIT_SYNC` is `off`, so the operation was **not** snapshotted and cannot be rolled back; `null` means a mode is active and the change was committed.
+
+**Report-only** — the operation still runs, exactly like `delete_note`'s `dangled_backlinks`. Passing `require_git: true` escalates the warning into a refusal raised *before* any filesystem change, for a caller that would rather fail than act unrecoverably.
+
+Only these three carry it, because only these three have a blast radius the arguments do not bound: every note-level write names the single path it touches, while one `delete_folder` can take an arbitrary subtree. `require_git` checks the *mode* only — a mode that is set but whose repo is unusable is already caught fail-closed by the write guard.
+
+Folder operands also refuse two things beyond the usual traversal and symlink guards: the **vault root** (a `delete_folder` of it would be a vault wipe), and **hidden or machinery directories** (`.obsidian`, `.trash`, `.git`, `node_modules`, any leading-dot folder). A file addressed as a folder errors with a pointer to `move_file` / `delete_note`.
+
 ### Line numbers
 
 `get_outline`, `read_section`, `list_tasks`, and `set_task_state` all use **1-based, body-relative** line numbers (frontmatter stripped), so a task's `line` cross-references directly against an outline's. `search_notes` returns both: `line_number` (file-absolute) and `body_line` (body-relative, `null` for hits inside frontmatter).
@@ -541,6 +551,8 @@ All writes funnel through a single guarded path that resolves and path-guards th
 
 **Dates.** An unquoted `created: 2026-07-25` parses to a date and is a valid scalar. A date-only value round-trips in its original `YYYY-MM-DD` form — an unrelated edit never rewrites it to `2026-07-25T00:00:00.000Z`. A value carrying a time keeps its full ISO timestamp.
 
+**Empty values.** A top-level `""` is written as a bare `key:`, matching Obsidian's own property editor rather than js-yaml's `key: ''`. It reads back as `null` — Obsidian shows an empty string and a null as the same empty property, so a pre-existing `key: ''` becoming null on the next frontmatter write changes nothing a user sees. Applies to values the server serializes (the `frontmatter` param and every structured edit), not to a frontmatter block you supply inline in `content`, which is written verbatim. Array elements stay quoted (`- ''`), since a bare `-` means null.
+
 **Validation.** Every frontmatter write rejects (1) nested objects, (2) arrays containing non-scalars, and (3) markdown syntax in string values (bare URLs are fine). Validation runs only on the keys a write actually touches, so a pre-existing violation elsewhere never blocks an unrelated edit. The content-writing tools validate any hand-written leading frontmatter block on the same rules — creating a note by hand can't bypass frontmatter integrity, and malformed YAML is rejected loudly rather than landing in the vault.
 
 ---
@@ -628,6 +640,52 @@ Move or rename an arbitrary file (attachment, image, or a note by literal path).
 | `overwrite` | boolean | Default `false` |
 
 **Returns** `{ from, to, overwritten }`.
+
+### `create_folder`
+
+Create a folder and any missing parents — the "C" of folder CRUD, whose "R" is [`list_folders`](#list_folders). Errors if anything already exists at the path (folder *or* file): a create that silently succeeded on an existing folder would hide a typo.
+
+Two honest limits, both consequences of folders being *implicit* in the vault model. The new folder holds no notes, so **`list_folders` will not show it** until one lands there — its rows come from indexed note paths, not from directories on disk. And **git does not track empty directories**, so with sync enabled this commits nothing rather than failing. It still earns its place: it materializes the directory so a subsequent `move_file` or attachment write has a destination.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `path` | string, **required** | Folder path, vault-relative |
+| `require_git` | boolean | Refuse when `OBSIDIAN_GIT_SYNC` is off. Default `false` |
+
+**Returns** `{ path, created, git_warning }`.
+
+### `move_folder`
+
+Move or rename a folder and everything under it, rewriting the wikilinks that pointed into it — the folder-level analogue of [`move_note`](#move_note).
+
+Only **folder-qualified** links (`[[projects/alpha]]`) are rewritten, because a folder move preserves every basename: `[[alpha]]` still names the same note afterwards. The one residual case is a bare link whose shortest-path winner the move changes (two notes sharing a basename, one moving nearer the root) — Obsidian re-resolves such a link the same way, so it is left alone rather than pinned to one side. Notes *inside* the moved folder are rewritten too, and are read at their new location, since the pre-move index recorded them at the old one.
+
+There is **no `overwrite`**: an existing destination is refused outright, because merging two subtrees is not a rename and silently clobbering a destination tree is not something a single flag should buy. Moving a folder into its own descendant, or onto itself, is likewise refused.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `from` `to` | string, **required** | Vault-relative; `to` must not exist |
+| `update_links` | boolean | Rewrite folder-qualified links pointing into it. Default `true` |
+| `require_git` | boolean | Refuse when `OBSIDIAN_GIT_SYNC` is off. Default `false` |
+
+**Returns** `{ from, to, moved_notes, moved_files, updated_notes, updated_links, git_warning }`.
+
+### `delete_folder`
+
+Delete a folder and everything under it. **Trash-safe by default**: the subtree moves to the vault's `.trash` (Obsidian's convention, ignored by the index) so the deletion stays recoverable, with the same numeric-suffix disambiguation as [`delete_note`](#delete_note). `permanent: true` unlinks outright.
+
+A non-empty folder is **refused unless `recursive: true`** — this is the only tool on the surface whose blast radius is not bounded by an explicit list of paths, so the caller states the intent to delete contents rather than discovering it afterwards. Emptiness is judged from a **disk walk, not the index**: the index skips hidden and machinery directories, so an index-derived listing would call a folder holding hidden data empty and wave the guard through.
+
+`dangled_backlinks` lists notes *outside* the folder that linked to notes *inside* it and now have a broken `[[wikilink]]` — report-only, exactly like `delete_note`'s field of the same name. A link from one deleted note to another is not dangling, so sources inside the folder are excluded.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `path` | string, **required** | Folder path, vault-relative |
+| `recursive` | boolean | Required for a non-empty folder. Default `false` |
+| `permanent` | boolean | Unlink instead of trashing. Default `false` |
+| `require_git` | boolean | Refuse when `OBSIDIAN_GIT_SYNC` is off. Default `false` |
+
+**Returns** `{ path, deleted, trashed, trash_path?, deleted_notes, deleted_files, dangled_backlinks, git_warning }`.
 
 ---
 

@@ -47,6 +47,9 @@ export const WRITE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "delete_note",
   "move_note",
   "move_file",
+  "create_folder",
+  "move_folder",
+  "delete_folder",
   "patch_note",
   "add_tag",
   "remove_tag",
@@ -512,7 +515,10 @@ async function moveNoteImpl(
     throw new Error("Source and destination are the same note");
   }
   if (!(await fileExists(fromFull))) {
-    throw await noteNotFoundError(vaultPath, fromResolved);
+    // Name the operand: with two paths in play, a bare "Note not found" reads
+    // as ambiguous — a caller whose `to` already exists cannot tell whether the
+    // complaint is about the source or the destination, and retries blindly.
+    throw await noteNotFoundError(vaultPath, fromResolved, "Source note not found");
   }
   const destExisted = await fileExists(toFull);
   if (destExisted && !overwrite) {
@@ -624,7 +630,7 @@ async function moveFileImpl(
     throw new Error("Source and destination are the same file");
   }
   if (!(await fileExists(fromFull))) {
-    throw new Error(`File not found: ${normalizeFilePath(from)}`);
+    throw new Error(`Source file not found: ${normalizeFilePath(from)}`);
   }
   const destExisted = await fileExists(toFull);
   if (destExisted && !overwrite) {
@@ -846,6 +852,18 @@ async function renameSectionInVaultImpl(
 /* -------------------------------------------------------------------- tasks -- */
 
 /**
+ * Serialized against other writes to the same vault (see write-lock.ts): this
+ * operation reads the whole note, rewrites one marker character, and writes the
+ * whole note back — so a concurrent edit interleaving at the read would have its
+ * change silently discarded by whichever write landed second.
+ */
+export async function setTaskState(
+  ...args: Parameters<typeof setTaskStateImpl>
+): ReturnType<typeof setTaskStateImpl> {
+  return withVaultWriteLock(args[0], () => setTaskStateImpl(...args));
+}
+
+/**
  * Change one checkbox task's state, rewriting only its marker character.
  * Addressing (`text` and/or `line`) and `parseTasks` both use 1-based
  * body-relative line numbers — the same convention as `list_tasks` and
@@ -858,18 +876,6 @@ async function renameSectionInVaultImpl(
  * by slicing it off `raw` (gray-matter's stripped body is always a suffix of
  * `raw`), matching the body-only-edit convention used by the section tools.
  */
-/**
- * Serialized against other writes to the same vault (see write-lock.ts): this
- * operation reads the whole note, rewrites one marker character, and writes the
- * whole note back — so a concurrent edit interleaving at the read would have its
- * change silently discarded by whichever write landed second.
- */
-export async function setTaskState(
-  ...args: Parameters<typeof setTaskStateImpl>
-): ReturnType<typeof setTaskStateImpl> {
-  return withVaultWriteLock(args[0], () => setTaskStateImpl(...args));
-}
-
 async function setTaskStateImpl(
   vaultPath: string,
   { path, text, line, status }: SetTaskStateParams
