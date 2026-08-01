@@ -201,7 +201,7 @@ const program = new Command();
 
 program
   .name("query")
-  .version("1.0.0")
+  .version("0.1.0")
   .description("Query the Notes MCP server tools directly")
   .option("-v, --verbose", "Show the tool request being sent");
 

@@ -10,6 +10,8 @@ It reduces token cost and removes the need for your agent to understand Obsidian
 
 **Read-only by default.** Out of the box the server exposes only read tools; writing is opt-in through a single environment variable.
 
+**Status: `0.x`.** The server is tested and in daily use, but the tool surface is still settling — tool names, parameters, and return shapes may change between releases. Following semver's `0.x` convention, breaking changes bump the **minor** version (`0.2.0`) and fixes bump the **patch** (`0.1.1`). Pin a version if you depend on a specific tool contract.
+
 ## What it can do
 
 | | |
